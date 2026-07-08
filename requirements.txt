@@ -1,0 +1,8 @@
+numpy
+sounddevice
+faster-whisper
+python-dotenv
+openai
+edge-tts
+miniaudio
+torch
