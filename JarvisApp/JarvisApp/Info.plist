@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>$(DEVELOPMENT_LANGUAGE)</string>
+    <key>CFBundleDisplayName</key>
+    <string>Jarvis</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>$(PRODUCT_NAME)</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Jarvis nutzt Apple Events nur nach deiner Freigabe, um macOS-Apps wie Mail, Kalender, Musik, Kontakte, Erinnerungen, Notizen oder Fotos auf deinen Befehl hin zu steuern.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>Jarvis benötigt Kalenderzugriff nur nach deiner Zustimmung, um Termine zu lesen oder mit deiner Bestätigung zu erstellen.</string>
+    <key>NSCalendarsUsageDescription</key>
+    <string>Jarvis benötigt Kalenderzugriff nur nach deiner Zustimmung, um Termine zu lesen oder mit deiner Bestätigung zu erstellen.</string>
+    <key>NSContactsUsageDescription</key>
+    <string>Jarvis benötigt Kontaktzugriff nur nach deiner Zustimmung, um Kontakte zu finden oder auf deinen Befehl hin Anrufe vorzubereiten.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Jarvis benötigt das Mikrofon, damit du mit deinem Assistenten sprechen kannst.</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Jarvis benötigt Fotozugriff nur nach deiner Zustimmung, um deine Fotos zu indexieren und auf deinen Befehl hin passende Bilder zu finden.</string>
+    <key>NSRemindersFullAccessUsageDescription</key>
+    <string>Jarvis benötigt Erinnerungszugriff nur nach deiner Zustimmung, um Erinnerungen zu lesen oder mit deiner Bestätigung zu erstellen.</string>
+    <key>NSRemindersUsageDescription</key>
+    <string>Jarvis benötigt Erinnerungszugriff nur nach deiner Zustimmung, um Erinnerungen zu lesen oder mit deiner Bestätigung zu erstellen.</string>
+    <key>NSSupportsAutomaticTermination</key>
+    <false/>
+    <key>NSSupportsSuddenTermination</key>
+    <false/>
+</dict>
+</plist>

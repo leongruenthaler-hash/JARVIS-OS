@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.venv.*/
+
+# Environment / secrets
+.env
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# Runtime/user data (personal conversation history, indexes, permissions)
+memory/
+
+# Editor / tooling caches
+.cache/
+.vscode/
+
+# Swift / Xcode
+JarvisApp/.build/
+JarvisApp/.swiftpm/
+**/DerivedData/
+*.xcuserstate
+**/xcuserdata/

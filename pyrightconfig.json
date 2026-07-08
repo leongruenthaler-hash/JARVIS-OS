@@ -1,0 +1,18 @@
+{
+    "venvPath": ".",
+    "venv": ".venv",
+    "include": [
+        "app"
+    ],
+    "exclude": [
+        "**/.venv.broken.*",
+        "app/backups",
+        "**/__pycache__"
+    ],
+    "extraPaths": [
+        "app"
+    ],
+    "reportMissingImports": "none",
+    "reportMissingModuleSource": "none",
+    "reportAttributeAccessIssue": "none"
+}
