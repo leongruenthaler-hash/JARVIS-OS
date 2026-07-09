@@ -151,6 +151,7 @@ PHOTOS_ENABLED = bool(CONFIG.get("photos_enabled", True))
 RECENT_CONTEXT_MESSAGES = min(int(CONFIG.get("recent_context_messages", 6)), 6)
 AUTO_MEMORY_ENABLED = bool(CONFIG.get("auto_memory_enabled", True))
 AUTO_MEMORY_MAX_FACTS = int(CONFIG.get("auto_memory_max_facts", 120))
+MEMORY_SUMMARY_MAX_FACTS = int(CONFIG.get("memory_summary_max_facts", 10))
 PERFORMANCE_LOG = bool(CONFIG.get("performance_log", True))
 OPENAI_MAX_OUTPUT_TOKENS = int(CONFIG.get("openai_max_output_tokens", 180))
 MAIL_SUMMARY_MAX_OUTPUT_TOKENS = int(CONFIG.get("mail_summary_max_output_tokens", 320))
@@ -539,22 +540,25 @@ def route_fast_intent(question: str) -> str | None:
     return None
 
 
-def build_memory_summary(long_memory: dict) -> str:
-    parts = []
+def build_memory_summary(long_memory: dict, max_facts: int = MEMORY_SUMMARY_MAX_FACTS) -> str:
+    entries: list[tuple[str, str]] = []
 
-    preferences = long_memory.get("Vorlieben")
-    if isinstance(preferences, dict):
-        for key, value in list(preferences.items())[:8]:
-            parts.append(f"{key}: {value}")
+    for values in long_memory.values():
+        if isinstance(values, dict):
+            for key, value in values.items():
+                entries.append(("", f"{key}: {value}"))
+        elif isinstance(values, list):
+            for item in values:
+                if isinstance(item, dict) and item.get("content"):
+                    sort_key = str(item.get("updated_at") or item.get("created_at") or "")
+                    entries.append((sort_key, str(item["content"])))
+                elif item:
+                    entries.append(("", str(item)))
 
-    facts = long_memory.get("facts")
-    if isinstance(facts, list):
-        for item in facts[-5:]:
-            content = item.get("content")
-            if content:
-                parts.append(content)
-
-    return "; ".join(parts) if parts else "Keine wichtigen Langzeitnotizen."
+    entries.sort(key=lambda pair: pair[0], reverse=True)
+    parts = [content for _, content in entries[:max_facts]]
+    summary = "; ".join(parts) if parts else "Keine wichtigen Langzeitnotizen."
+    return summary[:600]
 
 
 def today_key() -> str:
