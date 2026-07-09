@@ -162,7 +162,7 @@ struct HomeView: View {
                 HStack(spacing: 10) {
                     heroChip(title: appState.status == .offline ? "Offline" : "Verbunden", icon: appState.status == .offline ? "wifi.slash" : "checkmark.seal.fill", tint: appState.status == .offline ? .orange : .green)
                     heroChip(title: appState.voiceState.title, icon: appState.voiceState.symbol, tint: appState.voiceState.tint)
-                    heroChip(title: appState.modelStatus.activeModel, icon: appState.modelStatus.provider.lowercased() == "openai" ? "cloud.fill" : "cpu.fill", tint: appState.modelStatus.provider.lowercased() == "openai" ? .orange : .indigo)
+                    heroChip(title: isModelInfoAvailable ? appState.modelStatus.activeModel : "Nicht verbunden", icon: modelProviderIsOpenAI ? "cloud.fill" : "cpu.fill", tint: modelProviderIsOpenAI ? .orange : .indigo)
                     heroChip(title: jarvisAppVersion, icon: "seal.fill", tint: .cyan)
                 }
             }
@@ -194,8 +194,8 @@ struct HomeView: View {
             summaryCard(
                 title: "Modell",
                 value: modelSummary,
-                symbol: appState.modelStatus.provider.lowercased() == "openai" ? "cloud.fill" : "cpu.fill",
-                tint: appState.modelStatus.provider.lowercased() == "openai" ? .orange : .indigo
+                symbol: modelProviderIsOpenAI ? "cloud.fill" : "cpu.fill",
+                tint: modelProviderIsOpenAI ? .orange : .indigo
             )
             summaryCard(
                 title: "Berechtigungen",
@@ -212,8 +212,17 @@ struct HomeView: View {
         }
     }
 
+    private var isModelInfoAvailable: Bool {
+        appState.status != .offline
+    }
+
+    private var modelProviderIsOpenAI: Bool {
+        isModelInfoAvailable && appState.modelStatus.provider.lowercased() == "openai"
+    }
+
     private var modelSummary: String {
-        if appState.modelStatus.provider.lowercased() == "openai" {
+        guard isModelInfoAvailable else { return "Nicht verbunden" }
+        if modelProviderIsOpenAI {
             return "OpenAI • \(appState.modelStatus.activeModel)"
         }
         return "Lokal • \(appState.modelStatus.activeModel)"
@@ -509,7 +518,7 @@ struct ActionCenterView: View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 230), spacing: 14)], spacing: 14) {
             centerCard(title: "Status", value: appState.status.rawValue, symbol: "bolt.horizontal.circle.fill", tint: .green)
             centerCard(title: "Voice", value: appState.voiceState.title, symbol: appState.voiceState.symbol, tint: appState.voiceState.tint)
-            centerCard(title: "Modell", value: appState.modelStatus.activeModel, symbol: "cpu.fill", tint: .indigo)
+            centerCard(title: "Modell", value: appState.status != .offline ? appState.modelStatus.activeModel : "Nicht verbunden", symbol: "cpu.fill", tint: .indigo)
             centerCard(title: "Letzter Fehler", value: appState.lastError ?? "Kein Fehler", symbol: "exclamationmark.triangle.fill", tint: appState.lastError == nil ? .green : .orange)
         }
     }
