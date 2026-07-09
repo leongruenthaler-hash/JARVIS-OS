@@ -62,6 +62,7 @@ from mail_client import (
     normalize_document_categories,
 )
 from mail_calendar_actions import _extract_datetime
+from core.action_engine import ACTION_ENGINE, ActionProposal
 from core.conversation_manager import ConversationManager
 from core.daily_briefing import build_daily_briefing
 from core.memory_system import JarvisMemorySystem
@@ -2156,276 +2157,94 @@ def handle_pending_action_flow(
 
     pending_desktop_move = settings.get("pending_desktop_move")
     if isinstance(pending_desktop_move, dict):
-        if is_cancel:
-            settings.pop("pending_desktop_move", None)
-            memory.set("settings", settings)
-            return "Alles klar, ich verschiebe nichts."
-
-        if not is_confirm:
-            return "Ich warte noch auf deine Bestätigung. Sag ja zum Verschieben oder abbrechen."
-
-        settings.pop("pending_desktop_move", None)
-        memory.set("settings", settings)
-        source_name = str(pending_desktop_move.get("source") or "").strip()
-        target_folder = str(pending_desktop_move.get("target") or "").strip()
-        if not source_name or not target_folder:
-            return "Mir fehlt Quelle oder Zielordner. Ich verschiebe nichts."
-
-        try:
-            return move_desktop_item(source_name, target_folder)
-        except DesktopAccessError as exc:
-            return str(exc)
-        except Exception as exc:
-            print("Desktop Verschieben Fehler:", type(exc).__name__)
-            return "Ich konnte das auf dem Schreibtisch nicht verschieben."
+        return ACTION_ENGINE.resolve(
+            memory,
+            "pending_desktop_move",
+            pending_desktop_move,
+            action_type="desktop_move",
+            is_confirm=is_confirm,
+            is_cancel=is_cancel,
+            cancel_message="Alles klar, ich verschiebe nichts.",
+            waiting_message="Ich warte noch auf deine Bestätigung. Sag ja zum Verschieben oder abbrechen.",
+        )
 
     pending_desktop_move_many = settings.get("pending_desktop_move_many")
     if isinstance(pending_desktop_move_many, dict):
-        if is_cancel:
-            settings.pop("pending_desktop_move_many", None)
-            memory.set("settings", settings)
-            return "Alles klar, ich verschiebe nichts."
-
-        if not is_confirm:
-            return "Ich warte noch auf deine Bestätigung. Sag ja zum Verschieben oder abbrechen."
-
-        settings.pop("pending_desktop_move_many", None)
-        memory.set("settings", settings)
-        query = str(pending_desktop_move_many.get("query") or "").strip()
-        target_folder = str(pending_desktop_move_many.get("target") or "").strip()
-        if not query or not target_folder:
-            return "Mir fehlt Suchbegriff oder Zielordner. Ich verschiebe nichts."
-
-        try:
-            return move_desktop_items_matching(query, target_folder)
-        except DesktopAccessError as exc:
-            return str(exc)
-        except Exception as exc:
-            print("Desktop Sammelverschieben Fehler:", type(exc).__name__)
-            return "Ich konnte die Dateien auf dem Schreibtisch nicht verschieben."
+        return ACTION_ENGINE.resolve(
+            memory,
+            "pending_desktop_move_many",
+            pending_desktop_move_many,
+            action_type="desktop_move_many",
+            is_confirm=is_confirm,
+            is_cancel=is_cancel,
+            cancel_message="Alles klar, ich verschiebe nichts.",
+            waiting_message="Ich warte noch auf deine Bestätigung. Sag ja zum Verschieben oder abbrechen.",
+        )
 
     pending_calendar_create = settings.get("pending_calendar_create")
     if isinstance(pending_calendar_create, dict):
-        if is_cancel:
-            settings.pop("pending_calendar_create", None)
-            memory.set("settings", settings)
-            return "Alles klar, ich erstelle nichts."
-
-        if not is_confirm:
-            return "Ich warte noch auf deine Bestätigung. Sag ja zum Erstellen oder abbrechen."
-
-        settings.pop("pending_calendar_create", None)
-        memory.set("settings", settings)
-        kind = str(pending_calendar_create.get("kind") or "calendar")
-        title = str(pending_calendar_create.get("title") or "Termin").strip()
-        try:
-            when = datetime.fromisoformat(str(pending_calendar_create.get("when")))
-            if kind == "reminder":
-                create_reminder(
-                    title,
-                    when,
-                    list_name=CONFIG.get("reminders_list_name"),
-                    notes="Von Jarvis per Sprache erstellt.",
-                )
-                privacy_log("reminders", "create", success=True)
-                return f"Erledigt. Ich habe die Erinnerung {title} gesetzt."
-
-            create_calendar_event(
-                title,
-                when,
-                duration_minutes=int(CONFIG.get("auto_calendar_event_duration_minutes", 60)),
-                calendar_name=CONFIG.get("calendar_name"),
-                notes="Von Jarvis per Sprache erstellt.",
-            )
-            privacy_log("calendar", "create", success=True)
-            return f"Erledigt. Ich habe den Kalendereintrag {title} angelegt."
-        except CalendarAccessError as exc:
-            privacy_log("calendar", "create", success=False)
-            return str(exc)
-        except Exception as exc:
-            privacy_log("calendar", "create", success=False)
-            print("Kalender Fehler:", type(exc).__name__)
-            return "Ich konnte Kalender oder Erinnerungen nicht bearbeiten."
+        return ACTION_ENGINE.resolve(
+            memory,
+            "pending_calendar_create",
+            pending_calendar_create,
+            action_type="calendar_create",
+            is_confirm=is_confirm,
+            is_cancel=is_cancel,
+            cancel_message="Alles klar, ich erstelle nichts.",
+            waiting_message="Ich warte noch auf deine Bestätigung. Sag ja zum Erstellen oder abbrechen.",
+        )
 
     pending_mail_document_export = settings.get("pending_mail_document_export")
     if isinstance(pending_mail_document_export, dict):
-        if is_cancel:
-            settings.pop("pending_mail_document_export", None)
-            memory.set("settings", settings)
-            return "Alles klar, ich kopiere nichts."
-
-        if not is_confirm:
-            return "Ich warte auf dein Ja oder Abbrechen."
-
-        settings.pop("pending_mail_document_export", None)
-        memory.set("settings", settings)
-        categories = list(pending_mail_document_export.get("categories") or [])
-        max_messages = int(pending_mail_document_export.get("max_messages") or 80)
-        try:
-            return run_mail_document_export(categories, max_messages=max_messages)
-        except MailAccessError as exc:
-            return str(exc)
-        except Exception as exc:
-            print("Mail-Dokumentenexport Fehler:", type(exc).__name__)
-            return "Ich konnte die Mail-Dokumente nicht kopieren."
+        return ACTION_ENGINE.resolve(
+            memory,
+            "pending_mail_document_export",
+            pending_mail_document_export,
+            action_type="mail_document_export",
+            is_confirm=is_confirm,
+            is_cancel=is_cancel,
+            cancel_message="Alles klar, ich kopiere nichts.",
+            waiting_message="Ich warte auf dein Ja oder Abbrechen.",
+        )
 
     pending_file_action = settings.get("pending_file_action")
     if isinstance(pending_file_action, dict):
-        if is_cancel:
-            settings.pop("pending_file_action", None)
-            memory.set("settings", settings)
-            return "Alles klar, ich ändere nichts."
-
-        if not is_confirm:
-            return "Ich warte auf dein Ja oder Abbrechen."
-
-        settings.pop("pending_file_action", None)
-        memory.set("settings", settings)
-        action = str(pending_file_action.get("action") or "").strip()
-        source = str(pending_file_action.get("source") or "").strip()
-        query = str(pending_file_action.get("query") or "").strip()
-        target = str(pending_file_action.get("target") or "").strip()
-        root_hint = str(pending_file_action.get("root") or "").strip()
-        if not action or not target or (action != "move_matching" and not source) or (action == "move_matching" and not query):
-            return "Mir fehlt noch ein Baustein. Ich ändere nichts."
-
-        try:
-            if action == "copy":
-                return copy_item(source, target, root_hint=root_hint, config=CONFIG)
-            if action == "move":
-                return move_item(source, target, root_hint=root_hint, config=CONFIG)
-            if action == "move_matching":
-                return move_items_matching(query, target, root_hint=root_hint, config=CONFIG)
-            return "Diese Dateiaktion kenne ich noch nicht. Klingt aber sportlich."
-        except FileAccessError as exc:
-            return str(exc)
-        except Exception as exc:
-            print("Dateiaktion Fehler:", type(exc).__name__)
-            return "Ich konnte die Dateiaktion nicht ausführen."
+        return ACTION_ENGINE.resolve(
+            memory,
+            "pending_file_action",
+            pending_file_action,
+            action_type="file_action",
+            is_confirm=is_confirm,
+            is_cancel=is_cancel,
+            cancel_message="Alles klar, ich ändere nichts.",
+            waiting_message="Ich warte auf dein Ja oder Abbrechen.",
+        )
 
     pending_mail_delete = settings.get("pending_mail_delete")
     if isinstance(pending_mail_delete, dict):
-        if is_cancel:
-            settings.pop("pending_mail_delete", None)
-            memory.set("settings", settings)
-            return "Alles klar, ich verschiebe keine Mails."
-
-        if not is_confirm:
-            return "Ich warte noch auf deine Bestätigung. Sag ja zum Ausführen oder abbrechen."
-
-        settings.pop("pending_mail_delete", None)
-        memory.set("settings", settings)
-        search_terms = list(pending_mail_delete.get("search_terms") or [])
-        selected_targets = list(pending_mail_delete.get("selected_targets") or [])
-        message_ids = [str(item) for item in pending_mail_delete.get("message_ids") or [] if str(item).strip()]
-        targets_text = " und ".join(str(target) for target in selected_targets) or "diese Absender"
-        if message_ids:
-            error_note = ""
-            try:
-                moved_count = move_messages_to_trash(
-                    message_ids,
-                    account_name=MAIL_INBOX_ACCOUNT,
-                    mailbox_name=MAIL_INBOX_MAILBOX,
-                )
-            except MailAccessError as exc:
-                return str(exc)
-            except Exception as exc:
-                print("Apple-Mail Papierkorb Fehler:", type(exc).__name__)
-                error_note = str(exc)
-                moved_count = 0
-
-            if not moved_count:
-                fallback_terms = []
-                for subject in list(pending_mail_delete.get("subjects") or []):
-                    cleaned = clean_spoken_answer(str(subject))
-                    if cleaned:
-                        fallback_terms.append(cleaned)
-                for sender in list(pending_mail_delete.get("senders") or []):
-                    cleaned = clean_spoken_answer(str(sender))
-                    if cleaned:
-                        fallback_terms.append(cleaned)
-                if fallback_terms:
-                    try:
-                        moved_messages = move_matching_messages_to_trash(
-                            fallback_terms,
-                            max_messages=max(MAIL_MAX_MESSAGES, 50),
-                            account_name=MAIL_INBOX_ACCOUNT,
-                            mailbox_name=MAIL_INBOX_MAILBOX,
-                        )
-                        if moved_messages:
-                            settings.pop("pending_mail_delete", None)
-                            memory.set("settings", settings)
-                            return f"Erledigt. Ich habe {len(moved_messages)} gelesene Mail(s) in den Papierkorb gelegt."
-                    except MailAccessError as exc:
-                        return str(exc)
-                    except Exception as exc:
-                        print("Apple-Mail Papierkorb Fallback Fehler:", type(exc).__name__)
-                        error_note = error_note or str(exc)
-
-                if error_note:
-                    return (
-                        "Ich konnte die zuletzt gelesenen Mails nicht sauber verschieben. "
-                        f"Technisch: {error_note}"
-                    )
-                return (
-                    "Ich konnte die zuletzt gelesenen Mails nicht mehr sauber zuordnen. "
-                    "Wenn du willst, nenne ich sie dir noch einmal und wir räumen dann gezielt auf."
-                )
-            return f"Erledigt. Ich habe {moved_count} gelesene Mail(s) in den Papierkorb gelegt."
-        try:
-            moved_messages = move_matching_messages_to_trash(
-                search_terms,
-                max_messages=max(MAIL_MAX_MESSAGES, 50),
-                account_name=MAIL_INBOX_ACCOUNT,
-                mailbox_name=MAIL_INBOX_MAILBOX,
-            )
-        except MailAccessError as exc:
-            return str(exc)
-        except Exception as exc:
-            print("Apple-Mail Papierkorb Fehler:", type(exc).__name__)
-            return "Ich konnte die Mail-Löschaktion gerade nicht sauber ausführen."
-
-        if not moved_messages:
-            return (
-                f"Ich habe im aktuellen Posteingang keine passenden Mails von {targets_text} gefunden. "
-                "Ich habe deshalb nichts verschoben."
-            )
-
-        moved_subjects = "; ".join(
-            f"{message.sender or 'Unbekannt'}: {message.subject}"
-            for message in moved_messages[:3]
-        )
-        return (
-            f"Erledigt. Ich habe {len(moved_messages)} Mail(s) in den Papierkorb gelegt: "
-            f"{moved_subjects}."
+        return ACTION_ENGINE.resolve(
+            memory,
+            "pending_mail_delete",
+            pending_mail_delete,
+            action_type="mail_delete",
+            is_confirm=is_confirm,
+            is_cancel=is_cancel,
+            cancel_message="Alles klar, ich verschiebe keine Mails.",
+            waiting_message="Ich warte noch auf deine Bestätigung. Sag ja zum Ausführen oder abbrechen.",
         )
 
     pending_call = settings.get("pending_call_contact")
     if isinstance(pending_call, dict):
-        if is_cancel:
-            settings.pop("pending_call_contact", None)
-            memory.set("settings", settings)
-            return "Alles klar, ich starte keinen Anruf."
-
-        if not is_confirm:
-            return "Ich warte noch auf deine Bestätigung. Sag ja zum Anrufen oder abbrechen."
-
-        settings.pop("pending_call_contact", None)
-        memory.set("settings", settings)
-        contact_name = str(pending_call.get("name") or "").strip()
-        phone = str(pending_call.get("phone") or "").strip()
-        if not contact_name:
-            return "Der Kontaktname fehlt. Ich starte keinen Anruf."
-
-        try:
-            if phone:
-                return call_phone_number(contact_name, phone)
-            return call_contact_by_name(contact_name)
-        except ContactAccessError as exc:
-            return str(exc)
-        except Exception as exc:
-            print("Kontakte/Anruf Fehler:", type(exc).__name__)
-            return "Ich konnte den Anruf nicht starten."
+        return ACTION_ENGINE.resolve(
+            memory,
+            "pending_call_contact",
+            pending_call,
+            action_type="call_contact",
+            is_confirm=is_confirm,
+            is_cancel=is_cancel,
+            cancel_message="Alles klar, ich starte keinen Anruf.",
+            waiting_message="Ich warte noch auf deine Bestätigung. Sag ja zum Anrufen oder abbrechen.",
+        )
 
     pending_call_choice = settings.get("pending_call_choice")
     if isinstance(pending_call_choice, dict):
@@ -2451,12 +2270,19 @@ def handle_pending_action_flow(
             return f"Ich konnte die Nummer noch nicht sauber zuordnen. Ich sehe: {endings}."
 
         settings.pop("pending_call_choice", None)
-        settings["pending_call_contact"] = {
-            "name": contact_name,
-            "phone": matching_phones[0],
-        }
         memory.set("settings", settings)
-        return f"Nummer {mask_phone_end(matching_phones[0])}. Soll ich anrufen?"
+        return ACTION_ENGINE.propose(
+            memory,
+            "pending_call_contact",
+            ActionProposal(
+                action_type="call_contact",
+                execution_data={
+                    "name": contact_name,
+                    "phone": matching_phones[0],
+                },
+                confirm_prompt=f"Nummer {mask_phone_end(matching_phones[0])}. Soll ich anrufen?",
+            ),
+        )
 
     return None
 
@@ -2607,21 +2433,6 @@ def clean_note_body(text: str) -> str:
 
 def handle_mail_delete_command(text: str, memory: Memory | None = None) -> str | None:
     normalized = normalize_text(text)
-    explicit_delete_now = any(
-        term in normalized
-        for term in (
-            "ok",
-            "okay",
-            "ja",
-            "bitte",
-            "leg",
-            "lege",
-            "lösch",
-            "loesch",
-            "lösche",
-            "loesche",
-        )
-    ) and any(term in normalized for term in ("papierkorb", "trash", "löschen", "loeschen"))
     question_about_done = any(
         term in normalized
         for term in (
@@ -2711,64 +2522,23 @@ def handle_mail_delete_command(text: str, memory: Memory | None = None) -> str |
                 if str(item).strip()
             ]
         if last_summary_ids:
-            if memory is not None and explicit_delete_now:
-                try:
-                    moved_count = move_messages_to_trash(
-                        last_summary_ids,
-                        account_name=str(last_mail_summary.get("account") or MAIL_INBOX_ACCOUNT),
-                        mailbox_name=str(last_mail_summary.get("mailbox") or MAIL_INBOX_MAILBOX),
-                    )
-                except MailAccessError as exc:
-                    return str(exc)
-                except Exception as exc:
-                    print("Apple-Mail Papierkorb Fehler:", type(exc).__name__)
-                    moved_count = 0
-
-                if not moved_count:
-                    fallback_terms = []
-                    for subject in list(last_mail_summary.get("subjects") or []):
-                        cleaned = clean_spoken_answer(str(subject))
-                        if cleaned:
-                            fallback_terms.append(cleaned)
-                    for sender in list(last_mail_summary.get("senders") or []):
-                        cleaned = clean_spoken_answer(str(sender))
-                        if cleaned:
-                            fallback_terms.append(cleaned)
-                    try:
-                        moved_messages = move_matching_messages_to_trash(
-                            fallback_terms,
-                            max_messages=max(MAIL_MAX_MESSAGES, 50),
-                            account_name=str(last_mail_summary.get("account") or MAIL_INBOX_ACCOUNT),
-                            mailbox_name=str(last_mail_summary.get("mailbox") or MAIL_INBOX_MAILBOX),
-                        )
-                        moved_count = len(moved_messages)
-                    except MailAccessError as exc:
-                        return str(exc)
-                    except Exception as exc:
-                        print("Apple-Mail Papierkorb Fallback Fehler:", type(exc).__name__)
-                        moved_count = 0
-
-                if not moved_count:
-                    return (
-                        "Ich konnte die zuletzt gelesenen Mails nicht mehr sauber zuordnen. "
-                        "Wenn du willst, nenne ich sie dir noch einmal und wir räumen dann gezielt auf."
-                    )
-
-                settings.pop("pending_mail_delete", None)
-                memory.set("settings", settings)
-                return f"Erledigt. Ich habe {moved_count} gelesene Mail(s) in den Papierkorb gelegt."
-
-            settings["pending_mail_delete"] = {
-                "selected_targets": ["letzte gelesene Mails"],
-                "search_terms": [],
-                "message_ids": last_summary_ids,
-                "subjects": list(last_mail_summary.get("subjects") or []),
-                "senders": list(last_mail_summary.get("senders") or []),
-            }
-            memory.set("settings", settings)
-            return (
-                "Ich nehme die zuletzt gelesenen Mails. "
-                "Soll ich sie wirklich in den Papierkorb legen? Sag ja oder abbrechen."
+            return ACTION_ENGINE.propose(
+                memory,
+                "pending_mail_delete",
+                ActionProposal(
+                    action_type="mail_delete",
+                    execution_data={
+                        "selected_targets": ["letzte gelesene Mails"],
+                        "search_terms": [],
+                        "message_ids": last_summary_ids,
+                        "subjects": list(last_mail_summary.get("subjects") or []),
+                        "senders": list(last_mail_summary.get("senders") or []),
+                    },
+                    confirm_prompt=(
+                        "Ich nehme die zuletzt gelesenen Mails. "
+                        "Soll ich sie wirklich in den Papierkorb legen? Sag ja oder abbrechen."
+                    ),
+                ),
             )
         return None
 
@@ -2788,16 +2558,109 @@ def handle_mail_delete_command(text: str, memory: Memory | None = None) -> str |
             "Sag es mir noch einmal, dann räume ich auf."
         )
 
-    settings = memory.get("settings") or {}
-    settings["pending_mail_delete"] = {
-        "selected_targets": selected_targets,
-        "search_terms": search_terms,
-    }
-    memory.set("settings", settings)
-    return (
-        f"Ich habe noch nichts gelöscht. Soll ich Mails von {targets_text} wirklich in den Papierkorb legen? "
-        "Sag ja oder abbrechen."
+    return ACTION_ENGINE.propose(
+        memory,
+        "pending_mail_delete",
+        ActionProposal(
+            action_type="mail_delete",
+            execution_data={
+                "selected_targets": selected_targets,
+                "search_terms": search_terms,
+            },
+            confirm_prompt=(
+                f"Ich habe noch nichts gelöscht. Soll ich Mails von {targets_text} wirklich in den Papierkorb legen? "
+                "Sag ja oder abbrechen."
+            ),
+        ),
     )
+
+
+def execute_mail_delete(data: dict) -> str:
+    search_terms = list(data.get("search_terms") or [])
+    selected_targets = list(data.get("selected_targets") or [])
+    message_ids = [str(item) for item in data.get("message_ids") or [] if str(item).strip()]
+    targets_text = " und ".join(str(target) for target in selected_targets) or "diese Absender"
+    if message_ids:
+        error_note = ""
+        try:
+            moved_count = move_messages_to_trash(
+                message_ids,
+                account_name=MAIL_INBOX_ACCOUNT,
+                mailbox_name=MAIL_INBOX_MAILBOX,
+            )
+        except MailAccessError as exc:
+            return str(exc)
+        except Exception as exc:
+            print("Apple-Mail Papierkorb Fehler:", type(exc).__name__)
+            error_note = str(exc)
+            moved_count = 0
+
+        if not moved_count:
+            fallback_terms = []
+            for subject in list(data.get("subjects") or []):
+                cleaned = clean_spoken_answer(str(subject))
+                if cleaned:
+                    fallback_terms.append(cleaned)
+            for sender in list(data.get("senders") or []):
+                cleaned = clean_spoken_answer(str(sender))
+                if cleaned:
+                    fallback_terms.append(cleaned)
+            if fallback_terms:
+                try:
+                    moved_messages = move_matching_messages_to_trash(
+                        fallback_terms,
+                        max_messages=max(MAIL_MAX_MESSAGES, 50),
+                        account_name=MAIL_INBOX_ACCOUNT,
+                        mailbox_name=MAIL_INBOX_MAILBOX,
+                    )
+                    if moved_messages:
+                        return f"Erledigt. Ich habe {len(moved_messages)} gelesene Mail(s) in den Papierkorb gelegt."
+                except MailAccessError as exc:
+                    return str(exc)
+                except Exception as exc:
+                    print("Apple-Mail Papierkorb Fallback Fehler:", type(exc).__name__)
+                    error_note = error_note or str(exc)
+
+            if error_note:
+                return (
+                    "Ich konnte die zuletzt gelesenen Mails nicht sauber verschieben. "
+                    f"Technisch: {error_note}"
+                )
+            return (
+                "Ich konnte die zuletzt gelesenen Mails nicht mehr sauber zuordnen. "
+                "Wenn du willst, nenne ich sie dir noch einmal und wir räumen dann gezielt auf."
+            )
+        return f"Erledigt. Ich habe {moved_count} gelesene Mail(s) in den Papierkorb gelegt."
+    try:
+        moved_messages = move_matching_messages_to_trash(
+            search_terms,
+            max_messages=max(MAIL_MAX_MESSAGES, 50),
+            account_name=MAIL_INBOX_ACCOUNT,
+            mailbox_name=MAIL_INBOX_MAILBOX,
+        )
+    except MailAccessError as exc:
+        return str(exc)
+    except Exception as exc:
+        print("Apple-Mail Papierkorb Fehler:", type(exc).__name__)
+        return "Ich konnte die Mail-Löschaktion gerade nicht sauber ausführen."
+
+    if not moved_messages:
+        return (
+            f"Ich habe im aktuellen Posteingang keine passenden Mails von {targets_text} gefunden. "
+            "Ich habe deshalb nichts verschoben."
+        )
+
+    moved_subjects = "; ".join(
+        f"{message.sender or 'Unbekannt'}: {message.subject}"
+        for message in moved_messages[:3]
+    )
+    return (
+        f"Erledigt. Ich habe {len(moved_messages)} Mail(s) in den Papierkorb gelegt: "
+        f"{moved_subjects}."
+    )
+
+
+ACTION_ENGINE.register("mail_delete", execute_mail_delete)
 
 
 def handle_mail_document_export_command(text: str, memory: Memory | None = None) -> str | None:
@@ -2844,15 +2707,21 @@ def handle_mail_document_export_command(text: str, memory: Memory | None = None)
     if memory is None:
         return f"Ich würde {category_text} aus deinen Mails auf den Schreibtisch kopieren."
 
-    settings = memory.get("settings") or {}
-    settings["pending_mail_document_export"] = {
-        "categories": categories,
-        "max_messages": int(CONFIG.get("mail_document_export_max_messages", 80)),
-    }
-    memory.set("settings", settings)
-    return (
-        f"Ich habe noch nichts kopiert. Soll ich {category_text} aus den letzten "
-        f"{int(CONFIG.get('mail_document_export_max_messages', 80))} Mails auf deinen Schreibtisch kopieren?"
+    max_messages = int(CONFIG.get("mail_document_export_max_messages", 80))
+    return ACTION_ENGINE.propose(
+        memory,
+        "pending_mail_document_export",
+        ActionProposal(
+            action_type="mail_document_export",
+            execution_data={
+                "categories": categories,
+                "max_messages": max_messages,
+            },
+            confirm_prompt=(
+                f"Ich habe noch nichts kopiert. Soll ich {category_text} aus den letzten "
+                f"{max_messages} Mails auf deinen Schreibtisch kopieren?"
+            ),
+        ),
     )
 
 
@@ -2914,6 +2783,21 @@ def run_mail_document_export(categories: list[str], max_messages: int = 80) -> s
         return "Ich habe keine passenden Anhänge oder Mail-Notizen zum Kopieren gefunden. " + "; ".join(parts) + "."
 
     return "Erledigt. " + "; ".join(parts) + "."
+
+
+def execute_mail_document_export(data: dict) -> str:
+    categories = list(data.get("categories") or [])
+    max_messages = int(data.get("max_messages") or 80)
+    try:
+        return run_mail_document_export(categories, max_messages=max_messages)
+    except MailAccessError as exc:
+        return str(exc)
+    except Exception as exc:
+        print("Mail-Dokumentenexport Fehler:", type(exc).__name__)
+        return "Ich konnte die Mail-Dokumente nicht kopieren."
+
+
+ACTION_ENGINE.register("mail_document_export", execute_mail_document_export)
 
 
 def handle_mail_command(
@@ -3389,16 +3273,24 @@ def handle_calendar_command(text: str, memory: Memory | None = None) -> str | No
 
     is_reminder = "erinner" in normalized and "termin" not in normalized and "kalender" not in normalized
     if memory is not None:
-        settings = memory.get("settings") or {}
-        settings["pending_calendar_create"] = {
-            "kind": "reminder" if is_reminder else "calendar",
-            "title": title,
-            "when": when.isoformat(),
-            "has_time": has_time,
-        }
-        memory.set("settings", settings)
         target = "Erinnerung" if is_reminder else "Kalendereintrag"
-        return f"Ich habe noch nichts angelegt. Soll ich die {target} {title} für {when.strftime('%d.%m.%Y %H:%M')} erstellen?"
+        return ACTION_ENGINE.propose(
+            memory,
+            "pending_calendar_create",
+            ActionProposal(
+                action_type="calendar_create",
+                execution_data={
+                    "kind": "reminder" if is_reminder else "calendar",
+                    "title": title,
+                    "when": when.isoformat(),
+                    "has_time": has_time,
+                },
+                confirm_prompt=(
+                    f"Ich habe noch nichts angelegt. Soll ich die {target} {title} "
+                    f"für {when.strftime('%d.%m.%Y %H:%M')} erstellen?"
+                ),
+            ),
+        )
 
     try:
         if is_reminder:
@@ -3425,6 +3317,42 @@ def handle_calendar_command(text: str, memory: Memory | None = None) -> str | No
     except Exception as exc:
         print("Kalender Fehler:", type(exc).__name__)
         return "Kalender oder Erinnerung wollten gerade nicht."
+
+
+def execute_calendar_create(data: dict) -> str:
+    kind = str(data.get("kind") or "calendar")
+    title = str(data.get("title") or "Termin").strip()
+    try:
+        when = datetime.fromisoformat(str(data.get("when")))
+        if kind == "reminder":
+            create_reminder(
+                title,
+                when,
+                list_name=CONFIG.get("reminders_list_name"),
+                notes="Von Jarvis per Sprache erstellt.",
+            )
+            privacy_log("reminders", "create", success=True)
+            return f"Erledigt. Ich habe die Erinnerung {title} gesetzt."
+
+        create_calendar_event(
+            title,
+            when,
+            duration_minutes=int(CONFIG.get("auto_calendar_event_duration_minutes", 60)),
+            calendar_name=CONFIG.get("calendar_name"),
+            notes="Von Jarvis per Sprache erstellt.",
+        )
+        privacy_log("calendar", "create", success=True)
+        return f"Erledigt. Ich habe den Kalendereintrag {title} angelegt."
+    except CalendarAccessError as exc:
+        privacy_log("calendar", "create", success=False)
+        return str(exc)
+    except Exception as exc:
+        privacy_log("calendar", "create", success=False)
+        print("Kalender Fehler:", type(exc).__name__)
+        return "Ich konnte Kalender oder Erinnerungen nicht bearbeiten."
+
+
+ACTION_ENGINE.register("calendar_create", execute_calendar_create)
 
 
 def extract_calendar_title(text: str) -> str:
@@ -3537,9 +3465,15 @@ def handle_contact_command(text: str, memory: Memory | None = None) -> str | Non
                 f"Ich sehe diese Endungen: {endings}. Welche soll ich nehmen?"
             )
 
-        settings["pending_call_contact"] = {"name": resolved_name}
-        memory.set("settings", settings)
-        return f"Ich habe {resolved_name} gefunden. Soll ich den Anruf wirklich starten? Sag ja zum Anrufen oder abbrechen."
+        return ACTION_ENGINE.propose(
+            memory,
+            "pending_call_contact",
+            ActionProposal(
+                action_type="call_contact",
+                execution_data={"name": resolved_name},
+                confirm_prompt=f"Ich habe {resolved_name} gefunden. Soll ich den Anruf wirklich starten? Sag ja zum Anrufen oder abbrechen.",
+            ),
+        )
 
     if any(term in normalized for term in ("sehen", "anzeigen", "zeige", "liste", "hast du zugriff", "zugriff")):
         try:
@@ -3575,6 +3509,26 @@ def handle_contact_command(text: str, memory: Memory | None = None) -> str | Non
         return f"Ich finde diese passenden Kontakte: {names}."
 
     return None
+
+
+def execute_call_contact(data: dict) -> str:
+    contact_name = str(data.get("name") or "").strip()
+    phone = str(data.get("phone") or "").strip()
+    if not contact_name:
+        return "Der Kontaktname fehlt. Ich starte keinen Anruf."
+
+    try:
+        if phone:
+            return call_phone_number(contact_name, phone)
+        return call_contact_by_name(contact_name)
+    except ContactAccessError as exc:
+        return str(exc)
+    except Exception as exc:
+        print("Kontakte/Anruf Fehler:", type(exc).__name__)
+        return "Ich konnte den Anruf nicht starten."
+
+
+ACTION_ENGINE.register("call_contact", execute_call_contact)
 
 
 def extract_call_contact_name(text: str) -> str:
@@ -3652,15 +3606,20 @@ def handle_desktop_command(text: str, memory: Memory | None = None) -> str | Non
             if memory is None:
                 return f"Ich würde alle Dateien mit {query} im Namen in den Schreibtisch-Ordner {target_folder} schieben."
 
-            settings = memory.get("settings") or {}
-            settings["pending_desktop_move_many"] = {
-                "query": query,
-                "target": target_folder,
-            }
-            memory.set("settings", settings)
-            return (
-                f"Ich habe noch nichts verschoben. Soll ich alle Dateien mit {query} "
-                f"im Namen in den Schreibtisch-Ordner {target_folder} schieben?"
+            return ACTION_ENGINE.propose(
+                memory,
+                "pending_desktop_move_many",
+                ActionProposal(
+                    action_type="desktop_move_many",
+                    execution_data={
+                        "query": query,
+                        "target": target_folder,
+                    },
+                    confirm_prompt=(
+                        f"Ich habe noch nichts verschoben. Soll ich alle Dateien mit {query} "
+                        f"im Namen in den Schreibtisch-Ordner {target_folder} schieben?"
+                    ),
+                ),
             )
 
         move_match = re.search(
@@ -3677,15 +3636,20 @@ def handle_desktop_command(text: str, memory: Memory | None = None) -> str | Non
             if memory is None:
                 return f"Ich würde {source_name} in den Schreibtisch-Ordner {target_folder} schieben."
 
-            settings = memory.get("settings") or {}
-            settings["pending_desktop_move"] = {
-                "source": source_name,
-                "target": target_folder,
-            }
-            memory.set("settings", settings)
-            return (
-                f"Ich habe noch nichts verschoben. Soll ich {source_name} "
-                f"in den Schreibtisch-Ordner {target_folder} schieben?"
+            return ACTION_ENGINE.propose(
+                memory,
+                "pending_desktop_move",
+                ActionProposal(
+                    action_type="desktop_move",
+                    execution_data={
+                        "source": source_name,
+                        "target": target_folder,
+                    },
+                    confirm_prompt=(
+                        f"Ich habe noch nichts verschoben. Soll ich {source_name} "
+                        f"in den Schreibtisch-Ordner {target_folder} schieben?"
+                    ),
+                ),
             )
 
         create_match = re.search(
@@ -3737,6 +3701,40 @@ def handle_desktop_command(text: str, memory: Memory | None = None) -> str | Non
     return None
 
 
+def execute_desktop_move(data: dict) -> str:
+    source_name = str(data.get("source") or "").strip()
+    target_folder = str(data.get("target") or "").strip()
+    if not source_name or not target_folder:
+        return "Mir fehlt Quelle oder Zielordner. Ich verschiebe nichts."
+
+    try:
+        return move_desktop_item(source_name, target_folder)
+    except DesktopAccessError as exc:
+        return str(exc)
+    except Exception as exc:
+        print("Desktop Verschieben Fehler:", type(exc).__name__)
+        return "Ich konnte das auf dem Schreibtisch nicht verschieben."
+
+
+def execute_desktop_move_many(data: dict) -> str:
+    query = str(data.get("query") or "").strip()
+    target_folder = str(data.get("target") or "").strip()
+    if not query or not target_folder:
+        return "Mir fehlt Suchbegriff oder Zielordner. Ich verschiebe nichts."
+
+    try:
+        return move_desktop_items_matching(query, target_folder)
+    except DesktopAccessError as exc:
+        return str(exc)
+    except Exception as exc:
+        print("Desktop Sammelverschieben Fehler:", type(exc).__name__)
+        return "Ich konnte die Dateien auf dem Schreibtisch nicht verschieben."
+
+
+ACTION_ENGINE.register("desktop_move", execute_desktop_move)
+ACTION_ENGINE.register("desktop_move_many", execute_desktop_move_many)
+
+
 def handle_file_command(text: str, memory: Memory | None = None) -> str | None:
     normalized = normalize_text(text)
     file_context = has_domain(text, "files")
@@ -3771,15 +3769,20 @@ def handle_file_command(text: str, memory: Memory | None = None) -> str | None:
             if memory is None:
                 return f"Ich würde alle Dateien mit {query} im Namen in den Ordner {target_folder} verschieben."
 
-            settings = memory.get("settings") or {}
-            settings["pending_file_action"] = {
-                "action": "move_matching",
-                "query": query,
-                "target": target_folder,
-                "root": root_hint,
-            }
-            memory.set("settings", settings)
-            return f"Ich habe noch nichts geändert. Soll ich alle Dateien mit {query} im Namen in den Ordner {target_folder} verschieben?"
+            return ACTION_ENGINE.propose(
+                memory,
+                "pending_file_action",
+                ActionProposal(
+                    action_type="file_action",
+                    execution_data={
+                        "action": "move_matching",
+                        "query": query,
+                        "target": target_folder,
+                        "root": root_hint,
+                    },
+                    confirm_prompt=f"Ich habe noch nichts geändert. Soll ich alle Dateien mit {query} im Namen in den Ordner {target_folder} verschieben?",
+                ),
+            )
 
         action_match = re.search(
             r"(?:kopier|kopiere|verschieb|verschiebe|pack|packe|leg|lege)\s+(.+?)\s+(?:in|nach|zu)\s+(?:den\s+|dem\s+|der\s+)?(?:ordner\s+)?(.+?)(?:\s+(?:auf|am|in|aus|von)\s+.+)?[.?!]*$",
@@ -3797,15 +3800,20 @@ def handle_file_command(text: str, memory: Memory | None = None) -> str | None:
             if memory is None:
                 return f"Ich würde {source_name} in den Ordner {target_folder} {verb}."
 
-            settings = memory.get("settings") or {}
-            settings["pending_file_action"] = {
-                "action": action,
-                "source": source_name,
-                "target": target_folder,
-                "root": root_hint,
-            }
-            memory.set("settings", settings)
-            return f"Ich habe noch nichts geändert. Soll ich {source_name} in den Ordner {target_folder} {verb}?"
+            return ACTION_ENGINE.propose(
+                memory,
+                "pending_file_action",
+                ActionProposal(
+                    action_type="file_action",
+                    execution_data={
+                        "action": action,
+                        "source": source_name,
+                        "target": target_folder,
+                        "root": root_hint,
+                    },
+                    confirm_prompt=f"Ich habe noch nichts geändert. Soll ich {source_name} in den Ordner {target_folder} {verb}?",
+                ),
+            )
 
         create_match = re.search(
             r"(?:erstelle|erstell|mach|mache|leg|lege)\s+(?:mir\s+)?(?:einen\s+|eine\s+|neuen\s+|neue\s+)?(?:ordner\s+)?(.+?)(?:\s+(?:auf|am|in|unter)\s+.+)?[.?!]*$",
@@ -3863,6 +3871,33 @@ def handle_file_command(text: str, memory: Memory | None = None) -> str | None:
         return "Ich konnte die Dateien nicht lesen."
 
     return None
+
+
+def execute_file_action(data: dict) -> str:
+    action = str(data.get("action") or "").strip()
+    source = str(data.get("source") or "").strip()
+    query = str(data.get("query") or "").strip()
+    target = str(data.get("target") or "").strip()
+    root_hint = str(data.get("root") or "").strip()
+    if not action or not target or (action != "move_matching" and not source) or (action == "move_matching" and not query):
+        return "Mir fehlt noch ein Baustein. Ich ändere nichts."
+
+    try:
+        if action == "copy":
+            return copy_item(source, target, root_hint=root_hint, config=CONFIG)
+        if action == "move":
+            return move_item(source, target, root_hint=root_hint, config=CONFIG)
+        if action == "move_matching":
+            return move_items_matching(query, target, root_hint=root_hint, config=CONFIG)
+        return "Diese Dateiaktion kenne ich noch nicht. Klingt aber sportlich."
+    except FileAccessError as exc:
+        return str(exc)
+    except Exception as exc:
+        print("Dateiaktion Fehler:", type(exc).__name__)
+        return "Ich konnte die Dateiaktion nicht ausführen."
+
+
+ACTION_ENGINE.register("file_action", execute_file_action)
 
 
 def handle_photo_command(
@@ -4557,6 +4592,14 @@ def main():
                 speak(project_answer, voice=voice)
                 continue
 
+            if has_pending_action(memory):
+                pending_action_answer = handle_pending_action_flow(memory, question, photo_worker=photo_worker)
+                if pending_action_answer is not None:
+                    record_exchange(memory, question, pending_action_answer)
+                    print(f"\nJARVIS: {console_text(pending_action_answer, 'answer')}")
+                    speak(pending_action_answer, voice=voice)
+                    continue
+
             local_answer = handle_local_command(question)
             if local_answer is not None:
                 print(f"\nJARVIS: {console_text(local_answer, 'answer')}")
@@ -4588,13 +4631,6 @@ def main():
                 record_exchange(memory, question, pending_note_answer)
                 print(f"\nJARVIS: {console_text(pending_note_answer, 'answer')}")
                 speak(pending_note_answer, voice=voice)
-                continue
-
-            pending_action_answer = handle_pending_action_flow(memory, question, photo_worker=photo_worker)
-            if pending_action_answer is not None:
-                record_exchange(memory, question, pending_action_answer)
-                print(f"\nJARVIS: {console_text(pending_action_answer, 'answer')}")
-                speak(pending_action_answer, voice=voice)
                 continue
 
             permission_answer = ensure_privacy_domain_permission(memory, "notes", "Jarvis würde eine Notiz über Apple Notes erstellen oder ändern.") if has_domain(question, "notes") else None

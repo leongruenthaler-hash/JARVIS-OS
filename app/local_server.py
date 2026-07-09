@@ -1174,6 +1174,10 @@ class JarvisLocalServer:
                 ("handle_pending_note_flow", (memory, question), {}),
                 ("handle_pending_action_flow", (memory, question), {"photo_worker": self.photo_worker}),
             ]
+            if hasattr(core, "has_pending_action") and core.has_pending_action(memory):
+                pending_action_handler = direct_handlers.pop()
+                local_command_index = next(i for i, entry in enumerate(direct_handlers) if entry[0] == "handle_local_command")
+                direct_handlers.insert(local_command_index, pending_action_handler)
 
             for name, args, kwargs in direct_handlers:
                 handler = getattr(core, name, None)
