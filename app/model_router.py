@@ -107,10 +107,6 @@ class ModelRouter:
                 return "phi4-mini"
             return self._first_available(installed)
         if selected_mode == "quality":
-            if complex_task and "gemma3:4b" in installed:
-                return "gemma3:4b"
-            if "qwen3:4b" in installed:
-                return "qwen3:4b"
             if "gemma3:4b" in installed:
                 return "gemma3:4b"
             return self._first_available(installed)
