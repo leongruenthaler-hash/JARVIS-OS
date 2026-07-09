@@ -95,7 +95,6 @@ from photos_client import (
     PhotosAccessError,
     extract_photo_count_query,
     extract_photo_query,
-    open_photos_privacy_settings,
 )
 from action_confirmation import PlannedAction, confirmation_text, requires_confirmation
 from settings import load_config
@@ -1878,7 +1877,6 @@ def has_pending_action(memory: Memory) -> bool:
         "pending_mail_delete",
         "pending_call_contact",
         "pending_call_choice",
-        "pending_photo_permission",
         "pending_permission",
         "pending_note",
         "pending_desktop_move",
@@ -1918,7 +1916,6 @@ def pending_action_matches_text(settings: dict, normalized_text: str) -> bool:
 
     context_by_key = {
         "pending_permission": (),
-        "pending_photo_permission": ("foto", "fotos", "photo", "photos", "freigabe", "datenschutz", "einstellungen"),
         "pending_desktop_move": ("desktop", "schreibtisch", "verschieb", "ordner", "datei"),
         "pending_desktop_move_many": ("desktop", "schreibtisch", "verschieb", "ordner", "datei"),
         "pending_calendar_create": ("kalender", "termin", "erinnerung", "erstelle", "morgen", "heute", "uhr"),
@@ -2136,48 +2133,6 @@ def handle_pending_action_flow(
         settings.pop("pending_permission", None)
         memory.set("settings", settings)
         return "Die offene Berechtigung war unvollständig. Ich habe sie verworfen."
-
-    pending_photo_permission = settings.get("pending_photo_permission")
-    if isinstance(pending_photo_permission, dict):
-        photo_context = any(
-            term in normalized
-            for term in (
-                "foto",
-                "fotos",
-                "photo",
-                "photos",
-                "freigabe",
-                "freige",
-                "berechtigung",
-                "zugriff",
-                "datenschutz",
-                "einstellungen",
-                "systemeinstellungen",
-                "vs code",
-                "vscode",
-                "terminal",
-                "alle fotos",
-                "ausgewählte fotos",
-                "ausgewaehlte fotos",
-                "neue aufnahmen",
-                "mach das erste",
-                "öffne",
-                "oeffne",
-            )
-        )
-        if is_cancel:
-            settings.pop("pending_photo_permission", None)
-            memory.set("settings", settings)
-            return "Alles klar, ich breche die Fotos-Freigabe ab."
-
-        if photo_context:
-            settings.pop("pending_photo_permission", None)
-            memory.set("settings", settings)
-            if photo_worker is not None:
-                return photo_worker.request_permission()
-
-            open_photos_privacy_settings()
-            return "Der Foto-Helper pennt gerade."
 
     pending_desktop_move = settings.get("pending_desktop_move")
     if isinstance(pending_desktop_move, dict):
@@ -3950,11 +3905,6 @@ def handle_photo_command(
             "folterer",
         )
     ):
-        if memory is not None:
-            settings = memory.get("settings") or {}
-            settings.pop("pending_photo_permission", None)
-            memory.set("settings", settings)
-
         return photo_worker.request_permission()
 
     if any(
