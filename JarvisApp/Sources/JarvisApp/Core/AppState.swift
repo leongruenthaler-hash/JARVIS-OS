@@ -193,7 +193,7 @@ final class AppState: ObservableObject {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        stopCurrentSpeech()
+        await stopCurrentSpeech()
         let history = conversationPayload()
         messages.append(ChatMessage(role: .user, text: trimmed))
         status = .thinking
@@ -249,7 +249,7 @@ final class AppState: ObservableObject {
         }
 
         if !allowWhileSpeaking {
-            stopCurrentSpeech()
+            await stopCurrentSpeech()
             await serverController.setVoiceSpeakingState(false)
         }
 
@@ -283,6 +283,7 @@ final class AppState: ObservableObject {
                 maxWaitForSpeech: 8.0,
                 sampleRate: 16_000,
                 threshold: 0.010,
+                isSpeaking: { [weak self] in self?.isJarvisSpeaking ?? false },
                 onUpdate: { [weak self] level, speechDetected in
                     guard let self else { return }
                     if !recordingMarker.value {
@@ -424,7 +425,7 @@ final class AppState: ObservableObject {
 
 
     func performMailCommand(_ command: String) async {
-        stopCurrentSpeech()
+        await stopCurrentSpeech()
         await ensureServerConnected()
         let history = conversationPayload()
         mailIsLoading = true
@@ -559,7 +560,7 @@ final class AppState: ObservableObject {
     }
 
     func performPhotoCommand(_ command: String) async {
-        stopCurrentSpeech()
+        await stopCurrentSpeech()
         await ensureServerConnected()
         let history = conversationPayload()
         photoIsLoading = true
@@ -649,7 +650,7 @@ final class AppState: ObservableObject {
     }
 
     func performFileCommand(_ command: String) async {
-        stopCurrentSpeech()
+        await stopCurrentSpeech()
         await ensureServerConnected()
         let history = conversationPayload()
         fileIsLoading = true
@@ -813,7 +814,7 @@ final class AppState: ObservableObject {
         }
         await ensureServerConnected()
         let greeting = startupGreeting()
-        stopCurrentSpeech()
+        await stopCurrentSpeech()
         setVoiceState(.jarvisSpeaking, reason: "startup_greeting")
         messages.append(ChatMessage(role: .jarvis, text: greeting))
         do {
@@ -890,8 +891,8 @@ final class AppState: ObservableObject {
     }
 
 
-    func stopCurrentSpeech() {
-        ttsService.stop()
+    func stopCurrentSpeech() async {
+        await ttsService.stop()
         isJarvisSpeaking = false
         if voiceState == .jarvisSpeaking {
             setVoiceState(.idle, reason: "speech_stopped")
@@ -903,7 +904,7 @@ final class AppState: ObservableObject {
         pauseContinuousVoiceMode(reason: "stop_button")
         nextVoiceListenTask?.cancel()
         nextVoiceListenTask = nil
-        stopCurrentSpeech()
+        await stopCurrentSpeech()
         audioCaptureService.cancel()
         await serverController.setVoiceSpeakingState(false)
         await serverController.cancelListening()

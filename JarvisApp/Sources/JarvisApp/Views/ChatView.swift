@@ -107,7 +107,7 @@ struct ChatView: View {
 
             if appState.voiceState == .jarvisSpeaking {
                 Button {
-                    appState.stopCurrentSpeech()
+                    Task { await appState.stopCurrentSpeech() }
                 } label: {
                     Label("Stoppen", systemImage: "stop.fill")
                 }

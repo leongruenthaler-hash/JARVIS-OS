@@ -78,6 +78,7 @@ final class AudioCaptureService {
         maxWaitForSpeech: TimeInterval = 8.0,
         sampleRate: Double = 16_000,
         threshold: Double = 0.010,
+        isSpeaking: (() -> Bool)? = nil,
         onUpdate: (@MainActor (_ level: Double, _ speechDetected: Bool) -> Void)? = nil
     ) async throws -> AudioCaptureResult {
         if stopRequested {
@@ -136,6 +137,18 @@ final class AudioCaptureService {
         while !Task.isCancelled && !stopRequested {
             try await Task.sleep(for: .milliseconds(50))
             recorder.updateMeters()
+
+            if isSpeaking?() == true {
+                speechStartedAt = nil
+                lastSpeechAt = nil
+                speechDuration = 0
+                meanAccumulator = 0
+                sampleCount = 0
+                peakVolume = 0
+                onUpdate?(0, false)
+                continue
+            }
+
             let level = max(-160.0, Double(recorder.averagePower(forChannel: 0)))
             let normalized = Self.normalizedLevel(fromDecibels: level)
             meanAccumulator += normalized
