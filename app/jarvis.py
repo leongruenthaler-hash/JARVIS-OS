@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import re
+import threading
 import time
 import warnings
 from datetime import date, datetime
@@ -151,6 +152,7 @@ PHOTOS_ENABLED = bool(CONFIG.get("photos_enabled", True))
 RECENT_CONTEXT_MESSAGES = min(int(CONFIG.get("recent_context_messages", 6)), 6)
 AUTO_MEMORY_ENABLED = bool(CONFIG.get("auto_memory_enabled", True))
 AUTO_MEMORY_MAX_FACTS = int(CONFIG.get("auto_memory_max_facts", 120))
+AUTO_MEMORY_LLM_EXTRACTION_ENABLED = bool(CONFIG.get("auto_memory_llm_extraction_enabled", False))
 MEMORY_SUMMARY_MAX_FACTS = int(CONFIG.get("memory_summary_max_facts", 10))
 PERFORMANCE_LOG = bool(CONFIG.get("performance_log", True))
 OPENAI_MAX_OUTPUT_TOKENS = int(CONFIG.get("openai_max_output_tokens", 180))
@@ -842,30 +844,57 @@ def strip_wake_word_from_text(text: str) -> str:
     return cleaned.strip(" .,!?:;\"'")
 
 
+TRANSIENT_MARKERS = (
+    "das war aber noch nicht alles",
+    "das war noch nicht alles",
+    "funktioniert nicht",
+    "klappt nicht",
+    "ging nicht",
+    "geht nicht",
+    "immer noch nicht",
+    "immer noch",
+    "ich sehe hier",
+    "fehler",
+    "problem",
+    "komisch",
+    "falsch",
+    "nicht richtig",
+    "nicht so ganz",
+    "hat nicht",
+    "kaputt",
+    "nervt",
+)
+
+TRANSIENT_STARTS = (
+    "scanne",
+    "scan",
+    "suche",
+    "such",
+    "kopiere",
+    "verschiebe",
+    "erstelle",
+    "öffne",
+    "oeffne",
+    "spiel",
+    "spiele",
+    "rufe",
+    "ruf",
+    "lies",
+    "fasse",
+    "prüfe",
+    "pruefe",
+    "zeige",
+    "mach",
+    "mache",
+)
+
+
 def should_skip_auto_memory(text: str) -> bool:
     normalized = normalize_text(strip_wake_word_from_text(text))
     if len(normalized) < 12:
         return True
 
-    transient_markers = (
-        "das war aber noch nicht alles",
-        "das war noch nicht alles",
-        "funktioniert nicht",
-        "klappt nicht",
-        "ging nicht",
-        "geht nicht",
-        "immer noch nicht",
-        "immer noch",
-        "ich sehe hier",
-        "fehler",
-        "problem",
-        "komisch",
-        "falsch",
-        "nicht richtig",
-        "nicht so ganz",
-        "hat nicht",
-    )
-    if any(marker in normalized for marker in transient_markers):
+    if any(marker in normalized for marker in TRANSIENT_MARKERS):
         return True
 
     durable_markers = {
@@ -896,32 +925,25 @@ def should_skip_auto_memory(text: str) -> bool:
     if "immer" in normalized and any(marker in normalized for marker in ("soll", "sprich", "ansprech", "verwende", "nutze")):
         return False
 
-    transient_starts = (
-        "scanne",
-        "scan",
-        "suche",
-        "such",
-        "kopiere",
-        "verschiebe",
-        "erstelle",
-        "öffne",
-        "oeffne",
-        "spiel",
-        "spiele",
-        "rufe",
-        "ruf",
-        "lies",
-        "fasse",
-        "prüfe",
-        "pruefe",
-        "zeige",
-        "mach",
-        "mache",
-    )
-    if normalized.startswith(transient_starts):
+    if normalized.startswith(TRANSIENT_STARTS):
         return True
 
     return True
+
+
+def looks_like_memory_candidate(text: str) -> bool:
+    normalized = normalize_text(strip_wake_word_from_text(text))
+    if len(normalized) < 12:
+        return False
+    if any(marker in normalized for marker in TRANSIENT_MARKERS):
+        return False
+    if normalized.startswith(TRANSIENT_STARTS):
+        return False
+    if not should_skip_auto_memory(text):
+        return True
+
+    self_reference_markers = ("ich ", "mein ", "meine ", "meiner ", "meinen ", "meinem ")
+    return any(marker in normalized for marker in self_reference_markers)
 
 
 def clean_memory_subject(text: str) -> str:
@@ -955,55 +977,85 @@ def extract_auto_memory_facts(text: str) -> list[tuple[str, str]]:
     facts: list[tuple[str, str]] = []
     user_name = configured_user_name()
 
-    if should_skip_auto_memory(original):
+    # should_skip_auto_memory() gate gilt nur fuer die directive-artigen (anchored) Muster -
+    # die unanchored Fakten-Muster unten haben ihre eigene, leichtgewichtigere Pruefung
+    # (Laenge + TRANSIENT_MARKERS), da sie absichtlich auch Saetze ohne "durable_marker"
+    # (z.B. "ab jetzt", "merk dir") erfassen sollen.
+    if len(normalized) < 12:
         return facts
+    skip_anchored = should_skip_auto_memory(original)
 
     cleaned_subject = clean_memory_subject(original)
 
+    # anchored=True: directive-artige Muster, nur am Satzanfang (re.match), unveraendert.
+    # anchored=False: rein selbstbezogene Fakten-Muster, auch mitten im Satz erkannt (re.search) -
+    # jeder so gefundene Treffer wird zusaetzlich gegen TRANSIENT_MARKERS geprueft (siehe Schleife unten).
+    # (?<!\d) vor dem Satzende-Punkt verhindert, dass deutsche Ordinalzahlen wie "3. März" am
+    # internen Punkt abgeschnitten werden.
     patterns = [
         (
             r"^(?:ich möchte|ich moechte|ich will),?\s+dass\s+(.+)$",
             lambda match: f"{user_name} möchte, dass {match.group(1).strip(' .,!?:;')}.",
+            True,
         ),
         (
             r"^normalerweise\s+sollst\s+du\s+(.+)$",
             lambda match: f"Jarvis soll normalerweise {match.group(1).strip(' .,!?:;')}.",
+            True,
         ),
         (
             r"^du\s+mich\s+immer\s+mit\s+(.+?)\s+ansprichst$",
             lambda match: f"Jarvis soll {user_name} immer mit {match.group(1).strip(' .,!?:;')} ansprechen.",
+            True,
         ),
         (
             r"^ich\s+(.+?)\s+habe$",
             lambda match: f"{user_name} hat {match.group(1).strip(' .,!?:;')}.",
+            True,
         ),
         (
             r"^(?:jarvis\s+)?soll\s+(.+)$",
             lambda match: f"Jarvis soll {match.group(1).strip(' .,!?:;')}.",
+            True,
         ),
         (
             r"^(?:du sollst)\s+(.+)$",
             lambda match: f"Jarvis soll {match.group(1).strip(' .,!?:;')}.",
+            True,
         ),
         (
             r"^(?:ab jetzt|in zukunft|zukünftig|zukuenftig)\s+(.+)$",
             lambda match: f"Ab jetzt gilt: {clean_memory_subject(match.group(1))}.",
+            True,
         ),
         (
             r"^ich\s+(?:bevorzuge|nutze|verwende)\s+(.+)$",
             lambda match: f"{user_name} bevorzugt oder nutzt {match.group(1).strip(' .,!?:;')}.",
+            True,
         ),
         (
-            r"^ich\s+habe\s+(.+)$",
+            r"\bich\s+habe\s+(.+?)(?=(?<!\d)[.,!?]|$)",
             lambda match: f"{user_name} hat {match.group(1).strip(' .,!?:;')}.",
+            False,
         ),
         (
-            r"^ich\s+bin\s+(.+)$",
+            r"\bich\s+bin\s+(.+?)(?=(?<!\d)[.,!?]|$)",
             lambda match: f"{user_name} ist {match.group(1).strip(' .,!?:;')}.",
+            False,
         ),
         (
-            r"^mein(?:e|er|en|em)?\s+(.+?)\s+(?:ist|heißt|heisst)\s+(.+)$",
+            r"\bich\s+mag\s+(kein[e]?\s+)?(.+?)(?=(?<!\d)[.,!?]|$)",
+            lambda match: (
+                f"{user_name} mag {match.group(2).strip(' .,!?:;')} nicht."
+                if match.group(1)
+                else f"{user_name} mag {match.group(2).strip(' .,!?:;')}."
+            ),
+            False,
+        ),
+        (
+            r"\bmein(?:e|er|en|em)?\s+(.+?)\s+(?:ist|heißt|heisst)\s+(.+?)(?=(?<!\d)[.,!?]|$)",
             lambda match: f"{user_name}s {match.group(1).strip(' .,!?:;')} ist {match.group(2).strip(' .,!?:;')}.",
+            False,
         ),
     ]
 
@@ -1012,9 +1064,16 @@ def extract_auto_memory_facts(text: str) -> list[tuple[str, str]]:
         candidates.append(cleaned_subject)
 
     for candidate in candidates:
-        for pattern, builder in patterns:
-            match = re.match(pattern, candidate, flags=re.IGNORECASE)
+        for pattern, builder, anchored in patterns:
+            if anchored and skip_anchored:
+                continue
+
+            matcher = re.match if anchored else re.search
+            match = matcher(pattern, candidate, flags=re.IGNORECASE)
             if not match:
+                continue
+
+            if not anchored and any(marker in normalize_text(candidate) for marker in TRANSIENT_MARKERS):
                 continue
 
             fact = normalize_memory_fact(builder(match))
@@ -1024,7 +1083,7 @@ def extract_auto_memory_facts(text: str) -> list[tuple[str, str]]:
         if facts:
             break
 
-    if not facts and cleaned_subject:
+    if not facts and not skip_anchored and cleaned_subject:
         cleaned_norm = normalize_text(cleaned_subject)
         if "immer" in cleaned_norm and any(marker in cleaned_norm for marker in ("soll", "sprich", "ansprech", "verwende", "nutze")):
             fact = normalize_memory_fact(f"Dauerhafte Vorgabe von {user_name}: {cleaned_subject}.")
@@ -1047,6 +1106,116 @@ def normalize_memory_fact(fact: str) -> str:
     if not cleaned:
         return ""
     return cleaned + "."
+
+
+SENSITIVE_FACT_MARKERS = (
+    "krankheit",
+    "diagnose",
+    "medikament",
+    "therapie",
+    "depression",
+    "angststörung",
+    "angststoerung",
+    "psychisch",
+    "konto",
+    "iban",
+    "kontonummer",
+    "gehalt",
+    "kredit",
+    "schulden",
+    "passwort",
+    "pin code",
+    "kreditkarte",
+)
+
+
+def _build_memory_extraction_messages(user_text: str, user_name: str) -> list[dict[str, str]]:
+    system = (
+        "Du bist ein striktes Extraktions-Werkzeug, kein Assistent. Analysiere NUR die folgende "
+        f"Nutzeraussage von {user_name} und entscheide, ob sie einen dauerhaften, persönlichen Fakt "
+        f"ÜBER {user_name} SELBST enthält (nicht über andere, namentlich genannte Personen).\n"
+        "Speichere NIEMALS: Gesundheits- oder Krankheitsdetails, Finanz- oder Kontodaten, Beträge, "
+        "Passwörter, Aussagen primär über eine andere Person, oder einmalige/flüchtige Ereignisse "
+        "und Beschwerden.\n"
+        f"Falls ja, formuliere den Fakt als kurzen, neutralen Satz, der mit '{user_name}' beginnt.\n"
+        'Antworte NUR mit kompaktem JSON, ohne weiteren Text: {"has_fact": true, "fact": "..."} '
+        'oder {"has_fact": false, "fact": null}. Im Zweifel: has_fact=false.'
+    )
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user_text},
+    ]
+
+
+def _parse_llm_fact_response(raw: str) -> str | None:
+    cleaned = str(raw or "").strip()
+    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s*```$", "", cleaned).strip()
+
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Auto-Memory LLM-Antwort ist kein valides JSON: {exc}") from exc
+
+    if not isinstance(data, dict) or "has_fact" not in data:
+        raise ValueError("Auto-Memory LLM-Antwort hat nicht die erwartete Form.")
+
+    if not data.get("has_fact"):
+        return None
+
+    fact = str(data.get("fact") or "").strip()
+    if not fact:
+        raise ValueError("Auto-Memory LLM-Antwort meldet has_fact=true ohne fact-Text.")
+
+    return fact
+
+
+def _passes_sensitive_content_filter(fact: str) -> bool:
+    normalized = normalize_text(fact)
+    return not any(marker in normalized for marker in SENSITIVE_FACT_MARKERS)
+
+
+def _looks_self_referential(fact: str, user_name: str) -> bool:
+    """
+    Best-Effort-Heuristik, KEIN verlaesslicher Schutz: prueft nur, ob der extrahierte
+    Fakt-Satz den Nutzernamen oder eine Ich-Form als mutmassliches Subjekt enthaelt. Laesst
+    sich durch Umformulierung leicht umgehen und erkennt keine echte grammatische Subjekt-
+    Objekt-Struktur - dient nur als zusaetzliche, unscharfe Schicht neben der Prompt-
+    Instruktion in _build_memory_extraction_messages(), nicht als Ersatz dafuer.
+    """
+    normalized = normalize_text(fact)
+    name_normalized = normalize_text(user_name)
+    return bool(name_normalized) and (
+        normalized.startswith(name_normalized)
+        or f" {name_normalized} " in f" {normalized} "
+    )
+
+
+def _run_llm_memory_extraction(user_text: str, base_path: Path, user_name: str) -> None:
+    logger = PrivacyLogger(base_path / "logs")
+    try:
+        llm = LLMClient(CONFIG)
+        route = llm.plan([], user_text=user_text)
+        messages = _build_memory_extraction_messages(user_text, user_name)
+        raw = llm.ask(messages, max_output_tokens=80, user_text=user_text, route=route)
+        fact = _parse_llm_fact_response(raw)
+    except Exception as exc:
+        logger.log("auto_memory_llm", "extraction_failed", success=False, error=type(exc).__name__)
+        print(f"Auto-Memory LLM-Extraktion fehlgeschlagen: {type(exc).__name__}")
+        return
+
+    if not fact:
+        return
+
+    if not _passes_sensitive_content_filter(fact) or not _looks_self_referential(fact, user_name):
+        logger.log("auto_memory_llm", "filtered", success=True, reason="sensitive_or_third_party")
+        return
+
+    memory_system = JarvisMemorySystem(base_path)
+    category = classify_memory_category(fact)
+    result = memory_system.maybe_remember(fact, category=category, source="auto-llm")
+    if result in ("created", "updated"):
+        print(f"Memory (LLM): {result} unter {category}: {fact}")
 
 
 def auto_update_memory(memory: Memory, user_text: str, assistant_text: str = "") -> list[str]:
@@ -1078,6 +1247,12 @@ def auto_update_memory(memory: Memory, user_text: str, assistant_text: str = "")
 
     if notes:
         memory.trim_facts(AUTO_MEMORY_MAX_FACTS)
+    elif AUTO_MEMORY_LLM_EXTRACTION_ENABLED and looks_like_memory_candidate(user_text):
+        threading.Thread(
+            target=_run_llm_memory_extraction,
+            args=(user_text, memory.base_path, configured_user_name()),
+            daemon=True,
+        ).start()
 
     return notes
 
@@ -1957,9 +2132,49 @@ def handle_memory_command(memory: Memory, text: str) -> str | None:
         if fact_summary == "Keine wichtigen Langzeitnotizen.":
             return "Ich habe mir bisher noch keine Langzeit-Erinnerungen gespeichert."
 
-        facts = memory.all_facts()
-        fact_list = "\n".join(f"- {item['content']}" for item in facts[-10:])
-        return f"Das habe ich mir gemerkt:\n{fact_list}"
+        facts = memory.all_facts()[-10:]
+        settings = memory.get("settings") or {}
+        settings["pending_memory_list"] = [item.get("content", "") for item in facts]
+        memory.set("settings", settings)
+        fact_list = "\n".join(f"{index + 1}. {item['content']}" for index, item in enumerate(facts))
+        return (
+            f"Das habe ich mir gemerkt:\n{fact_list}\n"
+            "Sag z. B. 'vergiss Nummer 3', wenn ich mir davon etwas nicht mehr merken soll."
+        )
+
+    forget_numbered_match = re.match(
+        r"^vergiss\s+(?:die|den|nummer|fakt|den\s+punkt)?\s*"
+        r"(\d+|erste|zweite|dritte|vierte|f(?:ü|ue)nfte|sechste|siebte|achte|neunte|zehnte)n?\.?$",
+        lowered,
+        flags=re.IGNORECASE,
+    )
+    if forget_numbered_match:
+        ordinal_words = {
+            "erste": 1,
+            "zweite": 2,
+            "dritte": 3,
+            "vierte": 4,
+            "fünfte": 5,
+            "fuenfte": 5,
+            "sechste": 6,
+            "siebte": 7,
+            "achte": 8,
+            "neunte": 9,
+            "zehnte": 10,
+        }
+        raw_index = forget_numbered_match.group(1)
+        index = int(raw_index) if raw_index.isdigit() else ordinal_words.get(raw_index)
+
+        settings = memory.get("settings") or {}
+        pending_list = settings.get("pending_memory_list") or []
+        if not index or index < 1 or index > len(pending_list):
+            return "Dazu habe ich gerade keine passende Nummer aus der letzten Liste."
+
+        content = pending_list[index - 1]
+        removed = memory.forget_exact(content)
+        if removed:
+            return f"Erledigt, ich habe mir das nicht mehr gemerkt: {content}"
+        return "Das konnte ich nicht mehr finden - vielleicht war es schon weg."
 
     remember_patterns = [
         r"^(?:merk dir|merke dir|erinnere dich daran),?\s*(?:dass\s+)?(.+)$",
