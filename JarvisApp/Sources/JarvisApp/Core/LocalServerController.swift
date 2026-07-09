@@ -77,8 +77,8 @@ final class LocalServerController: ObservableObject {
         }
     }
 
-    func stop() {
-        stopSpeaking()
+    func stop() async {
+        await stopSpeaking()
         if let process = serverProcess, process.isRunning {
             process.terminate()
         }
@@ -113,7 +113,7 @@ final class LocalServerController: ObservableObject {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        stopSpeaking()
+        await stopSpeaking()
 
         let inputData = try JSONSerialization.data(withJSONObject: ["text": trimmed], options: [])
         let process = Process()
@@ -175,12 +175,28 @@ final class LocalServerController: ObservableObject {
         }
     }
 
-    func stopSpeaking() {
+    func stopSpeaking() async {
         guard let process = ttsProcess else { return }
+        ttsProcess = nil
         if process.isRunning {
             process.terminate()
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    await withCheckedContinuation { continuation in
+                        DispatchQueue.global(qos: .userInitiated).async {
+                            process.waitUntilExit()
+                            continuation.resume()
+                        }
+                    }
+                }
+                group.addTask {
+                    try? await Task.sleep(for: .seconds(1))
+                }
+                await group.next()
+                group.cancelAll()
+            }
         }
-        ttsProcess = nil
+        try? await Task.sleep(for: .milliseconds(250))
     }
 
     func warmVoicePipeline() {

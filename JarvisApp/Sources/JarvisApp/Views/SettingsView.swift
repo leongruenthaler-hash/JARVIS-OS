@@ -278,8 +278,10 @@ struct SettingsView: View {
                 .buttonStyle(.borderedProminent)
 
                 Button {
-                    appState.serverController.stop()
-                    Task { await appState.ensureServerConnected() }
+                    Task {
+                        await appState.serverController.stop()
+                        await appState.ensureServerConnected()
+                    }
                 } label: {
                     Label("Core neu starten", systemImage: "power")
                 }

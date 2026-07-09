@@ -4,7 +4,7 @@ import Foundation
 protocol TTSService {
     func speak(_ text: String) async throws
     func speak(_ text: String, onEvent: (@MainActor (BridgeRuntimeEvent) -> Void)?) async throws
-    func stop()
+    func stop() async
 }
 
 @MainActor
@@ -23,7 +23,7 @@ final class EdgeTTSService: TTSService {
         try await controller.speakText(text, onEvent: onEvent)
     }
 
-    func stop() {
-        controller.stopSpeaking()
+    func stop() async {
+        await controller.stopSpeaking()
     }
 }
