@@ -91,8 +91,30 @@ class Memory:
 
     def remember(self, category: str, key: str, value: str):
         long_memory = self.data["long_memory"]
-        long_memory.setdefault(category, {})
-        long_memory[category][key] = value
+        bucket = long_memory.setdefault(category, {})
+
+        if isinstance(bucket, list):
+            now = datetime.now().isoformat(timespec="seconds")
+            prefix = f"{key}: "
+            content = f"{prefix}{value}"
+            for item in bucket:
+                if isinstance(item, dict) and str(item.get("content", "")).startswith(prefix):
+                    item["content"] = content
+                    item["updated_at"] = now
+                    break
+            else:
+                bucket.append(
+                    {
+                        "content": content,
+                        "created_at": now,
+                        "updated_at": now,
+                        "category": category,
+                        "source": "manual",
+                    }
+                )
+        else:
+            bucket[key] = value
+
         self.save("long_memory")
 
     def remember_fact(self, content: str, category: str = "facts", source: str = "manual"):
