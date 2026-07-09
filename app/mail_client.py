@@ -288,6 +288,106 @@ def list_inbox_messages(
     return _parse_messages(raw_output)
 
 
+def fetch_message_previews(
+    message_ids: list[str],
+    preview_chars: int = 700,
+    account_name: str | None = None,
+    mailbox_name: str | None = None,
+    max_scan: int = 80,
+) -> dict[str, str]:
+    cleaned_ids = [
+        _escape_applescript_text(message_id)
+        for message_id in message_ids
+        if str(message_id).strip()
+    ]
+    if not cleaned_ids:
+        return {}
+
+    configured_account = _escape_applescript_text(account_name or "")
+    configured_mailbox = _escape_applescript_text(mailbox_name or "")
+    apple_ids = "{" + ", ".join(f'"{message_id}"' for message_id in cleaned_ids) + "}"
+    script = f"""
+    set fieldSeparator to ASCII character 31
+    set recordSeparator to ASCII character 30
+    set targetIds to {apple_ids}
+    set maxScan to {int(max_scan)}
+    set previewChars to {int(preview_chars)}
+    set configuredAccount to "{configured_account}"
+    set configuredMailbox to "{configured_mailbox}"
+    set outputText to ""
+
+    tell application "Mail"
+        set targetMailbox to missing value
+
+        if configuredAccount is not "" and configuredMailbox is not "" then
+            repeat with accountRef in every account
+                set accountText to name of accountRef as string
+                if accountText is configuredAccount then
+                    repeat with mailboxRef in every mailbox of accountRef
+                        set mailboxText to name of mailboxRef as string
+                        if mailboxText is configuredMailbox then
+                            set targetMailbox to mailboxRef
+                            exit repeat
+                        end if
+                    end repeat
+                end if
+            end repeat
+        end if
+
+        if targetMailbox is missing value then
+            try
+                set targetMailbox to inbox
+            end try
+        end if
+
+        if targetMailbox is missing value then return ""
+
+        set mailboxMessages to messages of targetMailbox
+        set messageCount to count of mailboxMessages
+        if messageCount is 0 then return ""
+
+        if messageCount < maxScan then
+            set limitCount to messageCount
+        else
+            set limitCount to maxScan
+        end if
+
+        repeat with messageIndex from 1 to limitCount
+            set messageRef to item messageIndex of mailboxMessages
+            set messageId to ""
+            try
+                set messageId to id of messageRef as string
+            end try
+
+            if targetIds contains messageId then
+                set bodyText to ""
+                try
+                    set bodyText to content of messageRef as string
+                    if (length of bodyText) is greater than previewChars then
+                        set bodyText to text 1 thru previewChars of bodyText
+                    end if
+                end try
+                set outputText to outputText & messageId & fieldSeparator & bodyText & recordSeparator
+            end if
+        end repeat
+    end tell
+
+    return outputText
+    """
+
+    raw_output = _run_applescript(script)
+    previews: dict[str, str] = {}
+    for record in raw_output.split(RECORD_SEPARATOR):
+        record = record.strip(" \n\r\t")
+        if not record:
+            continue
+        fields = record.split(FIELD_SEPARATOR)
+        if len(fields) < 2:
+            continue
+        previews[fields[0].strip()] = fields[1].strip()
+    return previews
+
+
 def list_unread_messages(max_messages: int = 10, preview_chars: int = 700) -> list[MailMessage]:
     return list_inbox_messages(max_messages=max_messages, preview_chars=preview_chars)
 
@@ -308,10 +408,9 @@ def export_categorized_mail_documents(
 
     messages = list_inbox_messages(
         max_messages=max_messages,
-        preview_chars=1400,
         account_name=account_name,
         mailbox_name=mailbox_name,
-        include_preview=True,
+        include_preview=False,
     )
 
     results: list[MailDocumentExportResult] = []
@@ -339,6 +438,17 @@ def export_categorized_mail_documents(
                 )
 
             if not saved_files:
+                note_ids = [message.message_id for message in matched_messages if message.message_id]
+                if note_ids:
+                    previews = fetch_message_previews(
+                        note_ids,
+                        preview_chars=1400,
+                        account_name=account_name,
+                        mailbox_name=mailbox_name,
+                        max_scan=max_messages,
+                    )
+                    for message in matched_messages:
+                        message.preview = previews.get(message.message_id, "")
                 note_files = _write_message_notes(folder, category, matched_messages)
 
         results.append(

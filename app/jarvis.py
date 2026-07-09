@@ -55,6 +55,7 @@ from llm_client import LLMClient
 from mail_client import (
     MailAccessError,
     export_categorized_mail_documents,
+    fetch_message_previews,
     list_inbox_messages,
     list_mailboxes,
     move_matching_messages_to_trash,
@@ -1799,15 +1800,38 @@ def _mail_preview_snippet(preview: str, limit: int = 140) -> str:
     return snippet or "Kein Auszug lesbar."
 
 
-def build_mail_summary_digest(messages: list[Any]) -> str:
+def build_mail_summary_digest(
+    messages: list[Any],
+    account_name: str | None = None,
+    mailbox_name: str | None = None,
+) -> str:
     groups: dict[str, list[Any]] = {}
     for message in messages:
         topic = _mail_topic_from_text(f"{message.subject} {message.preview}")
         groups.setdefault(topic, []).append(message)
 
+    samples = {topic: grouped_messages[:3] for topic, grouped_messages in groups.items()}
+    sample_ids = [
+        message.message_id
+        for sample in samples.values()
+        for message in sample
+        if message.message_id
+    ]
+    if sample_ids:
+        previews = fetch_message_previews(
+            sample_ids,
+            preview_chars=140,
+            account_name=account_name,
+            mailbox_name=mailbox_name,
+            max_scan=len(messages),
+        )
+        for sample in samples.values():
+            for message in sample:
+                message.preview = previews.get(message.message_id, "")
+
     digest_lines: list[str] = []
     for topic, grouped_messages in groups.items():
-        sample = grouped_messages[:3]
+        sample = samples[topic]
         digest_lines.append(f"Thema: {topic} | Anzahl: {len(grouped_messages)}")
         for message in sample:
             digest_lines.append(
@@ -3011,8 +3035,7 @@ def handle_mail_command(
             max_messages=MAIL_MAX_MESSAGES,
             account_name=target_account,
             mailbox_name=target_mailbox,
-            preview_chars=int(CONFIG.get("auto_calendar_mail_preview_chars", 900)),
-            include_preview=True,
+            include_preview=False,
         )
     except MailAccessError as exc:
         return str(exc)
@@ -3045,7 +3068,7 @@ def handle_mail_command(
     }
     memory.set("settings", settings)
 
-    mail_briefing = build_mail_summary_digest(messages)
+    mail_briefing = build_mail_summary_digest(messages, account_name=target_account, mailbox_name=target_mailbox)
 
     prompt = [
         {
