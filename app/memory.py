@@ -210,6 +210,29 @@ class Memory:
 
         return removed
 
+    def forget_exact(self, content: str) -> bool:
+        target = normalize_for_match(content)
+        if not target:
+            return False
+
+        long_memory = self.data["long_memory"]
+        for values in long_memory.values():
+            if isinstance(values, list):
+                for index, item in enumerate(values):
+                    item_content = str(item.get("content", "")) if isinstance(item, dict) else str(item)
+                    if normalize_for_match(item_content) == target:
+                        del values[index]
+                        self.save("long_memory")
+                        return True
+            elif isinstance(values, dict):
+                for key, value in list(values.items()):
+                    if normalize_for_match(f"{key}: {value}") == target:
+                        del values[key]
+                        self.save("long_memory")
+                        return True
+
+        return False
+
     def trim_facts(self, max_facts: int = 120):
         if max_facts <= 0:
             return

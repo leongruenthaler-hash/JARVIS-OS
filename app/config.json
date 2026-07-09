@@ -62,6 +62,7 @@
     "recent_context_messages": 6,
     "auto_memory_enabled": true,
     "auto_memory_max_facts": 120,
+    "auto_memory_llm_extraction_enabled": false,
     "memory_summary_max_facts": 10,
     "performance_log": true,
     "fast_voice_mode": true,
