@@ -141,9 +141,28 @@ class Memory:
             return "ignored"
 
         long_memory = self.data["long_memory"]
-        long_memory.setdefault(category, [])
-        if not isinstance(long_memory[category], list):
-            long_memory[category] = []
+        bucket = long_memory.setdefault(category, [])
+
+        if isinstance(bucket, dict):
+            now = datetime.now().isoformat(timespec="seconds")
+            bucket = [
+                {
+                    "content": f"{key}: {value}",
+                    "created_at": now,
+                    "updated_at": now,
+                    "category": category,
+                    "source": "manual",
+                }
+                for key, value in bucket.items()
+            ]
+            long_memory[category] = bucket
+            print(
+                f"Memory: Kategorie '{category}' von Dict- auf Listen-Schema konvertiert "
+                f"({len(bucket)} Eintraege uebernommen)."
+            )
+        elif not isinstance(bucket, list):
+            bucket = []
+            long_memory[category] = bucket
 
         normalized_content = normalize_for_match(content)
         now = datetime.now().isoformat(timespec="seconds")
