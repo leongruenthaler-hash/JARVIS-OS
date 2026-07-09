@@ -1222,6 +1222,7 @@ class JarvisLocalServer:
                     if handler is not None:
                         answer = handler(question, memory=memory)
                         if answer is not None:
+                            self.pending_mail_followup = False
                             answer = self._finalize_answer(core, question, answer)
                             return str(answer)
 
@@ -1240,6 +1241,7 @@ class JarvisLocalServer:
                 if photo_handler is not None:
                     answer = photo_handler(question, self.photo_worker, memory=memory)
                     if answer is not None:
+                        self.pending_mail_followup = False
                         answer = self._finalize_answer(core, question, answer)
                         return str(answer)
 
@@ -1250,6 +1252,7 @@ class JarvisLocalServer:
                 if mail_document_export_handler is not None:
                     answer = mail_document_export_handler(question, memory=memory)
                     if answer is not None:
+                        self.pending_mail_followup = False
                         answer = self._finalize_answer(core, question, answer)
                         return str(answer)
 
@@ -1273,7 +1276,12 @@ class JarvisLocalServer:
                 if mail_handler is not None:
                     mail_settings_before = memory.get("settings") or {}
                     had_pending_mail_delete = isinstance(mail_settings_before.get("pending_mail_delete"), dict)
-                    answer = mail_handler(self.llm, question, force=self.pending_mail_followup, memory=memory)
+                    mail_followup_intent = (
+                        hasattr(core, "is_mail_time_followup")
+                        and hasattr(core, "is_mail_status_followup")
+                        and (core.is_mail_time_followup(question) or core.is_mail_status_followup(question))
+                    )
+                    answer = mail_handler(self.llm, question, force=self.pending_mail_followup and mail_followup_intent, memory=memory)
                     if answer is not None:
                         self.pending_mail_followup = False if had_pending_mail_delete else True
                         answer = self._finalize_answer(core, question, answer)
@@ -1286,6 +1294,7 @@ class JarvisLocalServer:
                 if contact_handler is not None:
                     answer = contact_handler(question, memory=memory)
                     if answer is not None:
+                        self.pending_mail_followup = False
                         answer = self._finalize_answer(core, question, answer)
                         return str(answer)
 
@@ -1296,6 +1305,7 @@ class JarvisLocalServer:
                 if music_handler is not None:
                     answer = music_handler(question)
                     if answer is not None:
+                        self.pending_mail_followup = False
                         answer = self._finalize_answer(core, question, answer)
                         return str(answer)
 
