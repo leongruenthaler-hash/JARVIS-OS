@@ -181,6 +181,9 @@ final class AppState: ObservableObject {
             return health.ok
         } catch {
             status = .offline
+            modelStatus = ModelStatus()
+            privacySummary = "Datenschutzstatus wird geladen ..."
+            permissions = [:]
             lastError = "Nicht verbunden. Ich verbinde neu."
             if startIfOffline {
                 await ensureServerConnected()
