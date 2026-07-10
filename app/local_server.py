@@ -1344,7 +1344,7 @@ class JarvisLocalServer:
             )
             self._pipeline_log("finalPrompt/messages", messages=messages)
             print("VoicePerformanceEvent: llmResponseStarted", file=sys.stderr)
-            self._last_answer_source = self.models.provider
+            self._last_answer_source = route.provider
             self._last_answer_model = route.model
 
             first_chunk_sent = False
@@ -1389,69 +1389,6 @@ class JarvisLocalServer:
                 return f"Ich erreiche das lokale Modell gerade nicht sauber. {detail}"
             return f"Ich konnte die Anfrage gerade nicht sauber ausführen. Technisch war es: {_safe_error(exc)}."
 
-    def _stream_answer_streaming(self, message: str, history: list[dict[str, str]] | None = None, on_chunk=None) -> str:
-        core = self._core_module()
-        question = self._clean_question(message)
-        route = self.llm.plan(history or [], user_text=question)
-        if route.provider != "ollama":
-            response = self.chat(message, history=history)
-            return str(response.get("answer", ""))
-
-        web_context = None
-        if bool(self.config.get("web_search_enabled", True)) and hasattr(core, "should_use_web_search") and core.should_use_web_search(question):
-            permission = core.ensure_privacy_domain_permission(self.memory, "internet", "Jarvis würde eine Websuche im Internet ausführen.")
-            if permission is not None:
-                return str(permission)
-            try:
-                search_query = core.build_search_query(question)
-                results = core.search_web(search_query, max_results=int(self.config.get("web_search_max_results", 3)))
-                if results:
-                    web_context = core.format_search_results(results)
-            except Exception:
-                web_context = None
-
-        if hasattr(core, "build_input"):
-            try:
-                messages = core.build_input(self.memory, question, web_context, transient_history=history, compact=route.compact_prompt)
-            except TypeError:
-                messages = core.build_input(self.memory, question, web_context)
-        else:
-            messages = [
-                {"role": "system", "content": JARVIS_SYSTEM_PROMPT},
-                *(history or []),
-                {"role": "user", "content": question},
-            ]
-        messages = normalize_jarvis_messages(
-            messages,
-            recent_limit=min(int(self.config.get("recent_context_messages", 6)) + 1, 7),
-        )
-        self._pipeline_log("finalPrompt/messages", messages=messages)
-        print("VoicePerformanceEvent: llmResponseStarted", file=sys.stderr)
-        self._last_answer_source = self.models.provider
-        self._last_answer_model = route.model
-
-        chunks: list[str] = []
-
-        def _collect_chunk(chunk: str) -> None:
-            if chunk:
-                chunks.append(chunk)
-                if on_chunk is not None:
-                    on_chunk(chunk)
-
-        try:
-            answer = self.llm.ask_stream(
-                messages,
-                max_output_tokens=route.max_output_tokens,
-                user_text=question,
-                route=route,
-                on_chunk=_collect_chunk,
-            )
-        except Exception:
-            answer = self.llm.ask(messages, max_output_tokens=route.max_output_tokens, user_text=question, route=route)
-        print("VoicePerformanceEvent: llmResponseFinished", file=sys.stderr)
-        if chunks:
-            return "".join(chunks)
-        return str(answer)
 
     def _finalize_answer(self, core, question: str, answer: Any) -> str:
         text = str(answer or "").strip()
@@ -1746,9 +1683,24 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
-        streamed_answer = ""
+        chunk_sent = False
+
+        def _emit(chunk: str) -> None:
+            nonlocal chunk_sent
+            if chunk:
+                chunk_sent = True
+                self._write_stream_chunk(chunk)
+
         try:
-            streamed_answer = str(SERVER._stream_answer_streaming(message, history=history, on_chunk=self._write_stream_chunk))
+            answer = str(SERVER._answer_with_core(
+                message,
+                transient_history=SERVER._clean_history(history),
+                on_llm_chunk=_emit,
+            ))
+            if not chunk_sent:
+                for index, word in enumerate(answer.split(" ")):
+                    chunk = word if index == 0 else " " + word
+                    self._write_stream_chunk(chunk)
         except Exception:
             streamed_answer = str(SERVER.chat(message, history=history).get("answer", ""))
             for index, word in enumerate(streamed_answer.split(" ")):
