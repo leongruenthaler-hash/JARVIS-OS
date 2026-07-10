@@ -104,7 +104,7 @@ struct JarvisAPIClient {
     }
 
     func dailyBriefing() async throws -> DailyBriefingPayload {
-        try await get("/api/daily-briefing")
+        try await post("/api/daily-briefing", body: EmptyBody())
     }
 
     func startFileIndexScan() async throws -> ScanProgress {
@@ -177,9 +177,8 @@ struct JarvisAPIClient {
     }
 
     func permissions() async throws -> [String: PermissionInfo] {
-        struct Response: Decodable { let permissions: [String: PermissionPayload] }
-        let response: Response = try await get("/api/permissions")
-        return Self.decodePermissions(response.permissions)
+        let payloads: [String: PermissionPayload] = try await get("/api/permissions")
+        return Self.decodePermissions(payloads)
     }
 
     func setPermission(_ permission: String, allowed: Bool) async throws -> [String: PermissionInfo] {
