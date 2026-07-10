@@ -95,6 +95,21 @@ struct SettingsView: View {
                 .onChange(of: appState.fastVoiceMode) { _, _ in
                     Task { await appState.saveFastVoiceModeToCore() }
                 }
+
+                Divider().opacity(0.4)
+
+                Toggle(isOn: $appState.alwaysListenEnabled) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Immer-Zuhör-Modus (\"Hey Jarvis\")")
+                            .font(.headline)
+                        Text("Jarvis lauscht dauerhaft auf dein Aktivierungswort - komplett lokal, ohne Cloud-Dienst. Push-to-Talk bleibt parallel nutzbar.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .onChange(of: appState.alwaysListenEnabled) { _, _ in
+                    Task { await appState.applyAlwaysListenChange() }
+                }
             }
             .padding(14)
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))

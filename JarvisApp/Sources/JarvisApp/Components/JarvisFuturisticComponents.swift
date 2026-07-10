@@ -110,9 +110,9 @@ struct JarvisGlowOrb: View {
     private var animationDuration: Double {
         switch state {
         case .idle: return 2.4
-        case .listening, .preparingMicrophone: return 1.0
+        case .listening, .preparingMicrophone, .alwaysListenStandby: return 1.0
         case .userSpeaking, .jarvisSpeaking: return 0.55
-        case .thinking, .liveTranscribing, .transcribing: return 1.4
+        case .thinking, .liveTranscribing, .transcribing, .wakeWordChecking: return 1.4
         case .error: return 0.7
         }
     }
@@ -120,9 +120,9 @@ struct JarvisGlowOrb: View {
     private var glowScale: CGFloat {
         switch state {
         case .idle: return 1.00
-        case .listening, .preparingMicrophone: return 1.06
+        case .listening, .preparingMicrophone, .alwaysListenStandby: return 1.06
         case .userSpeaking, .jarvisSpeaking: return 1.13
-        case .thinking, .liveTranscribing, .transcribing: return 1.08
+        case .thinking, .liveTranscribing, .transcribing, .wakeWordChecking: return 1.08
         case .error: return 1.04
         }
     }
@@ -130,9 +130,9 @@ struct JarvisGlowOrb: View {
     private var ringScale: CGFloat {
         switch state {
         case .idle: return 0.98
-        case .listening, .preparingMicrophone: return 1.04
+        case .listening, .preparingMicrophone, .alwaysListenStandby: return 1.04
         case .userSpeaking, .jarvisSpeaking: return 1.10
-        case .thinking, .liveTranscribing, .transcribing: return 1.08
+        case .thinking, .liveTranscribing, .transcribing, .wakeWordChecking: return 1.08
         case .error: return 1.02
         }
     }

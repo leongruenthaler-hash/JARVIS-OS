@@ -20,6 +20,7 @@
 		90890DC4E684B2478412645D /* JarvisVoiceOrb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DF07EF06A8FD772A6543B0F /* JarvisVoiceOrb.swift */; };
 		8F9B0F06A4C10AB2852852AC /* TTSService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60FEA70A8BF10CD876B81319 /* TTSService.swift */; };
 		61373F209BCE87C5BF20A705 /* JarvisVoiceState.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE444AB69D8A6A00DEE3C4E2 /* JarvisVoiceState.swift */; };
+		146B709D49504797B41164F8 /* WakeWordListener.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DA1257E9ED4C1297042F47 /* WakeWordListener.swift */; };
 		5FF6C3B78EF98E864A767111 /* MailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A2C1DABFBACBB2472B6D363 /* MailView.swift */; };
 		4492D0E9C2B33074CA9E4E61 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE436B2B3FAF9DED68E8828A /* SettingsView.swift */; };
 		44B318F7654DA7A070E13E94 /* ModelsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD87D845E1639C0D7F9C10A3 /* ModelsView.swift */; };
@@ -53,6 +54,7 @@
 		8DF07EF06A8FD772A6543B0F /* JarvisVoiceOrb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/JarvisApp/Components/JarvisVoiceOrb.swift; sourceTree = SOURCE_ROOT; };
 		60FEA70A8BF10CD876B81319 /* TTSService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/JarvisApp/Core/TTSService.swift; sourceTree = SOURCE_ROOT; };
 		AE444AB69D8A6A00DEE3C4E2 /* JarvisVoiceState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/JarvisApp/Core/JarvisVoiceState.swift; sourceTree = SOURCE_ROOT; };
+		C0DA1257E9ED4C1297042F47 /* WakeWordListener.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/JarvisApp/Core/WakeWordListener.swift; sourceTree = SOURCE_ROOT; };
 		6A2C1DABFBACBB2472B6D363 /* MailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MailView.swift; sourceTree = "<group>"; };
 		0F69298EA3305AA688AC9E91 /* MainShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainShellView.swift; sourceTree = "<group>"; };
 		2805D3602E78FDB8A2D88F3B /* JarvisModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisModels.swift; sourceTree = "<group>"; };
@@ -165,6 +167,7 @@
 					1A2B3C4D5E6F708192A3B4C4 /* ScanProgress.swift */,
 					60FEA70A8BF10CD876B81319 /* TTSService.swift */,
 				AE444AB69D8A6A00DEE3C4E2 /* JarvisVoiceState.swift */,
+				C0DA1257E9ED4C1297042F47 /* WakeWordListener.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -257,6 +260,7 @@
 				90890DC4E684B2478412645D /* JarvisVoiceOrb.swift in Sources */,
 				8F9B0F06A4C10AB2852852AC /* TTSService.swift in Sources */,
 				61373F209BCE87C5BF20A705 /* JarvisVoiceState.swift in Sources */,
+				146B709D49504797B41164F8 /* WakeWordListener.swift in Sources */,
 				D68C167C2C437B05A54BC24C /* ChatView.swift in Sources */,
 				5A70B029084FA57F9FD921CB /* FeaturePlaceholderView.swift in Sources */,
 				BEEDA8D544E9F2D2E159BD20 /* MainShellView.swift in Sources */,
