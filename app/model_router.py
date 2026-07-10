@@ -56,7 +56,7 @@ class ModelRouter:
             return ModelRoute(
                 provider="ollama",
                 model=selected,
-                max_output_tokens=int(self.config.get("ollama_num_predict", 56)),
+                max_output_tokens=int(self.config.get("phi4_mini_num_predict", 80)),
                 num_ctx=int(self.config.get("ollama_num_ctx", 1024)),
                 temperature=0.2,
                 recent_context_limit=3,
