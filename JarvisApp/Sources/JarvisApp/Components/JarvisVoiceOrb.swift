@@ -84,10 +84,10 @@ struct JarvisVoiceOrb: View {
         switch state {
         case .idle: return 2.2
         case .preparingMicrophone: return 1.2
-        case .listening: return 1.05
+        case .listening, .alwaysListenStandby: return 1.05
         case .userSpeaking: return 0.62
         case .liveTranscribing: return 0.72
-        case .transcribing: return 0.82
+        case .transcribing, .wakeWordChecking: return 0.82
         case .thinking: return 1.45
         case .jarvisSpeaking: return 0.50
         case .error: return 0.78
@@ -98,10 +98,10 @@ struct JarvisVoiceOrb: View {
         switch state {
         case .idle: return 1.025
         case .preparingMicrophone: return 1.05
-        case .listening: return 1.08
+        case .listening, .alwaysListenStandby: return 1.08
         case .userSpeaking: return 1.12
         case .liveTranscribing: return 1.10
-        case .transcribing: return 1.09
+        case .transcribing, .wakeWordChecking: return 1.09
         case .thinking: return 1.06
         case .jarvisSpeaking: return 1.16
         case .error: return 1.04
@@ -113,10 +113,10 @@ struct JarvisVoiceOrb: View {
         switch state {
         case .idle: return 0.14
         case .preparingMicrophone: return 0.20
-        case .listening: return 0.28
+        case .listening, .alwaysListenStandby: return 0.28
         case .userSpeaking: return 0.36
         case .liveTranscribing: return 0.30
-        case .transcribing: return 0.22
+        case .transcribing, .wakeWordChecking: return 0.22
         case .thinking: return 0.30
         case .jarvisSpeaking: return 0.36
         case .error: return 0.18
@@ -126,10 +126,10 @@ struct JarvisVoiceOrb: View {
         switch state {
         case .idle: return phase ? 1.00 : 0.98
         case .preparingMicrophone: return phase ? 1.02 : 0.99
-        case .listening: return phase ? 1.04 : 1.00
+        case .listening, .alwaysListenStandby: return phase ? 1.04 : 1.00
         case .userSpeaking: return phase ? 1.07 : 1.01
         case .liveTranscribing: return phase ? 1.05 : 1.00
-        case .transcribing: return phase ? 1.03 : 0.99
+        case .transcribing, .wakeWordChecking: return phase ? 1.03 : 0.99
         case .thinking: return phase ? 1.05 : 0.99
         case .jarvisSpeaking: return phase ? 1.08 : 1.01
         case .error: return phase ? 1.01 : 0.99
@@ -154,10 +154,10 @@ struct JarvisVoiceOrb: View {
         switch state {
         case .idle: return .cyan
         case .preparingMicrophone: return .teal
-        case .listening: return .blue
+        case .listening, .alwaysListenStandby: return .blue
         case .userSpeaking: return .green
         case .liveTranscribing: return .mint
-        case .transcribing: return .indigo
+        case .transcribing, .wakeWordChecking: return .indigo
         case .thinking: return .purple
         case .jarvisSpeaking: return .orange
         case .error: return .red
@@ -167,10 +167,10 @@ struct JarvisVoiceOrb: View {
         switch state {
         case .idle: return phase ? 1.02 : 0.98
         case .preparingMicrophone: return phase ? 1.05 : 0.97
-        case .listening: return phase ? 1.08 : 0.99
+        case .listening, .alwaysListenStandby: return phase ? 1.08 : 0.99
         case .userSpeaking: return phase ? 1.12 : 1.00
         case .liveTranscribing: return phase ? 1.10 : 0.99
-        case .transcribing: return phase ? 1.08 : 0.98
+        case .transcribing, .wakeWordChecking: return phase ? 1.08 : 0.98
         case .thinking: return phase ? 1.08 : 0.96
         case .jarvisSpeaking: return phase ? 1.14 : 1.00
         case .error: return phase ? 1.04 : 0.97
@@ -180,10 +180,10 @@ struct JarvisVoiceOrb: View {
         switch state {
         case .idle: return phase ? 0.98 : 0.92
         case .preparingMicrophone: return phase ? 1.00 : 0.94
-        case .listening: return phase ? 1.03 : 0.95
+        case .listening, .alwaysListenStandby: return phase ? 1.03 : 0.95
         case .userSpeaking: return phase ? 1.06 : 0.97
         case .liveTranscribing: return phase ? 1.05 : 0.96
-        case .transcribing: return phase ? 1.02 : 0.94
+        case .transcribing, .wakeWordChecking: return phase ? 1.02 : 0.94
         case .thinking: return phase ? 1.08 : 0.94
         case .jarvisSpeaking: return phase ? 1.10 : 0.98
         case .error: return phase ? 0.99 : 0.93
@@ -193,10 +193,10 @@ struct JarvisVoiceOrb: View {
         switch state {
         case .idle: return phase ? 0.99 : 0.95
         case .preparingMicrophone: return phase ? 1.01 : 0.96
-        case .listening: return phase ? 1.03 : 0.97
+        case .listening, .alwaysListenStandby: return phase ? 1.03 : 0.97
         case .userSpeaking: return phase ? 1.06 : 0.99
         case .liveTranscribing: return phase ? 1.04 : 0.98
-        case .transcribing: return phase ? 1.03 : 0.97
+        case .transcribing, .wakeWordChecking: return phase ? 1.03 : 0.97
         case .thinking: return phase ? 1.10 : 0.99
         case .jarvisSpeaking: return phase ? 1.08 : 1.00
         case .error: return phase ? 1.00 : 0.95
@@ -206,10 +206,10 @@ struct JarvisVoiceOrb: View {
         switch state {
         case .idle: return phase ? 0.10 : 0.05
         case .preparingMicrophone: return phase ? 0.16 : 0.07
-        case .listening: return phase ? 0.22 : 0.10
+        case .listening, .alwaysListenStandby: return phase ? 0.22 : 0.10
         case .userSpeaking: return phase ? 0.30 : 0.14
         case .liveTranscribing: return phase ? 0.24 : 0.12
-        case .transcribing: return phase ? 0.18 : 0.09
+        case .transcribing, .wakeWordChecking: return phase ? 0.18 : 0.09
         case .thinking: return phase ? 0.22 : 0.12
         case .jarvisSpeaking: return phase ? 0.32 : 0.16
         case .error: return phase ? 0.20 : 0.09
@@ -219,10 +219,10 @@ struct JarvisVoiceOrb: View {
         switch state {
         case .idle: return phase ? 0.14 : 0.08
         case .preparingMicrophone: return phase ? 0.22 : 0.10
-        case .listening: return phase ? 0.28 : 0.14
+        case .listening, .alwaysListenStandby: return phase ? 0.28 : 0.14
         case .userSpeaking: return phase ? 0.34 : 0.18
         case .liveTranscribing: return phase ? 0.30 : 0.15
-        case .transcribing: return phase ? 0.24 : 0.11
+        case .transcribing, .wakeWordChecking: return phase ? 0.24 : 0.11
         case .thinking: return phase ? 0.30 : 0.14
         case .jarvisSpeaking: return phase ? 0.36 : 0.20
         case .error: return phase ? 0.22 : 0.11
@@ -232,10 +232,10 @@ struct JarvisVoiceOrb: View {
         switch state {
         case .idle: return phase ? 0.12 : 0.08
         case .preparingMicrophone: return phase ? 0.20 : 0.10
-        case .listening: return phase ? 0.30 : 0.14
+        case .listening, .alwaysListenStandby: return phase ? 0.30 : 0.14
         case .userSpeaking: return phase ? 0.38 : 0.18
         case .liveTranscribing: return phase ? 0.34 : 0.16
-        case .transcribing: return phase ? 0.28 : 0.14
+        case .transcribing, .wakeWordChecking: return phase ? 0.28 : 0.14
         case .thinking: return phase ? 0.36 : 0.18
         case .jarvisSpeaking: return phase ? 0.42 : 0.22
         case .error: return phase ? 0.22 : 0.10
@@ -245,10 +245,10 @@ struct JarvisVoiceOrb: View {
         switch state {
         case .idle: return phase ? 1.00 : 0.99
         case .preparingMicrophone: return phase ? 1.02 : 1.00
-        case .listening: return phase ? 1.04 : 1.00
+        case .listening, .alwaysListenStandby: return phase ? 1.04 : 1.00
         case .userSpeaking: return phase ? 1.06 : 1.01
         case .liveTranscribing: return phase ? 1.05 : 1.00
-        case .transcribing: return phase ? 1.03 : 0.99
+        case .transcribing, .wakeWordChecking: return phase ? 1.03 : 0.99
         case .thinking: return phase ? 1.05 : 0.99
         case .jarvisSpeaking: return phase ? 1.08 : 1.02
         case .error: return phase ? 1.01 : 0.99
@@ -262,11 +262,11 @@ struct JarvisVoiceOrb: View {
         switch state {
         case .idle:
             return .easeInOut(duration: animationDuration).repeatForever(autoreverses: true)
-        case .preparingMicrophone, .listening:
+        case .preparingMicrophone, .listening, .alwaysListenStandby:
             return .easeInOut(duration: animationDuration).repeatForever(autoreverses: true)
         case .userSpeaking:
             return .spring(response: 0.36, dampingFraction: 0.72, blendDuration: 0.1).repeatForever(autoreverses: true)
-        case .liveTranscribing, .transcribing:
+        case .liveTranscribing, .transcribing, .wakeWordChecking:
             return .easeInOut(duration: animationDuration).repeatForever(autoreverses: true)
         case .thinking:
             return .linear(duration: animationDuration).repeatForever(autoreverses: false)
@@ -325,10 +325,10 @@ struct JarvisVoiceOrb: View {
         let multiplier: CGFloat
         switch state {
         case .preparingMicrophone: multiplier = animate ? 0.7 + variance * 0.8 : 0.32
-        case .listening: multiplier = animate ? 1.0 + variance : 0.48
+        case .listening, .alwaysListenStandby: multiplier = animate ? 1.0 + variance : 0.48
         case .userSpeaking: multiplier = animate ? 2.0 + variance * 1.9 : 0.75
         case .liveTranscribing: multiplier = animate ? 1.65 + variance * 1.0 : 0.55
-        case .transcribing: multiplier = animate ? 1.4 + variance * 0.8 : 0.48
+        case .transcribing, .wakeWordChecking: multiplier = animate ? 1.4 + variance * 0.8 : 0.48
         case .thinking: multiplier = animate ? 1.0 + variance * 0.6 : 0.45
         case .jarvisSpeaking: multiplier = animate ? 2.4 + variance * 1.6 : 0.88
         case .error: multiplier = animate ? 0.9 + variance * 0.4 : 0.42
@@ -341,10 +341,10 @@ struct JarvisVoiceOrb: View {
         switch state {
         case .idle: return 0.0
         case .preparingMicrophone: return 0.42
-        case .listening: return 0.52
+        case .listening, .alwaysListenStandby: return 0.52
         case .userSpeaking: return 0.68
         case .liveTranscribing: return 0.58
-        case .transcribing: return 0.44
+        case .transcribing, .wakeWordChecking: return 0.44
         case .thinking: return 0.34
         case .jarvisSpeaking: return 0.74
         case .error: return 0.42

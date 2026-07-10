@@ -10,6 +10,8 @@ enum JarvisVoiceState: String, Equatable {
     case thinking
     case jarvisSpeaking
     case error
+    case alwaysListenStandby
+    case wakeWordChecking
 
     var title: String {
         switch self {
@@ -22,6 +24,8 @@ enum JarvisVoiceState: String, Equatable {
         case .thinking: return "Ich denke nach"
         case .jarvisSpeaking: return "Ich antworte"
         case .error: return "Aufmerksamkeit nötig"
+        case .alwaysListenStandby: return "Lauscht auf Jarvis"
+        case .wakeWordChecking: return "Prüfe, ob das Jarvis war"
         }
     }
 
@@ -36,6 +40,8 @@ enum JarvisVoiceState: String, Equatable {
         case .thinking: return "Ich verarbeite deine Anfrage lokal."
         case .jarvisSpeaking: return "Jarvis spricht über Edge TTS."
         case .error: return "Etwas hat nicht sauber funktioniert."
+        case .alwaysListenStandby: return "Ich achte nur auf Lautstärke, bis ich meinen Namen höre."
+        case .wakeWordChecking: return "Kurzer, lokaler Check, ob das eine Aktivierung war."
         }
     }
 
@@ -50,6 +56,8 @@ enum JarvisVoiceState: String, Equatable {
         case .thinking: return "brain.head.profile"
         case .jarvisSpeaking: return "speaker.wave.2.fill"
         case .error: return "exclamationmark.triangle.fill"
+        case .alwaysListenStandby: return "ear"
+        case .wakeWordChecking: return "waveform.badge.magnifyingglass"
         }
     }
 
@@ -64,6 +72,8 @@ enum JarvisVoiceState: String, Equatable {
         case .thinking: return .purple
         case .jarvisSpeaking: return .orange
         case .error: return .red
+        case .alwaysListenStandby: return .gray
+        case .wakeWordChecking: return .yellow
         }
     }
 }

@@ -34,6 +34,8 @@
     <string>Jarvis benötigt das Mikrofon, damit du mit deinem Assistenten sprechen kannst.</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>Jarvis benötigt Fotozugriff nur nach deiner Zustimmung, um deine Fotos zu indexieren und auf deinen Befehl hin passende Bilder zu finden.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Jarvis nutzt die lokale Spracherkennung nur, um im optionalen Immer-Zuhör-Modus dein Aktivierungswort zu erkennen. Es wird ausschließlich auf dem Gerät verarbeitet.</string>
     <key>NSRemindersFullAccessUsageDescription</key>
     <string>Jarvis benötigt Erinnerungszugriff nur nach deiner Zustimmung, um Erinnerungen zu lesen oder mit deiner Bestätigung zu erstellen.</string>
     <key>NSRemindersUsageDescription</key>

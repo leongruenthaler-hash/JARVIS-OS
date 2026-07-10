@@ -179,7 +179,6 @@ struct ChatView: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
 
-                moodStrip
                 statusRibbon
 
                 HStack(spacing: 12) {
@@ -211,7 +210,7 @@ struct ChatView: View {
                     .help("Stoppt Jarvis beim Zuhören und beendet das automatische Weiterzuhören")
                 }
 
-                playfulHints
+                ideaChips
                     .padding(.top, 2)
 
                 if let latestUserText {
@@ -235,18 +234,6 @@ struct ChatView: View {
         .background(LiquidGlassBackground())
     }
 
-    private var playfulHints: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                hintPill("Bereit", icon: "sparkles", tint: .cyan)
-                hintPill(appState.modelStatus.provider.lowercased() == "openai" ? "Cloud aktiv" : "Lokal aktiv", icon: appState.modelStatus.provider.lowercased() == "openai" ? "cloud.fill" : "house.fill", tint: appState.modelStatus.provider.lowercased() == "openai" ? .orange : .blue)
-                hintPill(appState.lastAnswerSource.contains("OpenAI") ? "OpenAI-Antwort" : "Lokale Antwort", icon: "heart.text.square", tint: .pink)
-            }
-            ideaChips
-        }
-        .frame(maxWidth: 620)
-    }
-
     private var ideaChips: some View {
         HStack(spacing: 8) {
             ideaChip("Was steht heute an?", symbol: "calendar.badge.clock") {
@@ -260,39 +247,6 @@ struct ChatView: View {
             }
         }
         .frame(maxWidth: 620, alignment: .leading)
-    }
-
-    private var moodStrip: some View {
-        HStack(spacing: 10) {
-            vibePill("Sofort", icon: "bolt.fill", tint: .cyan)
-            vibePill(appState.voiceState == .jarvisSpeaking ? "Jetzt spricht Jarvis" : "Bereit für den nächsten Satz", icon: appState.voiceState == .jarvisSpeaking ? "speaker.wave.2.fill" : "sparkles", tint: appState.voiceState == .jarvisSpeaking ? .orange : .green)
-            vibePill(appState.voiceState == .thinking ? "Denkt nach" : "Reagiert direkt", icon: appState.voiceState == .thinking ? "brain.head.profile" : "arrow.triangle.2.circlepath", tint: .blue)
-        }
-        .frame(maxWidth: 620)
-    }
-
-    private func vibePill(_ title: String, icon: String, tint: Color) -> some View {
-        Label(title, systemImage: icon)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(tint)
-            .lineLimit(1)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(.thinMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 1))
-            .shadow(color: tint.opacity(0.08), radius: 8, x: 0, y: 4)
-    }
-
-    private func hintPill(_ title: String, icon: String, tint: Color) -> some View {
-        Label(title, systemImage: icon)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(tint)
-            .lineLimit(1)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(.thinMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 1))
-            .shadow(color: tint.opacity(0.08), radius: 8, x: 0, y: 4)
     }
 
     private func ideaChip(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
@@ -312,9 +266,15 @@ struct ChatView: View {
     private var statusRibbon: some View {
         HStack(spacing: 10) {
             miniChip(title: appState.voiceState.title, icon: appState.voiceState.symbol, tint: appState.voiceState.tint)
-            miniChip(title: appState.modelStatus.activeModel, icon: "cpu.fill", tint: .indigo)
-            miniChip(title: modelModeLabel, icon: "speedometer", tint: .purple)
-            miniChip(title: appState.lastAnswerSource, icon: appState.modelStatus.provider.lowercased() == "openai" ? "cloud.fill" : "house.fill", tint: appState.modelStatus.provider.lowercased() == "openai" ? .orange : .blue)
+            toggleChip(
+                title: appState.alwaysListenEnabled ? "Immer an" : "Immer aus",
+                icon: appState.alwaysListenEnabled ? "ear.fill" : "ear.trianglebadge.exclamationmark",
+                isOn: appState.alwaysListenEnabled,
+                tint: .green
+            ) {
+                appState.alwaysListenEnabled.toggle()
+                Task { await appState.applyAlwaysListenChange() }
+            }
         }
         .frame(maxWidth: 560)
         .padding(.top, 6)
@@ -342,14 +302,31 @@ struct ChatView: View {
             .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
     }
 
+    private func toggleChip(title: String, icon: String, isOn: Bool, tint: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(isOn ? tint : .secondary)
+                .lineLimit(1)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(isOn ? tint.opacity(0.28) : Color.gray.opacity(0.16), in: Capsule())
+                .overlay(Capsule().strokeBorder(isOn ? tint.opacity(0.9) : tint.opacity(0.5), lineWidth: 1.5))
+                .shadow(color: tint.opacity(isOn ? 0.55 : 0), radius: isOn ? 6 : 0)
+        }
+        .buttonStyle(.plain)
+    }
+
     private var micButtonTitle: String {
         switch appState.voiceState {
         case .jarvisSpeaking: return "Jarvis spricht"
         case .preparingMicrophone: return "Mikrofon startet"
         case .liveTranscribing: return "Live-Transkript läuft"
         case .transcribing: return "Transkription läuft"
+        case .wakeWordChecking: return "Prüfe Aktivierungswort"
         case .thinking: return "Verarbeitung läuft"
         case .listening, .userSpeaking: return "Ich höre zu"
+        case .alwaysListenStandby: return "Lauscht auf \"Jarvis\""
         case .error: return "Erneut sprechen"
         case .idle: return "Mit Jarvis sprechen"
         }
@@ -360,8 +337,10 @@ struct ChatView: View {
         case .jarvisSpeaking: return "speaker.wave.2.fill"
         case .preparingMicrophone: return "mic.badge.plus"
         case .liveTranscribing, .transcribing: return "text.magnifyingglass"
+        case .wakeWordChecking: return "waveform.badge.magnifyingglass"
         case .thinking: return "brain.head.profile"
         case .listening, .userSpeaking: return "waveform"
+        case .alwaysListenStandby: return "ear"
         case .error: return "arrow.clockwise"
         case .idle: return "mic.fill"
         }

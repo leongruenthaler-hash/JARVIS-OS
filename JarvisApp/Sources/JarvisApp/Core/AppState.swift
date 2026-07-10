@@ -42,12 +42,15 @@ final class AppState: ObservableObject {
     @Published var userName = UserDefaults.standard.string(forKey: "JarvisUserName") ?? "Leon"
     @Published var userSalutation = UserDefaults.standard.string(forKey: "JarvisUserSalutation") ?? "sir"
     @Published var fastVoiceMode = UserDefaults.standard.object(forKey: "JarvisFastVoiceMode") as? Bool ?? true
+    @Published var alwaysListenEnabled = UserDefaults.standard.object(forKey: "JarvisAlwaysListenEnabled") as? Bool ?? false
     @Published var lastError: String?
 
     let serverController = LocalServerController()
 
     private lazy var ttsService = EdgeTTSService(controller: serverController)
     private lazy var audioCaptureService = AudioCaptureService()
+    private lazy var wakeWordListener = WakeWordListener()
+    private var alwaysListenTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
     private var scanPollingTask: Task<Void, Never>?
     private var isBootstrapping = false
@@ -60,6 +63,7 @@ final class AppState: ObservableObject {
     private let voiceFeedbackSounds = VoiceFeedbackSoundPlayer()
     private var microphoneWarmupTask: Task<Bool, Never>?
     private var nextVoiceListenTask: Task<Void, Never>?
+    private var backgroundReconnectTask: Task<Void, Never>?
     private var voiceStopGeneration = 0
     private var debugLoggingEnabled: Bool {
         UserDefaults.standard.bool(forKey: "JarvisDebugLogging")
@@ -79,6 +83,33 @@ final class AppState: ObservableObject {
         autoListenEnabled = true
         keepListeningAfterGreeting = true
         await presentStartupGreetingIfNeeded()
+        startBackgroundReconnectLoop()
+
+        if alwaysListenEnabled {
+            let granted = await wakeWordListener.requestPermissionIfNeeded()
+            if granted {
+                nextVoiceListenTask?.cancel()
+                nextVoiceListenTask = nil
+                startAlwaysListenStandby()
+            } else {
+                alwaysListenEnabled = false
+                UserDefaults.standard.set(false, forKey: "JarvisAlwaysListenEnabled")
+                lastError = "Spracherkennungszugriff fehlt. Immer-Zuhör-Modus wurde deaktiviert."
+            }
+        }
+    }
+
+    private func startBackgroundReconnectLoop() {
+        guard backgroundReconnectTask == nil else { return }
+        backgroundReconnectTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(15))
+                guard let self, !Task.isCancelled else { return }
+                if self.status == .offline {
+                    await self.refreshStatus(startIfOffline: true)
+                }
+            }
+        }
     }
 
     func completeOnboarding() {
@@ -132,6 +163,97 @@ final class AppState: ObservableObject {
         }
     }
 
+    func applyAlwaysListenChange() async {
+        if alwaysListenEnabled {
+            let granted = await wakeWordListener.requestPermissionIfNeeded()
+            guard granted else {
+                alwaysListenEnabled = false
+                UserDefaults.standard.set(false, forKey: "JarvisAlwaysListenEnabled")
+                lastError = "Spracherkennungszugriff fehlt. Immer-Zuhör-Modus konnte nicht aktiviert werden."
+                return
+            }
+            UserDefaults.standard.set(true, forKey: "JarvisAlwaysListenEnabled")
+            nextVoiceListenTask?.cancel()
+            nextVoiceListenTask = nil
+            startAlwaysListenStandby()
+        } else {
+            UserDefaults.standard.set(false, forKey: "JarvisAlwaysListenEnabled")
+            stopAlwaysListenStandby()
+        }
+    }
+
+    private func startAlwaysListenStandby() {
+        guard alwaysListenTask == nil else { return }
+        alwaysListenTask = Task { [weak self] in
+            await self?.runAlwaysListenLoop()
+        }
+    }
+
+    private func stopAlwaysListenStandby() {
+        alwaysListenTask?.cancel()
+        alwaysListenTask = nil
+        if voiceState == .alwaysListenStandby || voiceState == .wakeWordChecking {
+            setVoiceState(.idle, reason: "always_listen_stopped")
+        }
+    }
+
+    private func runAlwaysListenLoop() async {
+        while !Task.isCancelled && alwaysListenEnabled {
+            setVoiceState(.alwaysListenStandby, reason: "always_listen_waiting")
+
+            guard !isVoiceRequestRunning else {
+                try? await Task.sleep(for: .milliseconds(500))
+                continue
+            }
+
+            do {
+                let capture = try await audioCaptureService.recordUtterance(
+                    maxDuration: 3.0,
+                    silenceLimit: 0.6,
+                    minSpeechDuration: 0.45,
+                    maxWaitForSpeech: 20.0,
+                    sampleRate: 16_000,
+                    threshold: 0.010,
+                    isSpeaking: { [weak self] in self?.isJarvisSpeaking ?? false }
+                )
+
+                guard alwaysListenEnabled, !Task.isCancelled else {
+                    try? FileManager.default.removeItem(at: capture.fileURL)
+                    break
+                }
+
+                setVoiceState(.wakeWordChecking, reason: "candidate_clip_captured")
+                let transcript: String
+                do {
+                    transcript = try await wakeWordListener.transcribeOnDevice(fileURL: capture.fileURL)
+                } catch {
+                    logVoiceEvent("wake word check failed: \(error.localizedDescription)")
+                    transcript = ""
+                }
+                try? FileManager.default.removeItem(at: capture.fileURL)
+
+                if WakeWordListener.containsWakeWord(transcript) {
+                    logVoiceEvent("wake word matched: \(transcript)")
+                    var conversationShouldEnd = await listenOnce(retryCount: 0, allowWhileSpeaking: false, isAlwaysListenTurn: true)
+                    while !conversationShouldEnd && alwaysListenEnabled && !Task.isCancelled {
+                        conversationShouldEnd = await listenOnce(retryCount: 0, allowWhileSpeaking: false, isAlwaysListenTurn: true)
+                    }
+                } else {
+                    setVoiceState(.alwaysListenStandby, reason: "no_wake_word")
+                }
+            } catch AudioCaptureService.CaptureError.noSpeechDetected, AudioCaptureService.CaptureError.cancelled {
+                continue
+            } catch {
+                logVoiceEvent("always-listen capture failed: \(error.localizedDescription)")
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+
+        if voiceState == .alwaysListenStandby || voiceState == .wakeWordChecking {
+            setVoiceState(.idle, reason: "always_listen_loop_ended")
+        }
+    }
+
     func prepareComposerDraft(_ text: String) {
         composerDraft = text.trimmingCharacters(in: .whitespacesAndNewlines)
         selectedSection = .chat
@@ -153,10 +275,11 @@ final class AppState: ObservableObject {
         lastError = "Ich starte den lokalen Core ..."
         _ = serverController.start()
 
-        for _ in 0..<16 {
-            try? await Task.sleep(for: .milliseconds(200))
+        for _ in 0..<40 {
+            try? await Task.sleep(for: .milliseconds(500))
             if await refreshStatus(startIfOffline: false) {
                 lastError = nil
+                serverController.detectOllamaOwnership()
                 return
             }
         }
@@ -166,14 +289,35 @@ final class AppState: ObservableObject {
         lastError = serverController.lastLaunchError ?? "Der lokale Core konnte nicht automatisch starten."
     }
 
+    private static let statusCallTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+        return formatter
+    }()
+
+    private func timedStatusCall<T>(_ label: String, _ operation: () async throws -> T) async throws -> T {
+        let start = Date()
+        let timestamp = Self.statusCallTimeFormatter.string(from: start)
+        do {
+            let result = try await operation()
+            let duration = Date().timeIntervalSince(start)
+            print("[\(timestamp)] refreshStatus[\(label)]: ok in \(String(format: "%.3f", duration))s")
+            return result
+        } catch {
+            let duration = Date().timeIntervalSince(start)
+            print("[\(timestamp)] refreshStatus[\(label)]: FAILED after \(String(format: "%.3f", duration))s - \(error.localizedDescription)")
+            throw error
+        }
+    }
+
     @discardableResult
     func refreshStatus(startIfOffline: Bool = true, includeScanStates: Bool = false) async -> Bool {
         do {
-            let health = try await serverController.health()
+            let health = try await timedStatusCall("health") { try await serverController.health() }
             status = health.ok ? .idle : .offline
-            modelStatus = try await serverController.models()
-            privacySummary = try await serverController.privacyStatus()
-            permissions = try await serverController.permissions()
+            modelStatus = try await timedStatusCall("models") { try await serverController.models() }
+            privacySummary = try await timedStatusCall("privacyStatus") { try await serverController.privacyStatus() }
+            permissions = try await timedStatusCall("permissions") { try await serverController.permissions() }
             if includeScanStates {
                 try? await refreshScanStates()
             }
@@ -181,9 +325,6 @@ final class AppState: ObservableObject {
             return health.ok
         } catch {
             status = .offline
-            modelStatus = ModelStatus()
-            privacySummary = "Datenschutzstatus wird geladen ..."
-            permissions = [:]
             lastError = "Nicht verbunden. Ich verbinde neu."
             if startIfOffline {
                 await ensureServerConnected()
@@ -236,19 +377,26 @@ final class AppState: ObservableObject {
     }
 
     func listenOnce() async {
-        await listenOnce(retryCount: 0, allowWhileSpeaking: false)
+        _ = await listenOnce(retryCount: 0, allowWhileSpeaking: false)
     }
 
-    private func listenOnce(retryCount: Int, allowWhileSpeaking: Bool) async {
-        guard !isVoiceRequestRunning else { return }
+    /// Returns whether the conversation should end and control should return to
+    /// wake-word standby. Only meaningful for `isAlwaysListenTurn == true` callers;
+    /// other callers ignore the result.
+    @discardableResult
+    private func listenOnce(retryCount: Int, allowWhileSpeaking: Bool, isAlwaysListenTurn: Bool = false) async -> Bool {
+        guard !isVoiceRequestRunning else { return true }
         isVoiceRequestRunning = true
         defer { isVoiceRequestRunning = false }
 
-        if retryCount == 0 && !allowWhileSpeaking {
+        if isAlwaysListenTurn {
+            // Immer-Zuhören hat sein eigenes Fortsetzungsmodell in runAlwaysListenLoop() -
+            // das alte autoListenEnabled/keepListeningAfterGreeting-System bleibt hier außen vor.
+        } else if retryCount == 0 && !allowWhileSpeaking {
             voiceStopGeneration += 1
             resumeContinuousVoiceMode(reason: "manual_voice_start")
         } else if allowWhileSpeaking {
-            guard autoListenEnabled, keepListeningAfterGreeting else { return }
+            guard autoListenEnabled, keepListeningAfterGreeting else { return true }
         }
 
         if !allowWhileSpeaking {
@@ -267,7 +415,7 @@ final class AppState: ObservableObject {
             status = .offline
             setVoiceState(.error, reason: "microphone_permission_denied")
             lastError = "Mikrofonzugriff fehlt."
-            return
+            return true
         }
 
         markVoicePerformance("microphoneReady")
@@ -318,12 +466,12 @@ final class AppState: ObservableObject {
                 case .noSpeechDetected, .cancelled:
                     status = .idle
                     setVoiceState(.idle, reason: "listen_no_speech")
-                    return
+                    return true
                 case .permissionDenied:
                     status = .offline
                     setVoiceState(.error, reason: "microphone_permission_denied")
                     messages.append(ChatMessage(role: .system, text: "Die Sprachaufnahme konnte nicht starten. Technisch: \(detail)"))
-                    return
+                    return true
                 case .recorderUnavailable, .recorderFailed:
                     status = .offline
                     setVoiceState(.error, reason: "listen_failed")
@@ -337,12 +485,11 @@ final class AppState: ObservableObject {
                 setVoiceState(.preparingMicrophone, reason: "listen_retry")
                 try? await Task.sleep(for: .milliseconds(20))
                 isVoiceRequestRunning = false
-                await listenOnce(retryCount: 1, allowWhileSpeaking: false)
-                return
+                return await listenOnce(retryCount: 1, allowWhileSpeaking: allowWhileSpeaking, isAlwaysListenTurn: isAlwaysListenTurn)
             }
             setVoiceState(.idle, reason: "error_reset")
             await ensureServerConnected()
-            return
+            return true
         }
 
         markVoicePerformance("recordingStopped")
@@ -356,7 +503,7 @@ final class AppState: ObservableObject {
         guard !finalTranscript.isEmpty else {
             status = .idle
             setVoiceState(.idle, reason: "empty_transcript")
-            return
+            return true
         }
 
         var shouldStopAfterThisTurn = false
@@ -371,7 +518,7 @@ final class AppState: ObservableObject {
         let history = conversationPayload()
         let jarvisMessage = ChatMessage(role: .jarvis, text: "")
         messages.append(jarvisMessage)
-        guard let answerIndex = messages.firstIndex(where: { $0.id == jarvisMessage.id }) else { return }
+        guard let answerIndex = messages.firstIndex(where: { $0.id == jarvisMessage.id }) else { return true }
 
         do {
             status = .responding
@@ -393,23 +540,30 @@ final class AppState: ObservableObject {
                 model: modelStatus.activeModel
             )
             lastAnswerSource = modelLabel(from: response.source ?? modelStatus.provider, model: response.model ?? modelStatus.activeModel)
-            keepListeningAfterGreeting = true
-            if shouldStopAfterThisTurn {
-                pauseContinuousVoiceMode(reason: "stop_phrase_detected")
+            if isAlwaysListenTurn {
+                await speakAnswer(response.answer)
             } else {
-                resumeContinuousVoiceMode(reason: "continue_after_voice_response")
+                keepListeningAfterGreeting = true
+                if shouldStopAfterThisTurn {
+                    pauseContinuousVoiceMode(reason: "stop_phrase_detected")
+                } else {
+                    resumeContinuousVoiceMode(reason: "continue_after_voice_response")
+                }
+                await speakAnswer(response.answer)
             }
-            await speakAnswer(response.answer)
+            status = .idle
+            setVoiceState(.idle, reason: "listen_finished")
+            return shouldStopAfterThisTurn
         } catch {
             let detail = serverController.lastLaunchError.map { " Technisch: \($0)" } ?? ""
             messages[answerIndex].text = "Ich erreiche den lokalen Core gerade nicht. Ich verbinde im Hintergrund neu.\(detail)"
             status = .offline
             setVoiceState(.error, reason: "listen_failed")
             await ensureServerConnected()
+            status = .idle
+            setVoiceState(.idle, reason: "listen_finished")
+            return true
         }
-
-        status = .idle
-        setVoiceState(.idle, reason: "listen_finished")
     }
 
     func switchModel(provider: String? = nil, model: String? = nil) async {
@@ -828,7 +982,6 @@ final class AppState: ObservableObject {
                 switch event {
                 case .ttsStarted:
                     self.markVoicePerformance("ttsStarted")
-                    self.scheduleNextVoiceListen()
                 case .audioPlaybackStarted:
                     self.markVoicePerformance("audioPlaybackStarted")
                 case .ttsFinished:
@@ -1017,6 +1170,7 @@ final class AppState: ObservableObject {
     }
 
     private func scheduleNextVoiceListen() {
+        guard !alwaysListenEnabled else { return }
         guard autoListenEnabled, keepListeningAfterGreeting else { return }
         guard nextVoiceListenTask == nil else { return }
         nextVoiceListenTask = Task { [weak self] in
