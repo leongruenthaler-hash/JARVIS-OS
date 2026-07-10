@@ -18,6 +18,7 @@ struct JarvisMacApp: App {
                 .environment(\.jarvisTheme, activeTheme)
                 .onAppear {
                     JarvisAppDelegate.activateJarvisWindow()
+                    appDelegate.serverController = appState.serverController
                 }
                 .task {
                     await appState.bootstrap()
@@ -34,6 +35,8 @@ struct JarvisMacApp: App {
 }
 
 final class JarvisAppDelegate: NSObject, NSApplicationDelegate {
+    weak var serverController: LocalServerController?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         Self.activateJarvisWindow()
@@ -41,6 +44,11 @@ final class JarvisAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidBecomeActive(_ notification: Notification) {
         Self.activateJarvisWindow()
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        serverController?.shutdownForAppQuit()
+        return .terminateNow
     }
 
     static func activateJarvisWindow() {

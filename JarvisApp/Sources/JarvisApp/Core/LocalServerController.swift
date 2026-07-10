@@ -4,8 +4,10 @@ import Foundation
 final class LocalServerController: ObservableObject {
     @Published var isRunning = false
     @Published var lastLaunchError: String?
+    @Published private(set) var ollamaOwnedByApp = false
 
     private static let startLogPath = "/tmp/jarvis_app_server_start.log"
+    private static let ollamaOwnedMarkerPath = "/tmp/jarvis_app_ollama_started_by_app.marker"
 
     private let projectPath = LocalServerController.detectProjectPath()
     private let apiClient = JarvisAPIClient()
@@ -36,11 +38,14 @@ final class LocalServerController: ObservableObject {
             cd \(quotedProjectPath)
             source .venv/bin/activate
             OLLAMA_URL="http://127.0.0.1:11434/api/tags"
+            OLLAMA_MARKER=\(Self.shellQuote(Self.ollamaOwnedMarkerPath))
+            rm -f "$OLLAMA_MARKER"
             if /usr/bin/curl -fsS --max-time 2 http://127.0.0.1:8765/api/health >/dev/null 2>&1; then
                 echo "Jarvis local server already running."
                 exit 0
             fi
             if ! /usr/bin/curl -fsS --max-time 2 "$OLLAMA_URL" >/dev/null 2>&1; then
+                touch "$OLLAMA_MARKER"
                 if command -v ollama >/dev/null 2>&1; then
                     nohup ollama serve >/tmp/jarvis_ollama.log 2>&1 &
                 elif [ -d "/Applications/Ollama.app" ]; then
@@ -93,6 +98,35 @@ final class LocalServerController: ObservableObject {
         serverProcess = nil
         lastLaunchError = nil
         isRunning = false
+    }
+
+    /// Reads the marker the start script leaves behind if it had to launch Ollama itself.
+    /// Only ever flips to `true` - never resets back to `false` - so a later server-only
+    /// restart (with Ollama still alive from before) doesn't make the app forget it owns it.
+    func detectOllamaOwnership() {
+        if FileManager.default.fileExists(atPath: Self.ollamaOwnedMarkerPath) {
+            ollamaOwnedByApp = true
+        }
+    }
+
+    /// Synchronous cleanup for a real app quit (`applicationShouldTerminate`), not for
+    /// backgrounding. Only kills Ollama if this app instance actually started it.
+    func shutdownForAppQuit() {
+        if let process = serverProcess, process.isRunning {
+            process.terminate()
+            process.waitUntilExit()
+        }
+        serverProcess = nil
+        isRunning = false
+
+        guard ollamaOwnedByApp else { return }
+        let killProcess = Process()
+        killProcess.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        killProcess.arguments = ["-x", "ollama"]
+        killProcess.standardOutput = Pipe()
+        killProcess.standardError = Pipe()
+        try? killProcess.run()
+        killProcess.waitUntilExit()
     }
 
     /// Surfaces a script-level start failure (e.g. missing `.venv`) from the log file to the UI.
