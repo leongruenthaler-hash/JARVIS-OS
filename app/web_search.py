@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import re
+import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -112,7 +113,7 @@ def search_web(query: str, max_results: int = 3) -> list[SearchResult]:
     return clean_results
 
 
-def check_internet_access() -> tuple[bool, str]:
+def check_internet_access(*, retries: int = 2, retry_delay: float = 0.6) -> tuple[bool, str]:
     request = urllib.request.Request(
         "https://duckduckgo.com/",
         headers={
@@ -123,13 +124,21 @@ def check_internet_access() -> tuple[bool, str]:
         },
     )
 
-    try:
-        with urllib.request.urlopen(request, timeout=8) as response:
-            status = getattr(response, "status", 200)
-    except Exception as exc:
-        return False, str(exc)
+    last_detail = ""
+    for attempt in range(retries + 1):
+        try:
+            with urllib.request.urlopen(request, timeout=8) as response:
+                status = getattr(response, "status", 200)
+            if 200 <= status < 400:
+                return True, f"HTTP {status}"
+            last_detail = f"HTTP {status}"
+        except Exception as exc:
+            last_detail = str(exc)
 
-    return 200 <= status < 400, f"HTTP {status}"
+        if attempt < retries:
+            time.sleep(retry_delay)
+
+    return False, last_detail
 
 
 def format_search_results(results: list[SearchResult]) -> str:

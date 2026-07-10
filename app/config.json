@@ -118,5 +118,6 @@
     "ollama_timeout": 60,
     "ollama_num_ctx": 1024,
     "ollama_num_predict": 48,
+    "phi4_mini_num_predict": 112,
     "ollama_temperature": 0.3
 }

@@ -1326,6 +1326,9 @@ def should_use_web_search(text: str) -> bool:
         "nachrichten",
         "internet",
         "online",
+        "gibt's neues",
+        "gibt es neues",
+        "neuigkeiten",
     }
 
     if any(keyword in normalized for keyword in explicit_web_keywords):
