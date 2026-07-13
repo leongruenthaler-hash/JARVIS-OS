@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from secure_storage import get_openai_api_key, SecureStorageError
+from settings import load_config
 
 
 DEFAULT_LOCAL_MODEL = "phi4-mini"
@@ -210,7 +211,20 @@ def normalize_model_name(model_name: str) -> str:
     return SUPPORTED_LOCAL_MODELS.get(normalized, DEFAULT_LOCAL_MODEL)
 
 
+def ollama_base_url() -> str:
+    host = os.environ.get("OLLAMA_HOST")
+    if not host:
+        try:
+            host = load_config().get("ollama_host")
+        except Exception:
+            host = None
+    return f"http://{host or '127.0.0.1:11434'}"
+
+
 def is_ollama_installed() -> bool:
+    bundled = os.environ.get("JARVIS_BUNDLED_OLLAMA")
+    if bundled and Path(bundled).exists():
+        return True
     return shutil.which("ollama") is not None
 
 
@@ -220,10 +234,10 @@ def is_ollama_running(timeout: float = 1.5, *, use_cache: bool = True) -> bool:
     if use_cache and now - _OLLAMA_RUNNING_CACHE[0] < 1.5:
         return _OLLAMA_RUNNING_CACHE[1]
 
-    urls = (
-        "http://127.0.0.1:11434/api/tags",
-        "http://localhost:11434/api/tags",
-    )
+    base = ollama_base_url()
+    urls = [f"{base}/api/tags"]
+    if "127.0.0.1" in base:
+        urls.append(base.replace("127.0.0.1", "localhost") + "/api/tags")
     for url in urls:
         try:
             with urllib.request.urlopen(url, timeout=timeout) as response:
@@ -310,6 +324,7 @@ def ensure_ollama_running(wait_seconds: float = 15.0) -> bool:
 
 def find_ollama_executable() -> str | None:
     candidates = [
+        os.environ.get("JARVIS_BUNDLED_OLLAMA"),
         shutil.which("ollama"),
         "/opt/homebrew/bin/ollama",
         "/usr/local/bin/ollama",
@@ -328,7 +343,7 @@ def list_installed_ollama_models(timeout: float = 2.0, *, use_cache: bool = True
         return list(_OLLAMA_MODELS_CACHE[1])
 
     try:
-        with urllib.request.urlopen("http://127.0.0.1:11434/api/tags", timeout=timeout) as response:
+        with urllib.request.urlopen(f"{ollama_base_url()}/api/tags", timeout=timeout) as response:
             data = json.loads(response.read().decode("utf-8"))
     except Exception:
         return []

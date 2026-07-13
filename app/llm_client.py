@@ -9,7 +9,7 @@ from typing import Any
 
 from secure_storage import SecureStorageError, get_openai_api_key
 from model_router import ModelRoute, ModelRouter
-from model_manager import ModelManager, ollama_hint_for_model
+from model_manager import ModelManager, ollama_hint_for_model, ollama_base_url
 from jarvis_personality import normalize_jarvis_messages
 
 
@@ -102,7 +102,7 @@ class LLMClient:
         }
 
         request = urllib.request.Request(
-            "http://localhost:11434/api/chat",
+            f"{ollama_base_url()}/api/chat",
             data=json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="POST",
