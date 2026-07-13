@@ -114,12 +114,21 @@ load_dotenv()
 CONFIG = load_config()
 
 
+def _fresh_profile_config() -> dict[str, Any]:
+    try:
+        return load_config()
+    except Exception:
+        return CONFIG
+
+
 def configured_user_name() -> str:
-    return str(CONFIG.get("creator_name") or "Nutzer").strip() or "Nutzer"
+    fresh = _fresh_profile_config()
+    return str(fresh.get("creator_name") or "Nutzer").strip() or "Nutzer"
 
 
 def configured_user_address() -> str:
-    salutation = str(CONFIG.get("user_salutation") or "sir").strip().lower()
+    fresh = _fresh_profile_config()
+    salutation = str(fresh.get("user_salutation") or "sir").strip().lower()
     if salutation == "madam":
         return "Madam"
     if salutation == "none":
@@ -457,9 +466,10 @@ def build_input(
             previous_conversation = memory.get("conversation") or []
     else:
         previous_conversation = []
-    assistant_name = CONFIG.get("assistant_name", "Jarvis")
-    creator_name = CONFIG.get("creator_name", "Leon")
-    user_salutation = CONFIG.get("user_salutation", "sir")
+    fresh_profile = _fresh_profile_config()
+    assistant_name = fresh_profile.get("assistant_name", "Jarvis")
+    creator_name = fresh_profile.get("creator_name", "Leon")
+    user_salutation = fresh_profile.get("user_salutation", "sir")
     memory_summary = build_memory_summary(long_memory)
     temporary_style = get_temporary_style_instruction(settings)
 
@@ -4470,6 +4480,7 @@ def _clean_music_query(query: str) -> str:
     query = query.strip(" .,!?:;")
     query = re.sub(r"\b(?:in|auf)\s+apple\s+music\b", "", query, flags=re.IGNORECASE)
     query = re.sub(r"\b(?:bitte|mal|für mich|fuer mich)\b", "", query, flags=re.IGNORECASE)
+    query = re.sub(r"\b(?:starten|starte|start|spielen|spiele|abspielen|läuft|lauft)\b", "", query, flags=re.IGNORECASE)
     query = re.sub(r"\s+", " ", query)
     return query.strip(" .,!?:;")
 
