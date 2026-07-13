@@ -679,6 +679,23 @@ def has_domain(text: str, domain: str) -> bool:
     return any(term in normalized for term in DOMAIN_TERMS.get(domain, ()))
 
 
+CALENDAR_QUERY_PHRASES = (
+    "was steht",
+    "was habe ich",
+    "wann habe ich",
+    "was für termine",
+    "was fuer termine",
+    "welche termine",
+    "was liegt an",
+    "was ist heute los",
+)
+
+
+def looks_like_calendar_query(text: str) -> bool:
+    normalized = normalize_text(text)
+    return any(phrase in normalized for phrase in CALENDAR_QUERY_PHRASES)
+
+
 def remove_domain_words(text: str, domain: str) -> str:
     cleaned = strip_wake_word_from_text(text)
     terms = sorted(DOMAIN_TERMS.get(domain, ()), key=len, reverse=True)
@@ -1318,7 +1335,6 @@ def should_use_web_search(text: str) -> bool:
         "schau nach",
         "was ist aktuell",
         "aktuell",
-        "heute",
         "neueste",
         "neusten",
         "letzte",
@@ -3421,10 +3437,55 @@ def handle_background_mail_command(
     return None
 
 
+def _format_event_time(raw_start: str) -> str:
+    if " um " in raw_start:
+        time_part = raw_start.rsplit(" um ", 1)[-1].strip()
+        return time_part[:5] if len(time_part) >= 5 else time_part
+    return raw_start
+
+
+def answer_calendar_query(text: str, normalized: str) -> str:
+    wants_reminders = "erinner" in normalized and "termin" not in normalized and "kalender" not in normalized
+    only_today = "heute" in normalized and "morgen" not in normalized and "woche" not in normalized
+
+    try:
+        if wants_reminders:
+            items = list_open_reminders(limit=5).get("items", [])
+            if not items:
+                return "Ich sehe aktuell keine offenen Erinnerungen."
+            lines = [str(item.get("title") or "Erinnerung") for item in items]
+            return "Offene Erinnerungen: " + "; ".join(lines) + "."
+
+        until = None
+        if only_today:
+            now = datetime.now()
+            until = datetime(now.year, now.month, now.day, 23, 59, 59)
+
+        items = list_upcoming_calendar_items(limit=5, until=until).get("items", [])
+        if not items:
+            return "Für heute sehe ich keine Termine." if only_today else "Ich sehe aktuell keine anstehenden Termine."
+
+        lines = [f"{item.get('title') or 'Termin'} um {_format_event_time(item.get('start', ''))} Uhr" for item in items]
+        prefix = "Heute steht an: " if only_today else "Deine nächsten Termine: "
+        return prefix + "; ".join(lines) + "."
+    except CalendarAccessError as exc:
+        return str(exc)
+    except Exception as exc:
+        print("Kalender Fehler:", type(exc).__name__)
+        return "Ich konnte deinen Kalender gerade nicht lesen."
+
+
 def handle_calendar_command(text: str, memory: Memory | None = None) -> str | None:
     normalized = normalize_text(text)
-    if not has_domain(text, "calendar"):
+    domain_match = has_domain(text, "calendar")
+    is_query = looks_like_calendar_query(text)
+    if not is_query and domain_match and any(term in normalized for term in ("hab ich", "habe ich", "steht")):
+        is_query = True
+    if not domain_match and not is_query:
         return None
+
+    if is_query:
+        return answer_calendar_query(text, normalized)
 
     status_terms = (
         "zugriff",
@@ -4842,7 +4903,7 @@ def main():
                 continue
 
             calendar_permission = None
-            if has_domain(question, "calendar"):
+            if has_domain(question, "calendar") or looks_like_calendar_query(question):
                 calendar_permission = ensure_privacy_domain_permission(memory, "calendar", "Jarvis würde Kalenderdaten verwenden.")
                 if calendar_permission is None and "erinner" in normalize_text(question):
                     calendar_permission = ensure_privacy_domain_permission(memory, "reminders", "Jarvis würde eine Erinnerung verwenden.")
