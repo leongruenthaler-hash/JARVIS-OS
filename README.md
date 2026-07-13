@@ -50,7 +50,7 @@ ollama serve
 ## Start
 
 ```bash
-cd /Users/leongrunthaler/Desktop/JARVIS-OS
+cd ~/Desktop/JARVIS-OS
 source .venv/bin/activate
 bash start_jarvis.sh
 ```
@@ -107,7 +107,7 @@ Jarvis besitzt jetzt zusätzlich eine native SwiftUI-App. Die bestehende Python-
 Die SwiftUI-App startet den lokalen Jarvis-Server automatisch, falls er noch nicht läuft. Der manuelle Start ist nur noch zum Debuggen nötig:
 
 ```bash
-cd /Users/leongrunthaler/Desktop/JARVIS-OS
+cd ~/Desktop/JARVIS-OS
 source .venv/bin/activate
 python3 app/jarvis.py --local-server
 ```
@@ -117,21 +117,21 @@ python3 app/jarvis.py --local-server
 Während der Entwicklung:
 
 ```bash
-cd /Users/leongrunthaler/Desktop/JARVIS-OS/JarvisApp
+cd ~/Desktop/JARVIS-OS/JarvisApp
 swift run JarvisApp
 ```
 
 ### App kompilieren
 
 ```bash
-cd /Users/leongrunthaler/Desktop/JARVIS-OS/JarvisApp
+cd ~/Desktop/JARVIS-OS/JarvisApp
 swift build
 ```
 
 ### In Xcode öffnen
 
 ```bash
-open /Users/leongrunthaler/Desktop/JARVIS-OS/JarvisApp/Package.swift
+open ~/Desktop/JARVIS-OS/JarvisApp/Package.swift
 ```
 
 Die App enthält Onboarding, Chat, Modellverwaltung, Datenschutzbereich, OpenAI-Key-Verwaltung über Jarvis Core und Platzhalterseiten für Verlauf, Kalender, Mail, Erinnerungen, Dateien und Fotos. Diese Seiten sind bewusst an den bestehenden Python-Core angebunden vorbereitet, damit keine bestehende Funktionalität entfernt oder neu erfunden werden muss.

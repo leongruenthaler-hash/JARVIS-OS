@@ -36,7 +36,6 @@ final class LocalServerController: ObservableObject {
             exec >"$LOG_FILE" 2>&1
             set -e
             cd \(quotedProjectPath)
-            source .venv/bin/activate
             OLLAMA_URL="http://127.0.0.1:11434/api/tags"
             OLLAMA_MARKER=\(Self.shellQuote(Self.ollamaOwnedMarkerPath))
             rm -f "$OLLAMA_MARKER"
@@ -64,7 +63,7 @@ final class LocalServerController: ObservableObject {
                 /bin/kill $PIDS 2>/dev/null || true
                 /bin/sleep 0.7
             fi
-            exec python3 app/jarvis.py --local-server
+            exec \(quotedProjectPath)/.venv/bin/python3 app/jarvis.py --local-server
             """
         ]
         process.standardOutput = Pipe()
@@ -157,7 +156,7 @@ final class LocalServerController: ObservableObject {
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = [
             "-lc",
-            "cd \(Self.shellQuote(projectPath)) && source .venv/bin/activate && python3 app/tts_bridge.py"
+            "cd \(Self.shellQuote(projectPath)) && \(Self.shellQuote(projectPath))/.venv/bin/python3 app/tts_bridge.py"
         ]
         process.standardInput = stdinPipe
         process.standardOutput = Pipe()
@@ -244,7 +243,7 @@ final class LocalServerController: ObservableObject {
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = [
             "-lc",
-            "cd \(Self.shellQuote(projectPath)) && source .venv/bin/activate && python3 app/tts_bridge.py"
+            "cd \(Self.shellQuote(projectPath)) && \(Self.shellQuote(projectPath))/.venv/bin/python3 app/tts_bridge.py"
         ]
         process.standardInput = stdinPipe
         process.standardOutput = Pipe()
@@ -418,6 +417,10 @@ final class LocalServerController: ObservableObject {
         try await apiClient.dailyBriefing()
     }
 
+    func conversationHistory() async throws -> ConversationHistoryPayload {
+        try await apiClient.conversationHistory()
+    }
+
     func startFileIndexScan() async throws -> ScanProgress {
         let progress = try await apiClient.startFileIndexScan()
         isRunning = true
@@ -486,6 +489,11 @@ final class LocalServerController: ObservableObject {
         isRunning = true
     }
 
+    func setStoreConversation(_ enabled: Bool) async throws {
+        try await apiClient.setStoreConversation(enabled)
+        isRunning = true
+    }
+
     func privacyStatus() async throws -> String {
         try await apiClient.privacyStatus()
     }
@@ -543,7 +551,7 @@ final class LocalServerController: ObservableObject {
             process.executableURL = URL(fileURLWithPath: "/bin/zsh")
             process.arguments = [
                 "-lc",
-                "cd \(Self.shellQuote(projectPath)) && source .venv/bin/activate && python3 app/app_bridge.py"
+                "cd \(Self.shellQuote(projectPath)) && \(Self.shellQuote(projectPath))/.venv/bin/python3 app/app_bridge.py"
             ]
             process.standardInput = stdinPipe
             process.standardOutput = stdoutPipe
