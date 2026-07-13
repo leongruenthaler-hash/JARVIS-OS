@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import time
 from datetime import datetime
 
 
@@ -89,15 +90,22 @@ def create_reminder(
     return f"Erinnerung erstellt: {title}"
 
 
-def list_upcoming_calendar_items(limit: int = 5) -> dict[str, list[dict[str, str]]]:
+def list_upcoming_calendar_items(limit: int = 5, until: datetime | None = None) -> dict[str, list[dict[str, str]]]:
     limit = max(1, int(limit))
+    until_setup = ""
+    until_check = ""
+    if until is not None:
+        until_literal = _escape_applescript_text(_german_date_literal(until))
+        until_setup = f'\n    set untilDate to date "{until_literal}"'
+        until_check = " and startDate is less than untilDate"
+
     script = f"""
     set fieldSeparator to ASCII character 31
     set recordSeparator to ASCII character 30
     set maxItems to {limit}
     set outputText to ""
     set itemCount to 0
-    set nowDate to current date
+    set nowDate to current date{until_setup}
 
     tell application "Calendar"
         repeat with calendarRef in calendars
@@ -105,7 +113,7 @@ def list_upcoming_calendar_items(limit: int = 5) -> dict[str, list[dict[str, str
                 if itemCount is greater than or equal to maxItems then return outputText
                 try
                     set startDate to start date of eventRef
-                    if startDate is greater than nowDate then
+                    if startDate is greater than nowDate{until_check} then
                         set outputText to outputText & name of calendarRef as string & fieldSeparator & summary of eventRef as string & fieldSeparator & startDate as string & fieldSeparator & end date of eventRef as string & recordSeparator
                         set itemCount to itemCount + 1
                     end if
@@ -184,7 +192,47 @@ def _german_date_literal(value: datetime) -> str:
     )
 
 
+_APPLESCRIPT_PROCESS_NAMES = {
+    "Kalender": "Calendar",
+    "Erinnerungen": "Reminders",
+}
+
+
+def _ensure_app_running(process_name: str, timeout: float = 3.0) -> None:
+    check_script = f'tell application "System Events" to (name of processes) contains "{process_name}"'
+
+    def _is_running() -> bool:
+        try:
+            result = subprocess.run(["osascript", "-e", check_script], capture_output=True, text=True, timeout=5)
+        except subprocess.TimeoutExpired:
+            return False
+        return result.returncode == 0 and result.stdout.strip() == "true"
+
+    if _is_running():
+        return
+
+    try:
+        subprocess.run(
+            ["osascript", "-e", f'tell application "{process_name}" to launch'],
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+    except subprocess.TimeoutExpired:
+        return
+
+    waited = 0.0
+    while waited < timeout:
+        time.sleep(0.3)
+        waited += 0.3
+        if _is_running():
+            return
+
+
 def _run_applescript(script: str, app_name: str):
+    process_name = _APPLESCRIPT_PROCESS_NAMES.get(app_name, app_name)
+    _ensure_app_running(process_name)
+
     try:
         result = subprocess.run(
             ["osascript", "-e", script],
@@ -198,7 +246,7 @@ def _run_applescript(script: str, app_name: str):
         )
 
     if result.returncode == 0:
-        return
+        return result.stdout
 
     error_text = (result.stderr or result.stdout).strip()
     lowered_error = error_text.lower()

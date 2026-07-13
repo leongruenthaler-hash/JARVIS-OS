@@ -16,6 +16,7 @@ from audio_stream import StreamingAudioListener, warm_audio_pipeline
 from background_tasks import MailBackgroundWorker
 from calendar_client import list_open_reminders, list_upcoming_calendar_items
 from fast_intent_router import FastIntentRouter
+from core.conversation_manager import ConversationManager
 from core.daily_briefing import build_daily_briefing
 from files_client import configured_roots, move_indexed_matches_to_folder, normalize_name, search_file_index_entries, search_files
 from llm_client import LLMClient
@@ -131,6 +132,17 @@ class JarvisLocalServer:
         self._photo_vision_thread = None
         self._last_answer_source = "local"
         self._last_answer_model = self.models.active_model
+
+    def conversation_history(self) -> dict[str, Any]:
+        enabled = bool(self.config.get("privacy_store_conversation", False))
+        turns = ConversationManager().turns if enabled else []
+        return {
+            "recording_enabled": enabled,
+            "turns": [
+                {"role": turn.role, "content": turn.content, "created_at": turn.created_at}
+                for turn in turns
+            ],
+        }
 
     def health(self) -> dict[str, Any]:
         model_status = self.models.status()
@@ -1200,7 +1212,7 @@ class JarvisLocalServer:
                         return str(answer)
 
                 calendar_permission = None
-                if core.has_domain(question, "calendar"):
+                if core.has_domain(question, "calendar") or core.looks_like_calendar_query(question):
                     calendar_permission = core.ensure_privacy_domain_permission(memory, "calendar", "Jarvis würde Kalenderdaten verwenden.")
                     if calendar_permission is None and "erinner" in core.normalize_text(question):
                         calendar_permission = core.ensure_privacy_domain_permission(memory, "reminders", "Jarvis würde eine Erinnerung verwenden.")
@@ -1580,6 +1592,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, SERVER.local_photo_vision_status())
             elif path == "/api/calendar/overview":
                 self._json(200, SERVER.calendar_overview())
+            elif path == "/api/conversation-history":
+                self._json(200, SERVER.conversation_history())
             else:
                 self._json(404, {"error": "not_found"})
         except Exception as exc:
@@ -1617,6 +1631,11 @@ class Handler(BaseHTTPRequestHandler):
                 if SERVER._audio_listener is not None:
                     SERVER._audio_listener.stop_stream()
                     SERVER._audio_listener = None
+                self._json(200, {"ok": True, "enabled": enabled})
+            elif path == "/api/settings/store-conversation":
+                enabled = bool(payload.get("enabled"))
+                SERVER.config["privacy_store_conversation"] = enabled
+                save_config(SERVER.config)
                 self._json(200, {"ok": True, "enabled": enabled})
             elif path == "/api/scan-status":
                 self._json(200, SERVER.scan_status_payload())
