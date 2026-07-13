@@ -24,6 +24,7 @@ final class AppState: ObservableObject {
     @Published var fileScanProgress = ScanProgress()
     @Published var fileResult = "Noch keine Datei-Aktion ausgeführt."
     @Published var fileIsLoading = false
+    @Published var modelPullProgress = ScanProgress()
     @Published var fileSearchText = "Rechnungen"
     @Published var fileSearchResults: [FileSearchResult] = []
     @Published var lastFileSearchQuery = ""
@@ -35,6 +36,9 @@ final class AppState: ObservableObject {
         reminders: CalendarOverviewSection(items: [], count: 0, message: "Noch nicht geladen.", error: "")
     )
     @Published var dailyBriefingText = "Noch kein Tagesbriefing geladen."
+    @Published var conversationHistory = ConversationHistoryPayload(recordingEnabled: false, turns: [])
+    @Published var conversationHistoryLoading = false
+    @Published var storeConversationEnabled = false
     @Published var lastAnswerSource = "lokal"
     @Published var composerDraft = ""
     @Published var onboardingCompleted = UserDefaults.standard.bool(forKey: "JarvisOnboardingCompleted")
@@ -615,6 +619,20 @@ final class AppState: ObservableObject {
         photoScanProgress = bundle.photos
         photoVisionProgress = bundle.photoVision
         fileScanProgress = bundle.files
+        modelPullProgress = bundle.modelPull
+    }
+
+    func pullModel(_ model: String) async {
+        await ensureServerConnected()
+        modelPullProgress.status = .downloading
+        modelPullProgress.currentLabel = "Download von \(model) wird vorbereitet."
+        do {
+            modelPullProgress = try await serverController.pullModel(model)
+            startScanPolling()
+        } catch {
+            modelPullProgress.status = .failed
+            modelPullProgress.errorMessage = error.localizedDescription
+        }
     }
 
     func refreshScanStatesSafely() async {
@@ -771,6 +789,28 @@ final class AppState: ObservableObject {
         } catch {
             dailyBriefingText = "Tagesbriefing gerade nicht verfügbar. Kalender, Erinnerungen oder Mail antworten nicht sauber. Ich bleibe dran, sehr heldenhaft im Stillen."
             lastError = "Tagesbriefing konnte nicht geladen werden."
+        }
+    }
+
+    func refreshConversationHistory() async {
+        await ensureServerConnected()
+        conversationHistoryLoading = true
+        defer { conversationHistoryLoading = false }
+        do {
+            conversationHistory = try await serverController.conversationHistory()
+            storeConversationEnabled = conversationHistory.recordingEnabled
+            lastError = nil
+        } catch {
+            lastError = "Verlauf konnte nicht geladen werden."
+        }
+    }
+
+    func setStoreConversationEnabled(_ enabled: Bool) async {
+        do {
+            try await serverController.setStoreConversation(enabled)
+            storeConversationEnabled = enabled
+        } catch {
+            lastError = "Einstellung für Verlaufsspeicherung konnte nicht gespeichert werden."
         }
     }
 
@@ -1006,6 +1046,59 @@ final class AppState: ObservableObject {
         }
     }
 
+    private static let greetingRemarks: [String] = [
+        "Ich höre zu. Sogar freiwillig.",
+        "Was auch immer es ist - ich bin dabei.",
+        "Ich habe die Nacht ohne nennenswerte Zwischenfälle überstanden.",
+        "Bereit für Anweisungen, Beschwerden oder beides.",
+        "Ich stehe zur Verfügung - freiwillig, wie gesagt.",
+        "Fragen Sie ruhig zuerst mich, bevor Sie googeln.",
+        "Ohne Umschweife: was brauchen Sie?",
+        "Sagen Sie, wo es brennt - metaphorisch, hoffentlich.",
+        "Ihre Agenda, mein Vormittag. Sagen Sie einfach los.",
+        "Fragen Sie los, ich antworte meistens klüger, als ich klinge.",
+        "Startklar - schneller als Sie vermutlich.",
+        "Ihr Tag, meine Aufmerksamkeit. Fangen wir an.",
+        "Kein Ladebildschirm, kein Warten - einfach loslegen.",
+        "Was auch immer ansteht, ich bin schon dran gewöhnt.",
+        "Ich bin da. Das war's schon, der Rest liegt bei Ihnen.",
+        "Ich bin wach, nüchtern und erstaunlich kooperativ.",
+        "Keine Umwege - sagen Sie, was ansteht.",
+        "Ich habe nichts Besseres vor, ehrlich gesagt. Fangen wir an.",
+        "Bereit, sobald Sie es sind - Eile besteht meinerseits nicht.",
+        "Ich nehme Anweisungen, Ideen und gelegentlich Widerspruch entgegen.",
+        "Der Tag ist neu, meine Geduld auch. Los geht's.",
+        "Ich bin präsent, aber nicht aufdringlich. Sagen Sie einfach los.",
+        "Keine Ausreden heute - ich bin einsatzbereit.",
+        "Fangen wir an, bevor der Tag Einwände hat.",
+        "Ich stehe bereit - unaufgeregt, wie es sich gehört.",
+        "Sagen Sie mir, was zu tun ist.",
+        "Kein Umschweif nötig - ich bin schon bei der Sache.",
+        "Bereit für das Übliche oder etwas völlig Neues.",
+        "Ich bin startklar, Sie müssen nur noch sprechen.",
+        "Ihre Prioritäten, meine Aufmerksamkeit - in dieser Reihenfolge.",
+        "Ruhige Hand, klarer Kopf - was brauchen Sie?",
+        "Kein Small Talk nötig, wir kennen uns schließlich. Los geht's.",
+        "Bereit, sobald Sie das erste Wort sagen.",
+        "Ich bin geduldig, aber nicht untätig - sagen Sie los.",
+        "Ein neuer Tag, dieselbe Zuverlässigkeit. Fangen wir an.",
+        "Ich warte nicht gern, aber für Sie mache ich eine Ausnahme.",
+        "Sagen Sie, was ansteht - der Rest ist meine Aufgabe.",
+        "Keine Aufwärmphase nötig - ich funktioniere sofort.",
+        "Ich bin bereit für Ihre Liste, so lang sie auch ist.",
+        "Der erste Satz gehört Ihnen. Ich übernehme den Rest.",
+        "Ich stehe parat - ganz ohne Tamtam.",
+        "Sagen Sie es einmal, ich kümmere mich zuverlässig darum.",
+        "Bereit, unaufgeregt und erstaunlich wach für die Uhrzeit.",
+        "Ich bin da, sobald Sie mich brauchen.",
+        "Nennen Sie mir das Problem, ich kümmere mich um den Rest.",
+        "Bereit für Ihre Anweisungen - Widerrede nur auf Anfrage.",
+        "Ich bin startklar. Der Tag kann eigentlich losgehen.",
+        "Sagen Sie mir, wo ich anfangen soll.",
+        "Ich bin bereit. Der Rest ist reine Formsache.",
+        "Fangen wir an - der Tag wird ohnehin nicht kürzer."
+    ]
+
     private func startupGreeting() -> String {
         let hour = Calendar.current.component(.hour, from: Date())
         let baseGreeting: String
@@ -1018,14 +1111,16 @@ final class AppState: ObservableObject {
             baseGreeting = "Guten Abend"
         }
 
-        let endings = [
-            "\(userAddress). Wie kann ich helfen?",
-            "\(userAddress). Ich bin bereit, wenn Sie es sind.",
-            "\(userAddress). Womit starten wir?",
-            "\(userAddress). Ich höre zu. Sogar freiwillig."
-        ]
-        let ending = endings.randomElement() ?? "\(userAddress). Wie kann ich helfen?"
-        return "\(baseGreeting), \(ending)"
+        let lastIndexKey = "JarvisLastGreetingIndex"
+        let lastIndex = UserDefaults.standard.object(forKey: lastIndexKey) as? Int
+        var candidateIndices = Array(Self.greetingRemarks.indices)
+        if let lastIndex, candidateIndices.count > 1 {
+            candidateIndices.removeAll { $0 == lastIndex }
+        }
+        let chosenIndex = candidateIndices.randomElement() ?? 0
+        UserDefaults.standard.set(chosenIndex, forKey: lastIndexKey)
+        let remark = Self.greetingRemarks[chosenIndex]
+        return "\(baseGreeting), \(userAddress). \(remark)"
     }
 
     private func ensureMicrophonePermission() async -> Bool {
@@ -1346,14 +1441,20 @@ final class AppState: ObservableObject {
                 } catch {
                     continue
                 }
-                let activeStatuses: Set<ScanStatus> = [.preparing, .scanning, .indexing]
+                let activeStatuses: Set<ScanStatus> = [.preparing, .scanning, .indexing, .downloading]
                 let stillActive =
                     activeStatuses.contains(self.mailScanProgress.status) ||
                     activeStatuses.contains(self.mailBackgroundProgress.status) ||
                     activeStatuses.contains(self.photoScanProgress.status) ||
                     activeStatuses.contains(self.photoVisionProgress.status) ||
-                    activeStatuses.contains(self.fileScanProgress.status)
-                if !stillActive { return }
+                    activeStatuses.contains(self.fileScanProgress.status) ||
+                    activeStatuses.contains(self.modelPullProgress.status)
+                if !stillActive {
+                    if self.modelPullProgress.status == .completed {
+                        await self.refreshStatus(startIfOffline: false)
+                    }
+                    return
+                }
             }
         }
     }

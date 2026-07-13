@@ -15,6 +15,7 @@ enum JarvisSection: String, CaseIterable, Identifiable {
     case photos = "Fotos"
     case privacy = "Datenschutz"
     case models = "Modelle"
+    case licenses = "Lizenzen"
     case settings = "Einstellungen"
 
     var id: String { rawValue }
@@ -32,6 +33,7 @@ enum JarvisSection: String, CaseIterable, Identifiable {
         case .photos: "photo.on.rectangle"
         case .privacy: "hand.raised"
         case .models: "cpu"
+        case .licenses: "doc.text.magnifyingglass"
         case .settings: "gearshape"
         }
     }

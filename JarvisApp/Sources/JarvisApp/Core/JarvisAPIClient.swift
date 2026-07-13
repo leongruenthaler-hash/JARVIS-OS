@@ -103,6 +103,10 @@ struct JarvisAPIClient {
         try await get("/api/calendar/overview")
     }
 
+    func conversationHistory() async throws -> ConversationHistoryPayload {
+        try await get("/api/conversation-history")
+    }
+
     func dailyBriefing() async throws -> DailyBriefingPayload {
         try await post("/api/daily-briefing", body: EmptyBody())
     }
@@ -164,10 +168,21 @@ struct JarvisAPIClient {
         return response.status
     }
 
+    func pullModel(_ model: String) async throws -> ScanProgress {
+        struct Request: Encodable { let model: String }
+        return try await post("/api/models/pull", body: Request(model: model))
+    }
+
     func setFastVoiceMode(_ enabled: Bool) async throws {
         struct Request: Encodable { let enabled: Bool }
         struct Response: Decodable { let ok: Bool; let enabled: Bool }
         let _: Response = try await post("/api/settings/fast-voice-mode", body: Request(enabled: enabled))
+    }
+
+    func setStoreConversation(_ enabled: Bool) async throws {
+        struct Request: Encodable { let enabled: Bool }
+        struct Response: Decodable { let ok: Bool; let enabled: Bool }
+        let _: Response = try await post("/api/settings/store-conversation", body: Request(enabled: enabled))
     }
 
     func privacyStatus() async throws -> String {
@@ -348,6 +363,30 @@ struct DailyBriefingPayload: Decodable, Equatable {
         case briefing
         case calendarCount = "calendar_count"
         case remindersCount = "reminders_count"
+    }
+}
+
+struct ConversationHistoryPayload: Decodable, Equatable {
+    let recordingEnabled: Bool
+    let turns: [ConversationTurnPayload]
+
+    enum CodingKeys: String, CodingKey {
+        case recordingEnabled = "recording_enabled"
+        case turns
+    }
+}
+
+struct ConversationTurnPayload: Decodable, Equatable, Identifiable {
+    let role: String
+    let content: String
+    let createdAt: String
+
+    var id: String { createdAt + role + content.prefix(20) }
+
+    enum CodingKeys: String, CodingKey {
+        case role
+        case content
+        case createdAt = "created_at"
     }
 }
 

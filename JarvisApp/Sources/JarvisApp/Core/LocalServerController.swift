@@ -36,14 +36,20 @@ final class LocalServerController: ObservableObject {
             exec >"$LOG_FILE" 2>&1
             set -e
             cd \(quotedProjectPath)
-            OLLAMA_URL="http://127.0.0.1:11434/api/tags"
             OLLAMA_MARKER=\(Self.shellQuote(Self.ollamaOwnedMarkerPath))
             rm -f "$OLLAMA_MARKER"
             if /usr/bin/curl -fsS --max-time 2 http://127.0.0.1:8765/api/health >/dev/null 2>&1; then
                 echo "Jarvis local server already running."
                 exit 0
             fi
-            if ! /usr/bin/curl -fsS --max-time 2 "$OLLAMA_URL" >/dev/null 2>&1; then
+
+            try_system_ollama() {
+                export OLLAMA_HOST="127.0.0.1:11434"
+                unset JARVIS_BUNDLED_OLLAMA
+                local url="http://127.0.0.1:11434/api/tags"
+                if /usr/bin/curl -fsS --max-time 2 "$url" >/dev/null 2>&1; then
+                    return 0
+                fi
                 touch "$OLLAMA_MARKER"
                 if command -v ollama >/dev/null 2>&1; then
                     nohup ollama serve >/tmp/jarvis_ollama.log 2>&1 &
@@ -51,12 +57,41 @@ final class LocalServerController: ObservableObject {
                     /usr/bin/open -a Ollama >/tmp/jarvis_ollama.log 2>&1 &
                 fi
                 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-                    if /usr/bin/curl -fsS --max-time 2 "$OLLAMA_URL" >/dev/null 2>&1; then
-                        break
+                    if /usr/bin/curl -fsS --max-time 2 "$url" >/dev/null 2>&1; then
+                        return 0
                     fi
                     /bin/sleep 1
                 done
+                return 1
+            }
+
+            BUNDLED_OLLAMA=\(Self.shellQuote((Bundle.main.resourcePath ?? "") + "/ollama-runtime/ollama"))
+            if [ -x "$BUNDLED_OLLAMA" ]; then
+                export OLLAMA_HOST="127.0.0.1:11500"
+                export JARVIS_BUNDLED_OLLAMA="$BUNDLED_OLLAMA"
+                export OLLAMA_MODELS="$HOME/Library/Application Support/Jarvis/ollama-models"
+                BUNDLED_URL="http://$OLLAMA_HOST/api/tags"
+                if ! /usr/bin/curl -fsS --max-time 2 "$BUNDLED_URL" >/dev/null 2>&1; then
+                    touch "$OLLAMA_MARKER"
+                    nohup "$BUNDLED_OLLAMA" serve >/tmp/jarvis_ollama.log 2>&1 &
+                    BUNDLED_OK=1
+                    for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+                        if /usr/bin/curl -fsS --max-time 2 "$BUNDLED_URL" >/dev/null 2>&1; then
+                            BUNDLED_OK=0
+                            break
+                        fi
+                        /bin/sleep 1
+                    done
+                    if [ "$BUNDLED_OK" -ne 0 ]; then
+                        echo "Gebuendeltes Ollama nach 15s nicht erreichbar, Fallback auf System-Ollama."
+                        rm -f "$OLLAMA_MARKER"
+                        try_system_ollama || echo "Kein Ollama verfuegbar (weder gebuendelt noch System) - Jarvis laeuft ohne lokales Modell."
+                    fi
+                fi
+            else
+                try_system_ollama || echo "Kein Ollama verfuegbar - Jarvis laeuft ohne lokales Modell."
             fi
+
             PIDS=$(/usr/sbin/lsof -nP -tiTCP:8765 -sTCP:LISTEN 2>/dev/null || true)
             if [ -n "$PIDS" ]; then
                 echo "Stopping stale Jarvis server on port 8765: $PIDS"
@@ -367,6 +402,12 @@ final class LocalServerController: ObservableObject {
         let status = try await apiClient.models()
         isRunning = true
         return status
+    }
+
+    func pullModel(_ model: String) async throws -> ScanProgress {
+        let progress = try await apiClient.pullModel(model)
+        isRunning = true
+        return progress
     }
 
     func scanStatus() async throws -> ScanStatusBundle {
