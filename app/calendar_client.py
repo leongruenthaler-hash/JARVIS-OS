@@ -198,7 +198,7 @@ _APPLESCRIPT_PROCESS_NAMES = {
 }
 
 
-def _ensure_app_running(process_name: str, timeout: float = 3.0) -> None:
+def _ensure_app_running(process_name: str, timeout: float = 6.0) -> None:
     check_script = f'tell application "System Events" to (name of processes) contains "{process_name}"'
 
     def _is_running() -> bool:
@@ -238,7 +238,7 @@ def _run_applescript(script: str, app_name: str):
             ["osascript", "-e", script],
             capture_output=True,
             text=True,
-            timeout=12,
+            timeout=20,
         )
     except subprocess.TimeoutExpired:
         raise CalendarAccessError(
