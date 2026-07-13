@@ -5,6 +5,7 @@ enum ScanStatus: String, Codable, Equatable {
     case preparing
     case scanning
     case indexing
+    case downloading
     case completed
     case failed
     case cancelled
@@ -15,6 +16,7 @@ enum ScanStatus: String, Codable, Equatable {
         case .preparing: "Wird vorbereitet"
         case .scanning: "Scannt"
         case .indexing: "Indexiert"
+        case .downloading: "Lädt herunter"
         case .completed: "Fertig"
         case .failed: "Fehler"
         case .cancelled: "Abgebrochen"
@@ -100,6 +102,7 @@ struct ScanStatusBundle: Codable {
     let photos: ScanProgress
     let photoVision: ScanProgress
     let files: ScanProgress
+    let modelPull: ScanProgress
 
     enum CodingKeys: String, CodingKey {
         case mailScan = "mail_scan"
@@ -107,6 +110,7 @@ struct ScanStatusBundle: Codable {
         case photos
         case photoVision = "photos_vision"
         case files
+        case modelPull = "model_pull"
     }
 
     init(
@@ -114,13 +118,15 @@ struct ScanStatusBundle: Codable {
         mailBackground: ScanProgress,
         photos: ScanProgress,
         photoVision: ScanProgress = ScanProgress(),
-        files: ScanProgress = ScanProgress()
+        files: ScanProgress = ScanProgress(),
+        modelPull: ScanProgress = ScanProgress()
     ) {
         self.mailScan = mailScan
         self.mailBackground = mailBackground
         self.photos = photos
         self.photoVision = photoVision
         self.files = files
+        self.modelPull = modelPull
     }
 
     init(from decoder: Decoder) throws {
@@ -130,5 +136,6 @@ struct ScanStatusBundle: Codable {
         photos = try container.decode(ScanProgress.self, forKey: .photos)
         photoVision = try container.decodeIfPresent(ScanProgress.self, forKey: .photoVision) ?? ScanProgress()
         files = try container.decodeIfPresent(ScanProgress.self, forKey: .files) ?? ScanProgress()
+        modelPull = try container.decodeIfPresent(ScanProgress.self, forKey: .modelPull) ?? ScanProgress()
     }
 }

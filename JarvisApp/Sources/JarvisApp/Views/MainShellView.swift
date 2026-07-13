@@ -74,6 +74,8 @@ struct MainShellView: View {
             ActionCenterView()
         case .chat:
             ChatView()
+        case .history:
+            HistoryView()
         case .mail:
             MailView()
         case .files:
@@ -88,6 +90,8 @@ struct MainShellView: View {
             PrivacyView()
         case .models:
             ModelsView()
+        case .licenses:
+            LicensesView()
         case .settings:
             SettingsView()
         default:

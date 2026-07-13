@@ -16,6 +16,7 @@ struct SettingsView: View {
                 designSection
                 openAISection
                 coreSection
+                licensesSection
             }
             .padding(28)
             .frame(maxWidth: 920, alignment: .leading)
@@ -23,6 +24,9 @@ struct SettingsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(LiquidGlassBackground())
         .navigationTitle("Einstellungen")
+        .task {
+            await appState.refreshConversationHistory()
+        }
     }
 
     private var header: some View {
@@ -109,6 +113,21 @@ struct SettingsView: View {
                 }
                 .onChange(of: appState.alwaysListenEnabled) { _, _ in
                     Task { await appState.applyAlwaysListenChange() }
+                }
+
+                Divider().opacity(0.4)
+
+                Toggle(isOn: $appState.storeConversationEnabled) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Gesprächsverlauf speichern")
+                            .font(.headline)
+                        Text("Speichert die letzten Nachrichten lokal, damit der Verlauf-Tab etwas anzeigen kann. Standardmäßig aus.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .onChange(of: appState.storeConversationEnabled) { _, newValue in
+                    Task { await appState.setStoreConversationEnabled(newValue) }
                 }
             }
             .padding(14)
@@ -302,6 +321,20 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.bordered)
             }
+        }
+        .liquidGlassPanel(tint: .indigo)
+    }
+
+    private var licensesSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            sectionHeader("Lizenzen", subtitle: "Die lokalen KI-Modelle (phi4-mini, gemma3:4b, qwen3:4b) stehen unter eigenen Lizenzbedingungen der jeweiligen Hersteller.")
+
+            Button {
+                appState.selectedSection = .licenses
+            } label: {
+                Label("Lizenzen ansehen", systemImage: "doc.text.magnifyingglass")
+            }
+            .buttonStyle(.bordered)
         }
         .liquidGlassPanel(tint: .indigo)
     }

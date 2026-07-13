@@ -26,3 +26,9 @@ JarvisApp/.swiftpm/
 **/DerivedData/
 *.xcuserstate
 **/xcuserdata/
+
+# Bundled Ollama runtime + model weights (multi-GB binaries, not fit for git -
+# assembled locally before an export/build). Licenses/ stays tracked (small
+# text files).
+JarvisApp/Sources/JarvisApp/Resources/ollama-runtime/
+JarvisApp/Sources/JarvisApp/Resources/bundled-models/

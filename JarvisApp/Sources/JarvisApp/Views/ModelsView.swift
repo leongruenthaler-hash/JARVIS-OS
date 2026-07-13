@@ -17,14 +17,16 @@ struct ModelsView: View {
             subtitle: "Lokale Premiumqualität",
             detail: "Etwas stärker für längere Antworten und natürlichere Formulierungen.",
             model: "gemma3:4b",
-            symbol: "sparkles"
+            symbol: "sparkles",
+            downloadSizeHint: "3,3 GB"
         ),
         LocalModelOption(
             title: "qwen3:4b",
             subtitle: "Lokale höchste Qualität",
             detail: "Stark für komplexere Aufgaben, braucht aber etwas mehr Geduld.",
             model: "qwen3:4b",
-            symbol: "brain.head.profile"
+            symbol: "brain.head.profile",
+            downloadSizeHint: "2,5 GB"
         )
     ]
 
@@ -169,57 +171,115 @@ struct ModelsView: View {
         let installed = isInstalled(option.model)
         let active = isActiveLocalModel(option.model)
 
-        return Button {
-            guard installed else { return }
-            Task { await appState.switchModel(provider: "ollama", model: option.model) }
-        } label: {
-            HStack(spacing: 14) {
-                Image(systemName: option.symbol)
-                    .font(.system(size: 21, weight: .semibold))
-                    .foregroundStyle(active ? .green : .primary)
-                    .frame(width: 42, height: 42)
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        return VStack(alignment: .leading, spacing: 14) {
+            if installed {
+                Button {
+                    Task { await appState.switchModel(provider: "ollama", model: option.model) }
+                } label: {
+                    localModelRow(option, installed: true, active: active)
+                }
+                .buttonStyle(.plain)
+            } else {
+                localModelRow(option, installed: false, active: false)
+                modelDownloadControls(option)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(cardBackground(active: active), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(active ? Color.green.opacity(0.35) : Color.white.opacity(0.18), lineWidth: 1)
+        )
+        .shadow(color: (active ? Color.green : Color.indigo).opacity(0.08), radius: 18, x: 0, y: 10)
+    }
 
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 8) {
-                        Text(option.title)
-                            .font(.headline)
-                        pill(installed ? "Installiert" : "Fehlt", color: installed ? .green : .orange)
-                        if active {
-                            pill("Aktiv", color: .blue)
-                        }
+    private func localModelRow(_ option: LocalModelOption, installed: Bool, active: Bool) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: option.symbol)
+                .font(.system(size: 21, weight: .semibold))
+                .foregroundStyle(active ? .green : .primary)
+                .frame(width: 42, height: 42)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    Text(option.title)
+                        .font(.headline)
+                    pill(installed ? "Installiert" : "Fehlt", color: installed ? .green : .orange)
+                    if active {
+                        pill("Aktiv", color: .blue)
                     }
-                    Text(option.subtitle)
-                        .font(.callout.weight(.medium))
-                    Text(installed ? option.detail : "Installieren mit: ollama pull \(option.model)")
+                }
+                Text(option.subtitle)
+                    .font(.callout.weight(.medium))
+                Text(option.detail)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer()
+
+            if active {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.green)
+            } else if installed {
+                Image(systemName: "arrow.right.circle")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func modelDownloadControls(_ option: LocalModelOption) -> some View {
+        let isPullingThis = isPulling(option.model)
+        let failedThis = pullFailed(option.model)
+
+        if isPullingThis {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(appState.modelPullProgress.currentLabel)
                         .font(.callout)
                         .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    Text(appState.modelPullProgress.percentText)
+                        .font(.callout.monospacedDigit().weight(.semibold))
                 }
+                ProgressView(value: appState.modelPullProgress.totalItems > 0 ? appState.modelPullProgress.fraction : nil)
+                    .progressViewStyle(.linear)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                Button {
+                    Task { await appState.pullModel(option.model) }
+                } label: {
+                    Label(
+                        failedThis ? "Erneut versuchen" : "Herunterladen (\(option.downloadSizeHint))",
+                        systemImage: "arrow.down.circle"
+                    )
+                }
+                .buttonStyle(.borderedProminent)
 
-                Spacer()
-
-                if active {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.title3)
-                        .foregroundStyle(.green)
-                } else {
-                    Image(systemName: installed ? "arrow.right.circle" : "tray.and.arrow.down")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
+                if failedThis, let error = appState.modelPullProgress.errorMessage {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
                 }
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(cardBackground(active: active), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .strokeBorder(active ? Color.green.opacity(0.35) : Color.white.opacity(0.18), lineWidth: 1)
-            )
-            .shadow(color: (active ? Color.green : Color.indigo).opacity(0.08), radius: 18, x: 0, y: 10)
         }
-        .buttonStyle(.plain)
-        .disabled(!installed)
+    }
+
+    private func isPulling(_ model: String) -> Bool {
+        normalized(appState.modelPullProgress.stats["model"]?.description ?? "") == normalized(model)
+            && [.preparing, .downloading].contains(appState.modelPullProgress.status)
+    }
+
+    private func pullFailed(_ model: String) -> Bool {
+        normalized(appState.modelPullProgress.stats["model"]?.description ?? "") == normalized(model)
+            && appState.modelPullProgress.status == .failed
     }
 
     private var openAISection: some View {
@@ -324,6 +384,7 @@ private struct LocalModelOption: Identifiable {
     let detail: String
     let model: String
     let symbol: String
+    var downloadSizeHint: String = ""
 
     var id: String { model }
 }

@@ -89,7 +89,7 @@ struct ScanProgressCard: View {
         case .completed: .green
         case .failed: .red
         case .cancelled: .orange
-        case .scanning, .indexing, .preparing: .blue
+        case .scanning, .indexing, .preparing, .downloading: .blue
         case .idle: .secondary
         }
     }
