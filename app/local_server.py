@@ -4,6 +4,8 @@ import json
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -23,7 +25,7 @@ from llm_client import LLMClient
 from jarvis_personality import JARVIS_SYSTEM_PROMPT, message_shape, normalize_jarvis_messages, text_summary
 from mail_client import list_inbox_messages, list_mailboxes
 from memory import Memory
-from model_manager import ModelManager
+from model_manager import ModelManager, ollama_base_url
 from model_router import ModelRouter
 from photos_client import PhotoIndex
 from permission_manager import PermissionManager
@@ -130,6 +132,9 @@ class JarvisLocalServer:
         self._photo_scan_lock = threading.Lock()
         self._photo_scan_thread = None
         self._photo_vision_thread = None
+        self._model_pull_status_path = ROOT / "memory" / "model_pull_status.json"
+        self._model_pull_lock = threading.Lock()
+        self._model_pull_thread = None
         self._last_answer_source = "local"
         self._last_answer_model = self.models.active_model
 
@@ -176,7 +181,103 @@ class JarvisLocalServer:
             "photos": self._photos_status(),
             "photos_vision": self._photos_vision_status(),
             "files": self._files_status(),
+            "model_pull": self._load_scan_status(
+                self._model_pull_status_path,
+                fallback=self._scan_progress("idle", "Kein Modell-Download aktiv."),
+            ),
         }
+
+    PULLABLE_MODELS = {"gemma3:4b", "qwen3:4b"}
+
+    def start_model_pull(self, model: str) -> dict[str, Any]:
+        normalized = str(model or "").strip()
+        if normalized not in self.PULLABLE_MODELS:
+            return self._scan_progress(
+                "failed",
+                f"{normalized or 'Dieses Modell'} kann nicht per Ein-Klick-Download geladen werden.",
+                error_message="unsupported_model",
+            )
+
+        started_at = datetime_now()
+        self._save_scan_status(
+            self._model_pull_status_path,
+            self._scan_progress(
+                "downloading",
+                f"Download von {normalized} wird vorbereitet.",
+                started_at=started_at,
+                stats={"model": normalized},
+            ),
+        )
+        with self._model_pull_lock:
+            if self._model_pull_thread is not None and self._model_pull_thread.is_alive():
+                return self._load_scan_status(
+                    self._model_pull_status_path,
+                    fallback=self._scan_progress("downloading", "Download läuft bereits.", stats={"model": normalized}),
+                )
+            self._model_pull_thread = threading.Thread(
+                target=self._run_model_pull, args=(normalized, started_at), daemon=True
+            )
+            self._model_pull_thread.start()
+        return self._load_scan_status(
+            self._model_pull_status_path,
+            self._scan_progress("downloading", f"Download von {normalized} wird vorbereitet.", stats={"model": normalized}),
+        )
+
+    def _run_model_pull(self, model: str, started_at: str) -> None:
+        layer_progress: dict[str, tuple[int, int]] = {}
+        try:
+            request = urllib.request.Request(
+                f"{ollama_base_url()}/api/pull",
+                data=json.dumps({"model": model, "stream": True}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(request, timeout=1800) as response:
+                for raw_line in response:
+                    line = raw_line.decode("utf-8").strip()
+                    if not line:
+                        continue
+                    try:
+                        payload = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+
+                    status_text = str(payload.get("status") or "")
+                    digest = payload.get("digest")
+                    if digest:
+                        layer_progress[str(digest)] = (
+                            int(payload.get("completed") or 0),
+                            int(payload.get("total") or 0),
+                        )
+
+                    total_all = sum(total for _, total in layer_progress.values())
+                    completed_all = sum(completed for completed, _ in layer_progress.values())
+                    is_done = status_text == "success"
+
+                    self._save_scan_status(
+                        self._model_pull_status_path,
+                        self._scan_progress(
+                            "completed" if is_done else "downloading",
+                            status_text or f"Lädt {model} herunter.",
+                            current_item=completed_all,
+                            total_items=total_all,
+                            started_at=started_at,
+                            finished_at=datetime_now() if is_done else None,
+                            stats={"model": model},
+                        ),
+                    )
+        except Exception as exc:
+            self._save_scan_status(
+                self._model_pull_status_path,
+                self._scan_progress(
+                    "failed",
+                    f"Download von {model} fehlgeschlagen.",
+                    started_at=started_at,
+                    finished_at=datetime_now(),
+                    error_message=str(exc) or type(exc).__name__,
+                    stats={"model": model},
+                ),
+            )
 
     def start_mail_folder_scan(self) -> dict[str, Any]:
         started_at = datetime_now()
@@ -1619,6 +1720,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, SERVER.transcribe_voice(str(payload.get("audio_path") or ""), payload.get("sample_rate")))
             elif path == "/api/models":
                 self._json(200, SERVER.set_model(payload))
+            elif path == "/api/models/pull":
+                self._json(200, SERVER.start_model_pull(str(payload.get("model") or "")))
             elif path == "/api/settings/fast-voice-mode":
                 enabled = bool(payload.get("enabled"))
                 SERVER.config["fast_voice_mode"] = enabled

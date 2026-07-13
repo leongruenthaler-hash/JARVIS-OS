@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from model_manager import is_ollama_installed, is_ollama_running, list_installed_ollama_models
+from model_manager import is_ollama_installed, is_ollama_running, list_installed_ollama_models, ollama_base_url
 
 
 VISION_MODEL_CANDIDATES = (
@@ -163,7 +163,7 @@ class LocalVisionService:
             },
         }
         request = urllib.request.Request(
-            "http://127.0.0.1:11434/api/generate",
+            f"{ollama_base_url()}/api/generate",
             data=json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="POST",
