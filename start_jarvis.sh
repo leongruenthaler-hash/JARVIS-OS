@@ -4,6 +4,11 @@ set -euo pipefail
 cd "$(dirname "$0")"
 PYTHON="$PWD/.venv/bin/python"
 
+if [ ! -x "$PYTHON" ]; then
+    echo "Kein .venv gefunden, lege eins an ..."
+    python3 -m venv .venv
+fi
+
 if ! "$PYTHON" -c "import numpy, sounddevice, dotenv, openai, edge_tts, miniaudio, faster_whisper, torch" >/dev/null 2>&1; then
     echo "Python-Pakete fehlen oder laden nicht sauber in .venv."
     echo "Installiere requirements.txt ..."
