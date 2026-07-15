@@ -34,6 +34,7 @@
 		BB56C742007B2B0006A915D4 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FED92BDBA779BC8A1F4138B2 /* RootView.swift */; };
 		BEEDA8D544E9F2D2E159BD20 /* MainShellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F69298EA3305AA688AC9E91 /* MainShellView.swift */; };
 		C162A819C69FA27CFA196662 /* ServerStatusCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECD6CEA34720D0375415009B /* ServerStatusCard.swift */; };
+		8401EAA29BF80DAE1B953483 /* SetupProgressCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A82EFFD2741E4DAD6415FC96 /* SetupProgressCard.swift */; };
 		C4B7BAE04211F925F46CE89E /* JarvisModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2805D3602E78FDB8A2D88F3B /* JarvisModels.swift */; };
 		D68C167C2C437B05A54BC24C /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEC5ED5093EF18C40845EC9F /* ChatView.swift */; };
 		EB19DCFF8A89B08FA0E5BE7E /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55545D9D4E1E70D1A8E00B36 /* OnboardingView.swift */; };
@@ -76,6 +77,7 @@
 		CD87D845E1639C0D7F9C10A3 /* ModelsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelsView.swift; sourceTree = "<group>"; };
 		CE436B2B3FAF9DED68E8828A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		ECD6CEA34720D0375415009B /* ServerStatusCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerStatusCard.swift; sourceTree = "<group>"; };
+		A82EFFD2741E4DAD6415FC96 /* SetupProgressCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupProgressCard.swift; sourceTree = "<group>"; };
 		EDB9A78B15C2C04E8B5296A0 /* JarvisMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisMacApp.swift; sourceTree = "<group>"; };
 		FEC5ED5093EF18C40845EC9F /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		FED92BDBA779BC8A1F4138B2 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
@@ -112,6 +114,7 @@
 					1A2B3C4D5E6F708192A3B4D0 /* LiquidGlass.swift */,
 					1A2B3C4D5E6F708192A3B4C6 /* ScanProgressCard.swift */,
 					ECD6CEA34720D0375415009B /* ServerStatusCard.swift */,
+					A82EFFD2741E4DAD6415FC96 /* SetupProgressCard.swift */,
 				7B130D8C5A37DA22F60FFAC7 /* StatusPill.swift */,
 				8DF07EF06A8FD772A6543B0F /* JarvisVoiceOrb.swift */,
 			);
@@ -301,6 +304,7 @@
 					5EA0C61453C727CED1DD9588 /* JarvisMacApp.swift in Sources */,
 				F77A288475FF33BA98017C16 /* ChatBubble.swift in Sources */,
 				C162A819C69FA27CFA196662 /* ServerStatusCard.swift in Sources */,
+				8401EAA29BF80DAE1B953483 /* SetupProgressCard.swift in Sources */,
 				EE1BE78BAB5E3FEAD8C2DBDD /* StatusPill.swift in Sources */,
 				A967EE67784809B6D279BE80 /* AppState.swift in Sources */,
 				7565F6938579AAC278653159 /* JarvisAPIClient.swift in Sources */,

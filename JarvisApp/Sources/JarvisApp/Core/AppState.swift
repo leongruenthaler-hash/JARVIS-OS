@@ -48,6 +48,10 @@ final class AppState: ObservableObject {
     @Published var fastVoiceMode = UserDefaults.standard.object(forKey: "JarvisFastVoiceMode") as? Bool ?? true
     @Published var alwaysListenEnabled = UserDefaults.standard.object(forKey: "JarvisAlwaysListenEnabled") as? Bool ?? false
     @Published var lastError: String?
+    /// Progress message during first-run setup (Command Line Tools / venv / pip install).
+    /// Kept separate from `lastError` on purpose - it's shown with neutral styling, not as
+    /// an error, since a 10-15 minute one-time setup is expected behavior, not a failure.
+    @Published var bootstrapStatus: String?
 
     let serverController = LocalServerController()
 
@@ -283,22 +287,37 @@ final class AppState: ObservableObject {
 
         status = .offline
         let isFirstTimeSetup = !serverController.venvPythonExists
-        lastError = isFirstTimeSetup
-            ? "Ersteinrichtung läuft - installiere Python-Umgebung (einmalig, kann mehrere Minuten dauern) ..."
-            : "Ich starte den lokalen Core ..."
+        if isFirstTimeSetup {
+            bootstrapStatus = "Einmalige Ersteinrichtung wird vorbereitet ..."
+            lastError = nil
+        } else {
+            bootstrapStatus = nil
+            lastError = "Ich starte den lokalen Core ..."
+        }
         _ = serverController.start()
 
         let maxAttempts = isFirstTimeSetup ? 1800 : 40
         for _ in 0..<maxAttempts {
             try? await Task.sleep(for: .milliseconds(500))
+            if isFirstTimeSetup, let bootstrap = serverController.currentBootstrapStatus() {
+                bootstrapStatus = bootstrap.message
+                if bootstrap.stage == "error" {
+                    status = .offline
+                    lastError = bootstrap.message
+                    bootstrapStatus = nil
+                    return
+                }
+            }
             if await refreshStatus(startIfOffline: false) {
                 lastError = nil
+                bootstrapStatus = nil
                 serverController.detectOllamaOwnership()
                 return
             }
         }
 
         status = .offline
+        bootstrapStatus = nil
         serverController.captureLaunchFailureDetail()
         lastError = serverController.lastLaunchError ?? "Der lokale Core konnte nicht automatisch starten."
     }
