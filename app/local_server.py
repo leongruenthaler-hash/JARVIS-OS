@@ -43,6 +43,22 @@ from stt_engines import create_stt_engine
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG = load_config()
 
+VOICE_BOOTSTRAP_STATUS_PATH = Path("/tmp/jarvis_app_voice_bootstrap_status.txt")
+
+
+def _write_voice_bootstrap_status(stage: str, message: str) -> None:
+    """Atomically writes a single `<ts>|<stage>|<message>` line the Swift app polls
+    while the STT engine loads for the first time (model download + first-run
+    compilation can take 1-2 minutes) - same format/pattern as the venv/CLT bootstrap
+    status file in LocalServerController.swift."""
+    tmp_path = VOICE_BOOTSTRAP_STATUS_PATH.with_suffix(".tmp")
+    tmp_path.write_text(f"{int(time.time())}|{stage}|{message}\n", encoding="utf-8")
+    tmp_path.replace(VOICE_BOOTSTRAP_STATUS_PATH)
+
+
+def _clear_voice_bootstrap_status() -> None:
+    VOICE_BOOTSTRAP_STATUS_PATH.unlink(missing_ok=True)
+
 
 def datetime_now() -> str:
     from datetime import datetime
@@ -1191,7 +1207,15 @@ class JarvisLocalServer:
 
     def _get_stt_engine(self):
         if self._stt_engine is None:
-            self._stt_engine = create_stt_engine(self.config)
+            _write_voice_bootstrap_status(
+                "loading_stt_model",
+                "Einmalige Vorbereitung: Sprachmodell wird geladen (kann beim ersten "
+                "Mal 1-2 Minuten dauern, danach deutlich schneller).",
+            )
+            try:
+                self._stt_engine = create_stt_engine(self.config)
+            finally:
+                _clear_voice_bootstrap_status()
         return self._stt_engine
 
     def _get_audio_listener(self):
