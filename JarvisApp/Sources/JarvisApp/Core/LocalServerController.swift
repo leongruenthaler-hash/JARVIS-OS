@@ -9,6 +9,7 @@ final class LocalServerController: ObservableObject {
     private static let startLogPath = "/tmp/jarvis_app_server_start.log"
     private static let ollamaOwnedMarkerPath = "/tmp/jarvis_app_ollama_started_by_app.marker"
     private static let bootstrapStatusPath = "/tmp/jarvis_app_bootstrap_status.txt"
+    private static let voiceBootstrapStatusPath = "/tmp/jarvis_app_voice_bootstrap_status.txt"
 
     private let projectPath = LocalServerController.detectProjectPath()
     private let apiClient = JarvisAPIClient()
@@ -34,7 +35,18 @@ final class LocalServerController: ObservableObject {
     /// never started) - the file is written as `<unix_ts>|<stage_id>|<message>` and
     /// overwritten atomically (write-then-rename) so this never reads a half-written line.
     func currentBootstrapStatus() -> BootstrapStatus? {
-        guard let data = FileManager.default.contents(atPath: Self.bootstrapStatusPath),
+        Self.readStatusFile(atPath: Self.bootstrapStatusPath)
+    }
+
+    /// Same idea as `currentBootstrapStatus()`, but for the STT engine's first load
+    /// (model download + first-run compilation) - written by local_server.py right
+    /// before it creates the engine for the very first time.
+    func currentVoiceBootstrapStatus() -> BootstrapStatus? {
+        Self.readStatusFile(atPath: Self.voiceBootstrapStatusPath)
+    }
+
+    private static func readStatusFile(atPath path: String) -> BootstrapStatus? {
+        guard let data = FileManager.default.contents(atPath: path),
               let line = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
               !line.isEmpty else { return nil }
         let parts = line.split(separator: "|", maxSplits: 2, omittingEmptySubsequences: false)
