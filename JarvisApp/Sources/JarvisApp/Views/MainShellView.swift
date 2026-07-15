@@ -47,9 +47,15 @@ struct MainShellView: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            ServerStatusCard()
-                .padding(.horizontal, 12)
-                .padding(.bottom, 12)
+            Group {
+                if appState.bootstrapStatus != nil {
+                    SetupProgressCard()
+                } else {
+                    ServerStatusCard()
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 12)
         }
         .background {
             if theme.isFuturistic {

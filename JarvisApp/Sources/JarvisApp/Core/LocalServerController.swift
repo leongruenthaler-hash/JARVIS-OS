@@ -8,6 +8,7 @@ final class LocalServerController: ObservableObject {
 
     private static let startLogPath = "/tmp/jarvis_app_server_start.log"
     private static let ollamaOwnedMarkerPath = "/tmp/jarvis_app_ollama_started_by_app.marker"
+    private static let bootstrapStatusPath = "/tmp/jarvis_app_bootstrap_status.txt"
 
     private let projectPath = LocalServerController.detectProjectPath()
     private let apiClient = JarvisAPIClient()
@@ -21,6 +22,24 @@ final class LocalServerController: ObservableObject {
     /// install where `start()` will need to bootstrap it first (slow: several minutes).
     var venvPythonExists: Bool {
         FileManager.default.fileExists(atPath: projectPath + "/.venv/bin/python3")
+    }
+
+    struct BootstrapStatus {
+        let stage: String
+        let message: String
+    }
+
+    /// Reads the progress line the bootstrap script in `start()` writes while setting up
+    /// Command Line Tools / the venv on a fresh install. `nil` once bootstrap is done (or
+    /// never started) - the file is written as `<unix_ts>|<stage_id>|<message>` and
+    /// overwritten atomically (write-then-rename) so this never reads a half-written line.
+    func currentBootstrapStatus() -> BootstrapStatus? {
+        guard let data = FileManager.default.contents(atPath: Self.bootstrapStatusPath),
+              let line = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !line.isEmpty else { return nil }
+        let parts = line.split(separator: "|", maxSplits: 2, omittingEmptySubsequences: false)
+        guard parts.count == 3 else { return nil }
+        return BootstrapStatus(stage: String(parts[1]), message: String(parts[2]))
     }
 
     /// Checks whether the app bundle or its large bundled resources (the ~2.5GB model
@@ -82,6 +101,12 @@ final class LocalServerController: ObservableObject {
             cd \(quotedProjectPath)
             OLLAMA_MARKER=\(Self.shellQuote(Self.ollamaOwnedMarkerPath))
             rm -f "$OLLAMA_MARKER"
+            STATUS_FILE=\(Self.shellQuote(Self.bootstrapStatusPath))
+            rm -f "$STATUS_FILE"
+            write_status() {
+                printf '%s|%s|%s\n' "$(date +%s)" "$1" "$2" > "$STATUS_FILE.tmp"
+                mv "$STATUS_FILE.tmp" "$STATUS_FILE"
+            }
             if /usr/bin/curl -fsS --max-time 2 http://127.0.0.1:8765/api/health >/dev/null 2>&1; then
                 echo "Jarvis local server already running."
                 exit 0
@@ -143,19 +168,52 @@ final class LocalServerController: ObservableObject {
                 /bin/sleep 0.7
             fi
 
+            NEEDS_BOOTSTRAP=0
+            [ ! -x .venv/bin/python3 ] && NEEDS_BOOTSTRAP=1
+            if [ "$NEEDS_BOOTSTRAP" -eq 1 ]; then
+                write_status "checking_clt" "Pruefe, ob Xcode Command Line Tools installiert sind ..."
+                if ! xcode-select -p >/dev/null 2>&1; then
+                    write_status "clt_prompt" "Einmalige Einrichtung: Ein Systemfenster ist erschienen (ggf. hinter anderen Fenstern) - bitte dort auf Installieren klicken. Dauert danach ca. 10-15 Minuten."
+                    xcode-select --install >/dev/null 2>&1 || true
+                    write_status "clt_installing" "Xcode Command Line Tools werden installiert - bitte warten (kann bis zu 15 Minuten dauern)."
+                    CLT_OK=1
+                    for _ in $(seq 1 180); do
+                        if xcode-select -p >/dev/null 2>&1; then
+                            CLT_OK=0
+                            break
+                        fi
+                        /bin/sleep 5
+                    done
+                    if [ "$CLT_OK" -ne 0 ]; then
+                        write_status "error" "Xcode Command Line Tools wurden nicht installiert. Bitte im Terminal 'xcode-select --install' ausfuehren und Jarvis danach erneut starten."
+                        echo "FEHLER: Xcode Command Line Tools nach 15 Minuten nicht installiert."
+                        exit 1
+                    fi
+                fi
+            fi
+
             if [ ! -x .venv/bin/python3 ]; then
-                echo "Kein venv gefunden - richte Python-Umgebung einmalig ein (kann mehrere Minuten dauern)..."
+                write_status "creating_venv" "Einmalige Ersteinrichtung: Python-Umgebung wird angelegt ..."
                 if ! command -v python3 >/dev/null 2>&1; then
-                    echo "FEHLER: python3 ist auf diesem Mac nicht installiert. Bitte im Terminal 'xcode-select --install' ausfuehren und Jarvis danach erneut starten."
+                    write_status "error" "python3 ist auf diesem Mac nicht installiert. Bitte im Terminal 'xcode-select --install' ausfuehren und Jarvis danach erneut starten."
+                    echo "FEHLER: python3 ist auf diesem Mac nicht installiert."
                     exit 1
                 fi
                 python3 -m venv .venv
             fi
             if ! .venv/bin/python3 -c "import numpy, sounddevice, dotenv, openai, edge_tts, miniaudio, faster_whisper, torch" >/dev/null 2>&1; then
-                echo "Installiere Python-Pakete (einmalig, kann mehrere Minuten dauern)..."
-                .venv/bin/python3 -m pip install --upgrade pip
-                .venv/bin/python3 -m pip install -r requirements.txt
+                write_status "installing_packages" "Einmalige Ersteinrichtung: Python-Pakete werden vorbereitet ..."
+                .venv/bin/python3 -m pip install --upgrade pip >/dev/null 2>&1 || true
+                TOTAL=$(grep -vc '^[[:space:]]*$' requirements.txt)
+                N=0
+                while IFS= read -r PKG; do
+                    [ -z "$PKG" ] && continue
+                    N=$((N + 1))
+                    write_status "installing_packages" "Einmalige Ersteinrichtung: Installiere Paket $N von $TOTAL ($PKG) - kann insgesamt 10-15 Minuten dauern. Mac bitte nicht in den Ruhezustand versetzen."
+                    .venv/bin/python3 -m pip install "$PKG"
+                done < requirements.txt
             fi
+            write_status "starting_server" "Python-Umgebung bereit, Jarvis-Kern startet ..."
             exec \(quotedProjectPath)/.venv/bin/python3 app/jarvis.py --local-server
             """
         ]
