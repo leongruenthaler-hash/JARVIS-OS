@@ -17,6 +17,50 @@ final class LocalServerController: ObservableObject {
 
     var hasOwnedProcess: Bool { serverProcess != nil }
 
+    /// Whether the Python backend's venv has already been set up. `false` on a fresh
+    /// install where `start()` will need to bootstrap it first (slow: several minutes).
+    var venvPythonExists: Bool {
+        FileManager.default.fileExists(atPath: projectPath + "/.venv/bin/python3")
+    }
+
+    /// Checks whether the app bundle or its large bundled resources (the ~2.5GB model
+    /// blob, the ollama binary) are iCloud placeholders that macOS hasn't fully
+    /// downloaded locally. Reading/mapping such a file mid-eviction is what causes a
+    /// hard SIGBUS crash instead of a normal error - this catches it ahead of time.
+    /// Returns a user-facing German message if a problem is found, `nil` otherwise.
+    func iCloudPlaceholderIssue() -> String? {
+        let fileManager = FileManager.default
+        let resourceKeys: Set<URLResourceKey> = [.isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey]
+
+        func isUndownloadedPlaceholder(_ url: URL) -> Bool {
+            guard let values = try? url.resourceValues(forKeys: resourceKeys) else { return false }
+            return Self.isUndownloadedPlaceholder(
+                isUbiquitousItem: values.isUbiquitousItem,
+                downloadingStatus: values.ubiquitousItemDownloadingStatus
+            )
+        }
+
+        var pathsToCheck: [String] = [Bundle.main.bundlePath]
+        if let resourcePath = Bundle.main.resourcePath {
+            pathsToCheck.append(resourcePath + "/ollama-runtime/ollama")
+            let bundledModelsPath = resourcePath + "/bundled-models"
+            if let enumerator = fileManager.enumerator(atPath: bundledModelsPath) {
+                for case let relativePath as String in enumerator {
+                    let fullPath = bundledModelsPath + "/" + relativePath
+                    let size = (try? fileManager.attributesOfItem(atPath: fullPath)[.size] as? Int) ?? nil
+                    if let size, size > 10_000_000 {
+                        pathsToCheck.append(fullPath)
+                    }
+                }
+            }
+        }
+
+        for path in pathsToCheck where isUndownloadedPlaceholder(URL(fileURLWithPath: path)) {
+            return "Jarvis liegt in einem iCloud-synchronisierten Ordner (z. B. Desktop) und macOS hat Teile davon ausgelagert, um Speicherplatz zu sparen. Bitte JarvisApp.app nach /Applications verschieben und erneut starten - sonst kann die App abstürzen."
+        }
+        return nil
+    }
+
     @discardableResult
     func start(projectPath: String? = nil) -> Bool {
         if serverProcess?.isRunning == true {
@@ -97,6 +141,20 @@ final class LocalServerController: ObservableObject {
                 echo "Stopping stale Jarvis server on port 8765: $PIDS"
                 /bin/kill $PIDS 2>/dev/null || true
                 /bin/sleep 0.7
+            fi
+
+            if [ ! -x .venv/bin/python3 ]; then
+                echo "Kein venv gefunden - richte Python-Umgebung einmalig ein (kann mehrere Minuten dauern)..."
+                if ! command -v python3 >/dev/null 2>&1; then
+                    echo "FEHLER: python3 ist auf diesem Mac nicht installiert. Bitte im Terminal 'xcode-select --install' ausfuehren und Jarvis danach erneut starten."
+                    exit 1
+                fi
+                python3 -m venv .venv
+            fi
+            if ! .venv/bin/python3 -c "import numpy, sounddevice, dotenv, openai, edge_tts, miniaudio, faster_whisper, torch" >/dev/null 2>&1; then
+                echo "Installiere Python-Pakete (einmalig, kann mehrere Minuten dauern)..."
+                .venv/bin/python3 -m pip install --upgrade pip
+                .venv/bin/python3 -m pip install -r requirements.txt
             fi
             exec \(quotedProjectPath)/.venv/bin/python3 app/jarvis.py --local-server
             """
@@ -673,6 +731,17 @@ private extension LocalServerController {
 
     nonisolated static func shellQuote(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    /// Pure decision logic behind `iCloudPlaceholderIssue()`, split out so it can be
+    /// exercised with synthetic inputs (real iCloud eviction isn't reliably triggerable
+    /// from a script - see verification notes) instead of only against live resourceValues.
+    nonisolated static func isUndownloadedPlaceholder(
+        isUbiquitousItem: Bool?,
+        downloadingStatus: URLUbiquitousItemDownloadingStatus?
+    ) -> Bool {
+        guard isUbiquitousItem == true else { return false }
+        return downloadingStatus != .current
     }
 }
 

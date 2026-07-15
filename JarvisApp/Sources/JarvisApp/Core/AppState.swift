@@ -43,8 +43,8 @@ final class AppState: ObservableObject {
     @Published var composerDraft = ""
     @Published var onboardingCompleted = UserDefaults.standard.bool(forKey: "JarvisOnboardingCompleted")
     @Published var language = UserDefaults.standard.string(forKey: "JarvisLanguage") ?? "Deutsch"
-    @Published var userName = UserDefaults.standard.string(forKey: "JarvisUserName") ?? "Leon"
-    @Published var userSalutation = UserDefaults.standard.string(forKey: "JarvisUserSalutation") ?? "sir"
+    @Published var userName = UserDefaults.standard.string(forKey: "JarvisUserName") ?? ""
+    @Published var userSalutation = UserDefaults.standard.string(forKey: "JarvisUserSalutation") ?? "none"
     @Published var fastVoiceMode = UserDefaults.standard.object(forKey: "JarvisFastVoiceMode") as? Bool ?? true
     @Published var alwaysListenEnabled = UserDefaults.standard.object(forKey: "JarvisAlwaysListenEnabled") as? Bool ?? false
     @Published var lastError: String?
@@ -275,11 +275,21 @@ final class AppState: ObservableObject {
 
         if await refreshStatus(startIfOffline: false) { return }
 
+        if let placeholderIssue = serverController.iCloudPlaceholderIssue() {
+            status = .offline
+            lastError = placeholderIssue
+            return
+        }
+
         status = .offline
-        lastError = "Ich starte den lokalen Core ..."
+        let isFirstTimeSetup = !serverController.venvPythonExists
+        lastError = isFirstTimeSetup
+            ? "Ersteinrichtung läuft - installiere Python-Umgebung (einmalig, kann mehrere Minuten dauern) ..."
+            : "Ich starte den lokalen Core ..."
         _ = serverController.start()
 
-        for _ in 0..<40 {
+        let maxAttempts = isFirstTimeSetup ? 1800 : 40
+        for _ in 0..<maxAttempts {
             try? await Task.sleep(for: .milliseconds(500))
             if await refreshStatus(startIfOffline: false) {
                 lastError = nil

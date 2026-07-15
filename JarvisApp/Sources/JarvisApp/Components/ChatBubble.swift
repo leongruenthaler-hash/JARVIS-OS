@@ -3,7 +3,7 @@ import SwiftUI
 struct ChatBubble: View {
     let message: ChatMessage
     @Environment(\.jarvisTheme) private var theme
-    @AppStorage("JarvisUserName") private var storedUserName = "Leon"
+    @AppStorage("JarvisUserName") private var storedUserName = ""
 
     var body: some View {
         HStack {
