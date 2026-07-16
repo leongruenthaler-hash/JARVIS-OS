@@ -5,6 +5,16 @@ struct OnboardingView: View {
     @State private var step = 0
     @State private var selectedModel = "phi4-mini"
     @State private var openAIKey = ""
+    @State private var tappedExamples: Set<String> = []
+
+    private let capabilityItems: [(icon: String, title: String, detail: String)] = [
+        ("envelope", "Mail", "Zusammenfassen, durchsuchen, beantworten"),
+        ("calendar", "Kalender", "Termine lesen und anlegen"),
+        ("folder", "Dateien", "Lokal suchen, öffnen, verschieben"),
+        ("music.note", "Musik", "Wiedergabe über Apple Music steuern"),
+        ("ear", "Immer-Zuhören-Modus", "Optional per Aktivierungswort"),
+        ("cpu", "Lokal oder Cloud", "Eigenes Modell wählen, jederzeit wechselbar")
+    ]
 
     private let examples = [
         "Wie wird heute das Wetter?",
@@ -29,9 +39,9 @@ struct OnboardingView: View {
                     Button("Zurück") { withAnimation { step -= 1 } }
                 }
                 Spacer()
-                Button(step == 7 ? "Jarvis starten" : "Weiter") {
+                Button(step == 8 ? "Jarvis starten" : "Weiter") {
                     withAnimation {
-                        if step == 7 {
+                        if step == 8 {
                             Task {
                                 await appState.saveUserProfileToCore()
                                 appState.completeOnboarding()
@@ -54,12 +64,13 @@ struct OnboardingView: View {
     @ViewBuilder private var content: some View {
         switch step {
         case 0: welcome
-        case 1: language
-        case 2: profile
-        case 3: model
-        case 4: privacy
-        case 5: permissions
-        case 6: tutorial
+        case 1: capabilities
+        case 2: language
+        case 3: profile
+        case 4: model
+        case 5: privacy
+        case 6: permissions
+        case 7: tutorial
         default: done
         }
     }
@@ -75,6 +86,40 @@ struct OnboardingView: View {
                 .font(.title3)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
+            if appState.bootstrapStatus != nil {
+                SetupProgressCard()
+            }
+        }
+    }
+
+    private var capabilities: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Das kann Jarvis")
+                .font(.largeTitle.bold())
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
+                ForEach(capabilityItems, id: \.title) { item in
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: item.icon)
+                            .font(.title3)
+                            .foregroundStyle(.blue)
+                            .frame(width: 24)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.title)
+                                .font(.subheadline.weight(.semibold))
+                            Text(item.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
+                    )
+                }
+            }
         }
     }
 
@@ -182,14 +227,15 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Jarvis kennenlernen")
                 .font(.largeTitle.bold())
+            Text("Nur ein paar Beispiele, was du später fragen kannst - zum Ausprobieren geht es mit \"Jarvis starten\" los.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 230))], spacing: 12) {
                 ForEach(examples, id: \.self) { example in
-                    Button(example) {
-                        Task {
-                            await appState.saveUserProfileToCore()
-                            appState.completeOnboarding()
-                            await appState.send(example)
-                        }
+                    Button {
+                        withAnimation { _ = tappedExamples.insert(example) }
+                    } label: {
+                        Label(example, systemImage: tappedExamples.contains(example) ? "checkmark.circle.fill" : "circle")
                     }
                     .buttonStyle(.bordered)
                 }
