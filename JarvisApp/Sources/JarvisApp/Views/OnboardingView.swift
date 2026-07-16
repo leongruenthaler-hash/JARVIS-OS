@@ -57,6 +57,7 @@ struct OnboardingView: View {
             .frame(maxWidth: 760)
             Spacer()
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(40)
         .background(LiquidGlassBackground())
     }
