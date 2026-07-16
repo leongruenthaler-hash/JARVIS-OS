@@ -94,7 +94,12 @@ final class LocalServerController: ObservableObject {
 
     @discardableResult
     func start(projectPath: String? = nil) -> Bool {
-        if serverProcess?.isRunning == true {
+        // Only trust an already-running process if its venv is still intact - otherwise
+        // a zombie process left over from a deleted/replaced JARVIS-OS folder (e.g. after
+        // extracting a fresh export on top of an old one) silently blocks every future
+        // self-heal attempt, since it keeps answering health checks despite its own venv
+        // being gone.
+        if serverProcess?.isRunning == true && venvPythonExists {
             isRunning = true
             return true
         }
@@ -119,7 +124,7 @@ final class LocalServerController: ObservableObject {
                 printf '%s|%s|%s\n' "$(date +%s)" "$1" "$2" > "$STATUS_FILE.tmp"
                 mv "$STATUS_FILE.tmp" "$STATUS_FILE"
             }
-            if /usr/bin/curl -fsS --max-time 2 http://127.0.0.1:8765/api/health >/dev/null 2>&1; then
+            if [ -x .venv/bin/python3 ] && /usr/bin/curl -fsS --max-time 2 http://127.0.0.1:8765/api/health >/dev/null 2>&1; then
                 echo "Jarvis local server already running."
                 exit 0
             fi

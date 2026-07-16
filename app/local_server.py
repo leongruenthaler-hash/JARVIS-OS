@@ -1875,11 +1875,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def _json(self, status: int, payload: dict[str, Any]):
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionError, OSError):
+            # Client already disconnected (e.g. gave up after a timeout) - nothing left
+            # to send back. Without this, do_GET/do_POST's own `except Exception` handler
+            # would try to write a 500 to the same dead socket and raise a second,
+            # unhandled exception from inside the except block.
+            pass
 
 
 def run(host: str = "127.0.0.1", port: int = 8765):
