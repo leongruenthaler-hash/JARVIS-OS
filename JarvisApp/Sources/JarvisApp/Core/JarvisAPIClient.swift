@@ -49,7 +49,10 @@ struct JarvisAPIClient {
                 case sampleRate = "sample_rate"
             }
         }
-        return try await post("/api/voice/transcribe", body: Request(audioPath: audioPath, sampleRate: sampleRate))
+        // First-ever voice request can trigger a slow, one-time STT model load/download
+        // (see LocalServerController voice-bootstrap status) - matches that timeframe
+        // instead of the default 60s, so it doesn't time out mid-load.
+        return try await post("/api/voice/transcribe", body: Request(audioPath: audioPath, sampleRate: sampleRate), timeoutInterval: 1200)
     }
 
     func prewarmVoicePipeline() async throws -> PrewarmResponse {
@@ -252,8 +255,9 @@ struct JarvisAPIClient {
         return try JSONDecoder().decode(T.self, from: data)
     }
 
-    private func post<T: Decodable, B: Encodable>(_ path: String, body: B) async throws -> T {
-        let request = try makePostRequest(path, body: body)
+    private func post<T: Decodable, B: Encodable>(_ path: String, body: B, timeoutInterval: TimeInterval? = nil) async throws -> T {
+        var request = try makePostRequest(path, body: body)
+        if let timeoutInterval { request.timeoutInterval = timeoutInterval }
         let (data, response) = try await URLSession.shared.data(for: request)
         try validate(response, data: data)
         return try JSONDecoder().decode(T.self, from: data)

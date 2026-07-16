@@ -152,6 +152,12 @@ final class LocalServerController: ObservableObject {
                 export OLLAMA_HOST="127.0.0.1:11500"
                 export JARVIS_BUNDLED_OLLAMA="$BUNDLED_OLLAMA"
                 export OLLAMA_MODELS="$HOME/Library/Application Support/Jarvis/ollama-models"
+                BUNDLED_MODELS_SRC=\(Self.shellQuote((Bundle.main.resourcePath ?? "") + "/bundled-models/phi4-mini"))
+                PHI4_MANIFEST="$OLLAMA_MODELS/manifests/registry.ollama.ai/library/phi4-mini/latest"
+                if [ -d "$BUNDLED_MODELS_SRC" ] && [ ! -f "$PHI4_MANIFEST" ]; then
+                    mkdir -p "$OLLAMA_MODELS"
+                    cp -R "$BUNDLED_MODELS_SRC/." "$OLLAMA_MODELS/" 2>/dev/null || true
+                fi
                 BUNDLED_URL="http://$OLLAMA_HOST/api/tags"
                 if ! /usr/bin/curl -fsS --max-time 2 "$BUNDLED_URL" >/dev/null 2>&1; then
                     nohup "$BUNDLED_OLLAMA" serve >/tmp/jarvis_ollama.log 2>&1 &
