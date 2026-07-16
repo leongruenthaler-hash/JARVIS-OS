@@ -4860,8 +4860,16 @@ def main():
                 continue
 
             if has_pending_action(memory):
+                settings_before = memory.get("settings") or {}
+                pending_permission_before = settings_before.get("pending_permission")
+                declined_mail_permission = (
+                    isinstance(pending_permission_before, dict)
+                    and pending_permission_before.get("permission") == "mail"
+                )
                 pending_action_answer = handle_pending_action_flow(memory, question, photo_worker=photo_worker)
                 if pending_action_answer is not None:
+                    if declined_mail_permission and not has_permission("mail"):
+                        pending_mail_followup = False
                     record_exchange(memory, question, pending_action_answer)
                     print(f"\nJARVIS: {console_text(pending_action_answer, 'answer')}")
                     speak(pending_action_answer, voice=voice)
@@ -4997,7 +5005,10 @@ def main():
                 speak(background_mail_answer, voice=voice)
                 continue
 
-            mail_permission = ensure_privacy_domain_permission(memory, "mail", "Jarvis würde Apple Mail lokal lesen oder bearbeiten.") if has_domain(question, "mail") or pending_mail_followup else None
+            mail_followup_intent = pending_mail_followup and (
+                is_mail_time_followup(question) or is_mail_status_followup(question)
+            )
+            mail_permission = ensure_privacy_domain_permission(memory, "mail", "Jarvis würde Apple Mail lokal lesen oder bearbeiten.") if has_domain(question, "mail") or mail_followup_intent else None
             if mail_permission is not None:
                 print(f"\nJARVIS: {console_text(mail_permission, 'answer')}")
                 speak(mail_permission, voice=voice)
@@ -5008,8 +5019,7 @@ def main():
             mail_answer = handle_mail_command(
                 llm,
                 question,
-                force=pending_mail_followup
-                and (is_mail_time_followup(question) or is_mail_status_followup(question)),
+                force=mail_followup_intent,
                 memory=memory,
             )
             if mail_answer is not None:
@@ -5089,7 +5099,7 @@ def main():
             promised_action_answer = execute_promised_action_if_possible(llm, question, answer)
             if promised_action_answer is not None:
                 answer = promised_action_answer
-            pending_mail_followup = "mail" in normalize_text(question) or "mail" in normalize_text(answer)
+            pending_mail_followup = "mail" in normalize_text(question)
             if PERFORMANCE_LOG:
                 print(
                     "Zeit: "

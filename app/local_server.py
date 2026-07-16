@@ -1320,8 +1320,18 @@ class JarvisLocalServer:
                 handler = getattr(core, name, None)
                 if handler is None:
                     continue
+                declined_mail_permission = False
+                if name == "handle_pending_action_flow":
+                    settings_before = memory.get("settings") or {}
+                    pending_permission_before = settings_before.get("pending_permission")
+                    declined_mail_permission = (
+                        isinstance(pending_permission_before, dict)
+                        and pending_permission_before.get("permission") == "mail"
+                    )
                 answer = handler(*args, **kwargs)
                 if answer is not None:
+                    if declined_mail_permission and not core.has_permission("mail"):
+                        self.pending_mail_followup = False
                     answer = self._finalize_answer(core, question, answer)
                     return str(answer)
 
@@ -1406,19 +1416,19 @@ class JarvisLocalServer:
                         answer = self._finalize_answer(core, question, answer)
                         return str(answer)
 
-                mail_permission = core.ensure_privacy_domain_permission(memory, "mail", "Jarvis würde Apple Mail lokal lesen oder bearbeiten.") if core.has_domain(question, "mail") or self.pending_mail_followup else None
+                mail_followup_intent = self.pending_mail_followup and (
+                    hasattr(core, "is_mail_time_followup")
+                    and hasattr(core, "is_mail_status_followup")
+                    and (core.is_mail_time_followup(question) or core.is_mail_status_followup(question))
+                )
+                mail_permission = core.ensure_privacy_domain_permission(memory, "mail", "Jarvis würde Apple Mail lokal lesen oder bearbeiten.") if core.has_domain(question, "mail") or mail_followup_intent else None
                 if mail_permission is not None:
                     return str(mail_permission)
                 mail_handler = getattr(core, "handle_mail_command", None)
                 if mail_handler is not None:
                     mail_settings_before = memory.get("settings") or {}
                     had_pending_mail_delete = isinstance(mail_settings_before.get("pending_mail_delete"), dict)
-                    mail_followup_intent = (
-                        hasattr(core, "is_mail_time_followup")
-                        and hasattr(core, "is_mail_status_followup")
-                        and (core.is_mail_time_followup(question) or core.is_mail_status_followup(question))
-                    )
-                    answer = mail_handler(self.llm, question, force=self.pending_mail_followup and mail_followup_intent, memory=memory)
+                    answer = mail_handler(self.llm, question, force=mail_followup_intent, memory=memory)
                     if answer is not None:
                         self.pending_mail_followup = False if had_pending_mail_delete else True
                         answer = self._finalize_answer(core, question, answer)
@@ -1510,7 +1520,7 @@ class JarvisLocalServer:
             promised = core.execute_promised_action_if_possible(self.llm, question, answer) if hasattr(core, "execute_promised_action_if_possible") else None
             if promised is not None:
                 answer = promised
-            self.pending_mail_followup = "mail" in question.lower() or "mail" in str(answer).lower()
+            self.pending_mail_followup = "mail" in core.normalize_text(question) if hasattr(core, "normalize_text") else "mail" in question.lower()
             answer = self._finalize_answer(core, question, answer)
             return str(answer)
         except Exception as exc:
