@@ -1858,10 +1858,17 @@ class Handler(BaseHTTPRequestHandler):
                     chunk = word if index == 0 else " " + word
                     self._write_stream_chunk(chunk)
         except Exception:
-            streamed_answer = str(SERVER.chat(message, history=history).get("answer", ""))
-            for index, word in enumerate(streamed_answer.split(" ")):
-                chunk = word if index == 0 else " " + word
-                self._write_stream_chunk(chunk)
+            # A failure here can happen AFTER the primary answer already streamed fully
+            # (on_llm_chunk already wrote it out) - e.g. clean_ai_answer, a promised-action
+            # follow-through, or record_exchange raising during post-processing. Falling
+            # back to a fresh, unrelated SERVER.chat() call in that case would append a
+            # second, independent answer onto the chunks already sent, gluing two unrelated
+            # replies into one message. Only run the fallback if nothing was streamed yet.
+            if not chunk_sent:
+                streamed_answer = str(SERVER.chat(message, history=history).get("answer", ""))
+                for index, word in enumerate(streamed_answer.split(" ")):
+                    chunk = word if index == 0 else " " + word
+                    self._write_stream_chunk(chunk)
         finally:
             done = json.dumps({"chunk": "", "done": True}, ensure_ascii=False).encode("utf-8") + b"\n"
             self.wfile.write(done)

@@ -27,6 +27,12 @@ struct ChatView: View {
         appState.voiceState == .thinking
     }
 
+    // Blocks a second overlapping send while one is still in flight - avoids racing two
+    // concurrent chat requests against the same conversation state on the server.
+    private var sendDisabled: Bool {
+        trimmedInput.isEmpty || appState.status == .thinking || appState.status == .responding
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -449,7 +455,7 @@ struct ChatView: View {
                     .labelStyle(.titleAndIcon)
             }
             .keyboardShortcut(.return, modifiers: [.command])
-            .disabled(trimmedInput.isEmpty)
+            .disabled(sendDisabled)
 
             Button {
                 Task { await appState.stopAutoListening() }
@@ -524,8 +530,8 @@ struct ChatView: View {
     }
 
     private func send() {
+        guard !sendDisabled else { return }
         let text = trimmedInput
-        guard !text.isEmpty else { return }
         input = ""
         Task { await appState.send(text) }
     }
