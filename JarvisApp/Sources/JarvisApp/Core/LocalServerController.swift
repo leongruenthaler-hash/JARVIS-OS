@@ -4,10 +4,9 @@ import Foundation
 final class LocalServerController: ObservableObject {
     @Published var isRunning = false
     @Published var lastLaunchError: String?
-    @Published private(set) var ollamaOwnedByApp = false
 
     private static let startLogPath = "/tmp/jarvis_app_server_start.log"
-    private static let ollamaOwnedMarkerPath = "/tmp/jarvis_app_ollama_started_by_app.marker"
+    private static let bundledOllamaPort = 11500
     private static let bootstrapStatusPath = "/tmp/jarvis_app_bootstrap_status.txt"
     private static let voiceBootstrapStatusPath = "/tmp/jarvis_app_voice_bootstrap_status.txt"
 
@@ -116,8 +115,6 @@ final class LocalServerController: ObservableObject {
             exec >"$LOG_FILE" 2>&1
             set -e
             cd \(quotedProjectPath)
-            OLLAMA_MARKER=\(Self.shellQuote(Self.ollamaOwnedMarkerPath))
-            rm -f "$OLLAMA_MARKER"
             STATUS_FILE=\(Self.shellQuote(Self.bootstrapStatusPath))
             rm -f "$STATUS_FILE"
             write_status() {
@@ -136,7 +133,6 @@ final class LocalServerController: ObservableObject {
                 if /usr/bin/curl -fsS --max-time 2 "$url" >/dev/null 2>&1; then
                     return 0
                 fi
-                touch "$OLLAMA_MARKER"
                 if command -v ollama >/dev/null 2>&1; then
                     nohup ollama serve >/tmp/jarvis_ollama.log 2>&1 &
                 elif [ -d "/Applications/Ollama.app" ]; then
@@ -158,7 +154,6 @@ final class LocalServerController: ObservableObject {
                 export OLLAMA_MODELS="$HOME/Library/Application Support/Jarvis/ollama-models"
                 BUNDLED_URL="http://$OLLAMA_HOST/api/tags"
                 if ! /usr/bin/curl -fsS --max-time 2 "$BUNDLED_URL" >/dev/null 2>&1; then
-                    touch "$OLLAMA_MARKER"
                     nohup "$BUNDLED_OLLAMA" serve >/tmp/jarvis_ollama.log 2>&1 &
                     BUNDLED_OK=1
                     for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
@@ -170,7 +165,6 @@ final class LocalServerController: ObservableObject {
                     done
                     if [ "$BUNDLED_OK" -ne 0 ]; then
                         echo "Gebuendeltes Ollama nach 15s nicht erreichbar, Fallback auf System-Ollama."
-                        rm -f "$OLLAMA_MARKER"
                         try_system_ollama || echo "Kein Ollama verfuegbar (weder gebuendelt noch System) - Jarvis laeuft ohne lokales Modell."
                     fi
                 fi
@@ -267,17 +261,8 @@ final class LocalServerController: ObservableObject {
         isRunning = false
     }
 
-    /// Reads the marker the start script leaves behind if it had to launch Ollama itself.
-    /// Only ever flips to `true` - never resets back to `false` - so a later server-only
-    /// restart (with Ollama still alive from before) doesn't make the app forget it owns it.
-    func detectOllamaOwnership() {
-        if FileManager.default.fileExists(atPath: Self.ollamaOwnedMarkerPath) {
-            ollamaOwnedByApp = true
-        }
-    }
-
     /// Synchronous cleanup for a real app quit (`applicationShouldTerminate`), not for
-    /// backgrounding. Only kills Ollama if this app instance actually started it.
+    /// backgrounding.
     func shutdownForAppQuit() {
         if let process = serverProcess, process.isRunning {
             process.terminate()
@@ -286,14 +271,44 @@ final class LocalServerController: ObservableObject {
         serverProcess = nil
         isRunning = false
 
-        guard ollamaOwnedByApp else { return }
-        let killProcess = Process()
-        killProcess.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        killProcess.arguments = ["-x", "ollama"]
-        killProcess.standardOutput = Pipe()
-        killProcess.standardError = Pipe()
-        try? killProcess.run()
-        killProcess.waitUntilExit()
+        killBundledOllama()
+    }
+
+    /// Kills whatever process is listening on the bundled Ollama's port, independent of
+    /// whether *this* app instance started it this session - covers both the shell start
+    /// script's `nohup ... &` and the separate self-heal spawn in `model_manager.py`,
+    /// since both inherit `OLLAMA_HOST=127.0.0.1:11500` and end up listening on the same
+    /// port. Scoped by port rather than process name so an unrelated, independently
+    /// running system Ollama (default port 11434) is never touched.
+    private func killBundledOllama() {
+        let pids = Self.listeningPIDs(onPort: Self.bundledOllamaPort)
+        guard !pids.isEmpty else { return }
+        for pid in pids { kill(pid, SIGTERM) }
+
+        let deadline = Date().addingTimeInterval(2.0)
+        while Date() < deadline {
+            if Self.listeningPIDs(onPort: Self.bundledOllamaPort).isEmpty { return }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        for pid in Self.listeningPIDs(onPort: Self.bundledOllamaPort) { kill(pid, SIGKILL) }
+    }
+
+    private static func listeningPIDs(onPort port: Int) -> [pid_t] {
+        let lookup = Process()
+        lookup.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        lookup.arguments = ["-nP", "-tiTCP:\(port)", "-sTCP:LISTEN"]
+        let pipe = Pipe()
+        lookup.standardOutput = pipe
+        lookup.standardError = Pipe()
+        do {
+            try lookup.run()
+        } catch {
+            return []
+        }
+        lookup.waitUntilExit()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        guard let output = String(data: data, encoding: .utf8) else { return [] }
+        return output.split(separator: "\n").compactMap { pid_t($0.trimmingCharacters(in: .whitespaces)) }
     }
 
     /// Surfaces a script-level start failure (e.g. missing `.venv`) from the log file to the UI.

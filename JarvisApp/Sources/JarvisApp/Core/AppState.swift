@@ -311,7 +311,6 @@ final class AppState: ObservableObject {
             if await refreshStatus(startIfOffline: false) {
                 lastError = nil
                 bootstrapStatus = nil
-                serverController.detectOllamaOwnership()
                 return
             }
         }
