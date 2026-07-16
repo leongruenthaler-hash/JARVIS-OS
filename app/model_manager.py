@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import tempfile
@@ -32,6 +33,33 @@ _OLLAMA_PROCESS: subprocess.Popen[str] | None = None
 _OLLAMA_LAST_START_ATTEMPT: float = 0.0
 _OLLAMA_RUNNING_CACHE: tuple[float, bool] = (0.0, False)
 _OLLAMA_MODELS_CACHE: tuple[float, list[str]] = (0.0, [])
+_OLLAMA_CLEANUP_REGISTERED = False
+
+
+def _cleanup_ollama_process() -> None:
+    """Terminates the Ollama process this module spawned as a self-heal, if it's
+    still alive when this Python process exits. Covers cases where jarvis.py exits
+    without going through the Swift wrapper's own port-based Ollama cleanup (e.g.
+    when running app/jarvis.py standalone)."""
+    process = _OLLAMA_PROCESS
+    if process is None or process.poll() is not None:
+        return
+    try:
+        process.terminate()
+        process.wait(timeout=3)
+    except Exception:
+        try:
+            process.kill()
+        except Exception:
+            pass
+
+
+def _register_ollama_cleanup() -> None:
+    global _OLLAMA_CLEANUP_REGISTERED
+    if _OLLAMA_CLEANUP_REGISTERED:
+        return
+    atexit.register(_cleanup_ollama_process)
+    _OLLAMA_CLEANUP_REGISTERED = True
 
 
 @dataclass
@@ -278,6 +306,7 @@ def ensure_ollama_running(wait_seconds: float = 15.0) -> bool:
                 start_new_session=True,
             )
             started = True
+            _register_ollama_cleanup()
         except Exception:
             _OLLAMA_PROCESS = None
 
@@ -298,6 +327,7 @@ def ensure_ollama_running(wait_seconds: float = 15.0) -> bool:
                         start_new_session=True,
                     )
                     started = True
+                    _register_ollama_cleanup()
                     break
                 except Exception:
                     _OLLAMA_PROCESS = None
