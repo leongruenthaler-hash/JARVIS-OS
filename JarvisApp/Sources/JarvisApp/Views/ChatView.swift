@@ -172,11 +172,20 @@ struct ChatView: View {
                         VStack(spacing: 6) {
                             Text(appState.voiceState.title)
                                 .font(.system(size: 30, weight: .bold, design: .rounded))
-                            Text(appState.voiceState.subtitle)
-                                .font(.title3)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
-                                .frame(maxWidth: 520)
+                            if appState.voiceState == .liveTranscribing && !appState.liveTranscriptText.isEmpty {
+                                Text(appState.liveTranscriptText)
+                                    .font(.title3.weight(.medium))
+                                    .foregroundStyle(.primary)
+                                    .multilineTextAlignment(.center)
+                                    .frame(maxWidth: 520)
+                                    .animation(.easeOut(duration: 0.15), value: appState.liveTranscriptText)
+                            } else {
+                                Text(appState.voiceState.subtitle)
+                                    .font(.title3)
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.center)
+                                    .frame(maxWidth: 520)
+                            }
                         }
                         .padding(.horizontal, 22)
                     }

@@ -412,6 +412,38 @@ final class AppState: ObservableObject {
         _ = await listenOnce(retryCount: 0, allowWhileSpeaking: false)
     }
 
+    /// Tries native live transcription (Etappe 1-2: apple_speech --live, growing partial
+    /// text surfaced via `liveTranscriptText`) before falling back to the existing
+    /// record-then-transcribe flow. Returns `nil` on ANY failure - permission, compile
+    /// error, engine unavailable, or an empty result - so the caller transparently falls
+    /// through to the unchanged fallback path; a failure here must never block the turn.
+    /// Gated on `!isJarvisSpeaking` so Jarvis's own trailing TTS is never transcribed as
+    /// live user speech (same discipline `recordUtterance`'s `isSpeaking` closure already
+    /// applies to the fallback path).
+    private func attemptLiveTranscription() async -> String? {
+        guard !isJarvisSpeaking else { return nil }
+
+        setVoiceState(.liveTranscribing, reason: "live_transcription_started")
+        liveTranscriptText = ""
+        markVoicePerformance("recordingStarted")
+        logVoiceEvent("live transcription started timestamp=\(Date())")
+
+        defer { liveTranscriptText = "" }
+
+        do {
+            let text = try await serverController.startLiveTranscription(locale: "de-DE") { [weak self] partial in
+                self?.liveTranscriptText = partial
+            }
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            logVoiceEvent("live transcription succeeded: \(trimmed)")
+            return trimmed
+        } catch {
+            logVoiceEvent("live transcription failed, falling back to standard capture: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     /// Returns whether the conversation should end and control should return to
     /// wake-word standby. Only meaningful for `isAlwaysListenTurn == true` callers;
     /// other callers ignore the result.
@@ -459,49 +491,62 @@ final class AppState: ObservableObject {
         let voiceTranscript: VoiceTranscriptionResponse
         let recordingMarker = MutableBoolBox()
         do {
-            let capture = try await audioCaptureService.recordUtterance(
-                maxDuration: TimeInterval(UserDefaults.standard.double(forKey: "JarvisVoiceListenMaxSeconds")) > 0 ? UserDefaults.standard.double(forKey: "JarvisVoiceListenMaxSeconds") : 10,
-                silenceLimit: TimeInterval(UserDefaults.standard.double(forKey: "JarvisVoiceSilenceLimit")) > 0 ? UserDefaults.standard.double(forKey: "JarvisVoiceSilenceLimit") : 0.9,
-                minSpeechDuration: 0.45,
-                maxWaitForSpeech: 8.0,
-                sampleRate: 16_000,
-                threshold: 0.010,
-                isSpeaking: { [weak self] in self?.isJarvisSpeaking ?? false },
-                onUpdate: { [weak self] level, speechDetected in
-                    guard let self else { return }
-                    if !recordingMarker.value {
-                        recordingMarker.value = true
-                        self.markVoicePerformance("recordingStarted")
-                        self.logVoiceEvent("recording started timestamp=\(Date())")
+            if let liveText = await attemptLiveTranscription() {
+                voiceTranscript = VoiceTranscriptionResponse(
+                    transcript: liveText,
+                    duration: nil,
+                    speechDuration: nil,
+                    sampleRate: nil,
+                    source: "apple_speech_live",
+                    model: nil,
+                    error: nil
+                )
+            } else {
+                setVoiceState(.listening, reason: "live_transcription_fallback")
+                let capture = try await audioCaptureService.recordUtterance(
+                    maxDuration: TimeInterval(UserDefaults.standard.double(forKey: "JarvisVoiceListenMaxSeconds")) > 0 ? UserDefaults.standard.double(forKey: "JarvisVoiceListenMaxSeconds") : 10,
+                    silenceLimit: TimeInterval(UserDefaults.standard.double(forKey: "JarvisVoiceSilenceLimit")) > 0 ? UserDefaults.standard.double(forKey: "JarvisVoiceSilenceLimit") : 0.9,
+                    minSpeechDuration: 0.45,
+                    maxWaitForSpeech: 8.0,
+                    sampleRate: 16_000,
+                    threshold: 0.010,
+                    isSpeaking: { [weak self] in self?.isJarvisSpeaking ?? false },
+                    onUpdate: { [weak self] level, speechDetected in
+                        guard let self else { return }
+                        if !recordingMarker.value {
+                            recordingMarker.value = true
+                            self.markVoicePerformance("recordingStarted")
+                            self.logVoiceEvent("recording started timestamp=\(Date())")
+                        }
+                        if speechDetected {
+                            self.setVoiceState(.userSpeaking, reason: "speech_detected")
+                        } else if self.voiceState == .preparingMicrophone || self.voiceState == .listening {
+                            self.setVoiceState(.listening, reason: "microphone_hot")
+                        }
+                        if self.debugLoggingEnabled {
+                            self.logVoiceEvent("microphone level=\(String(format: "%.4f", level)) speechDetected=\(speechDetected)")
+                        }
                     }
-                    if speechDetected {
-                        self.setVoiceState(.userSpeaking, reason: "speech_detected")
-                    } else if self.voiceState == .preparingMicrophone || self.voiceState == .listening {
-                        self.setVoiceState(.listening, reason: "microphone_hot")
-                    }
-                    if self.debugLoggingEnabled {
-                        self.logVoiceEvent("microphone level=\(String(format: "%.4f", level)) speechDetected=\(speechDetected)")
+                )
+                logVoiceEvent("recording completed duration=\(capture.duration)")
+                setVoiceState(.transcribing, reason: "recording_stopped")
+                defer { try? FileManager.default.removeItem(at: capture.fileURL) }
+                let voiceBootstrapPoll = Task { [weak self] in
+                    while !Task.isCancelled {
+                        if let status = self?.serverController.currentVoiceBootstrapStatus() {
+                            self?.bootstrapStatus = status.message
+                        }
+                        try? await Task.sleep(for: .milliseconds(500))
                     }
                 }
-            )
-            logVoiceEvent("recording completed duration=\(capture.duration)")
-            setVoiceState(.transcribing, reason: "recording_stopped")
-            defer { try? FileManager.default.removeItem(at: capture.fileURL) }
-            let voiceBootstrapPoll = Task { [weak self] in
-                while !Task.isCancelled {
-                    if let status = self?.serverController.currentVoiceBootstrapStatus() {
-                        self?.bootstrapStatus = status.message
-                    }
-                    try? await Task.sleep(for: .milliseconds(500))
+                defer {
+                    voiceBootstrapPoll.cancel()
+                    bootstrapStatus = nil
                 }
-            }
-            defer {
-                voiceBootstrapPoll.cancel()
-                bootstrapStatus = nil
-            }
-            voiceTranscript = try await serverController.transcribeVoice(audioPath: capture.fileURL.path, sampleRate: capture.sampleRate)
-            if let error = voiceTranscript.error?.trimmingCharacters(in: .whitespacesAndNewlines), !error.isEmpty {
-                throw NSError(domain: "JarvisVoiceTranscription", code: -1, userInfo: [NSLocalizedDescriptionKey: error])
+                voiceTranscript = try await serverController.transcribeVoice(audioPath: capture.fileURL.path, sampleRate: capture.sampleRate)
+                if let error = voiceTranscript.error?.trimmingCharacters(in: .whitespacesAndNewlines), !error.isEmpty {
+                    throw NSError(domain: "JarvisVoiceTranscription", code: -1, userInfo: [NSLocalizedDescriptionKey: error])
+                }
             }
         } catch {
             let detail = error.localizedDescription
