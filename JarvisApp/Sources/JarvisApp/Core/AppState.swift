@@ -67,6 +67,7 @@ final class AppState: ObservableObject {
     private var keepListeningAfterGreeting = false
     @Published private(set) var autoListenEnabled = true
     private var isJarvisSpeaking = false
+    private var activeSpeechPlayer: StreamingSpeechPlayer?
     private var voicePerformanceMarks: [String: Date] = [:]
     private let voiceFeedbackSounds = VoiceFeedbackSoundPlayer()
     private var microphoneWarmupTask: Task<Bool, Never>?
@@ -383,23 +384,17 @@ final class AppState: ObservableObject {
 
         do {
             status = .responding
-            let streamed = try await serverController.chatStream(trimmed, history: history) { [weak self] chunk in
-                guard let self else { return }
-                self.messages[answerIndex].text.append(chunk)
-            }
-            if messages[answerIndex].text.isEmpty {
-                messages[answerIndex].text = streamed
-            }
+            let answer = try await streamAndSpeakAnswer(question: trimmed, history: history, answerIndex: answerIndex)
             let response = ChatResponse(
-                answer: messages[answerIndex].text,
+                answer: answer,
                 source: modelStatus.provider,
                 model: modelStatus.activeModel
             )
             lastAnswerSource = modelLabel(from: response.source ?? modelStatus.provider, model: response.model ?? modelStatus.activeModel)
             keepListeningAfterGreeting = true
-            await speakAnswer(response.answer)
             status = .idle
         } catch {
+            activeSpeechPlayer = nil
             let detail = serverController.lastLaunchError.map { " Technisch: \($0)" } ?? ""
             messages[answerIndex].text = "Ich erreiche den lokalen Core gerade nicht. Ich verbinde im Hintergrund neu.\(detail)"
             status = .offline
@@ -567,38 +562,37 @@ final class AppState: ObservableObject {
         do {
             status = .responding
             markVoicePerformance("llmResponseStarted")
-            let streamed = try await serverController.chatStream(finalUserText.isEmpty ? finalTranscript : finalUserText, history: history) { [weak self] chunk in
-                guard let self else { return }
-                self.messages[answerIndex].text.append(chunk)
-                if self.voiceState != .jarvisSpeaking {
-                    self.setVoiceState(.thinking, reason: "assistant_streaming")
+            let answer = try await streamAndSpeakAnswer(
+                question: finalUserText.isEmpty ? finalTranscript : finalUserText,
+                history: history,
+                answerIndex: answerIndex,
+                onTextChunk: { [weak self] _ in
+                    guard let self else { return }
+                    if self.voiceState != .jarvisSpeaking {
+                        self.setVoiceState(.thinking, reason: "assistant_streaming")
+                    }
                 }
-            }
+            )
             markVoicePerformance("llmResponseFinished")
-            if messages[answerIndex].text.isEmpty {
-                messages[answerIndex].text = streamed
-            }
             let response = ChatResponse(
-                answer: messages[answerIndex].text,
+                answer: answer,
                 source: modelStatus.provider,
                 model: modelStatus.activeModel
             )
             lastAnswerSource = modelLabel(from: response.source ?? modelStatus.provider, model: response.model ?? modelStatus.activeModel)
-            if isAlwaysListenTurn {
-                await speakAnswer(response.answer)
-            } else {
+            if !isAlwaysListenTurn {
                 keepListeningAfterGreeting = true
                 if shouldStopAfterThisTurn {
                     pauseContinuousVoiceMode(reason: "stop_phrase_detected")
                 } else {
                     resumeContinuousVoiceMode(reason: "continue_after_voice_response")
                 }
-                await speakAnswer(response.answer)
             }
             status = .idle
             setVoiceState(.idle, reason: "listen_finished")
             return shouldStopAfterThisTurn
         } catch {
+            activeSpeechPlayer = nil
             let detail = serverController.lastLaunchError.map { " Technisch: \($0)" } ?? ""
             messages[answerIndex].text = "Ich erreiche den lokalen Core gerade nicht. Ich verbinde im Hintergrund neu.\(detail)"
             status = .offline
@@ -1183,6 +1177,8 @@ final class AppState: ObservableObject {
 
 
     func stopCurrentSpeech() async {
+        await activeSpeechPlayer?.cancel()
+        activeSpeechPlayer = nil
         await ttsService.stop()
         isJarvisSpeaking = false
         if voiceState == .jarvisSpeaking {
@@ -1250,6 +1246,95 @@ final class AppState: ObservableObject {
                 setVoiceState(.idle, reason: "tts_error_reset")
             }
         }
+    }
+
+    /// Streams `question`'s answer into `messages[answerIndex].text` AND speaks it
+    /// incrementally - each sentence starts playing as soon as it's detected in the
+    /// streamed text, via `StreamingSpeechPlayer`'s prefetch pipeline, instead of waiting
+    /// for the complete answer before starting TTS (the old `speakAnswer` behavior, left
+    /// untouched and still used by call sites that already have a complete answer
+    /// upfront - e.g. command-handler responses that never stream text at all).
+    /// `onTextChunk` mirrors any extra per-chunk bookkeeping the caller needs (e.g.
+    /// `listenOnce`'s voice-state update while the assistant is still "thinking").
+    private func streamAndSpeakAnswer(
+        question: String,
+        history: [[String: String]],
+        answerIndex: Int,
+        onTextChunk: ((String) -> Void)? = nil
+    ) async throws -> String {
+        var sentenceSplitter = IncrementalSentenceSplitter()
+        let speechPlayer = StreamingSpeechPlayer(controller: serverController)
+        activeSpeechPlayer = speechPlayer
+        speechPlayer.onEvent = { [weak self] event in self?.handleStreamingSpeechEvent(event) }
+        var speechStarted = false
+
+        let streamed = try await serverController.chatStream(question, history: history) { [weak self] chunk in
+            guard let self else { return }
+            self.messages[answerIndex].text.append(chunk)
+            onTextChunk?(chunk)
+            for sentence in sentenceSplitter.feed(chunk) {
+                if !speechStarted {
+                    speechStarted = true
+                    self.beginStreamingSpeech()
+                }
+                speechPlayer.enqueue(sentence)
+            }
+        }
+
+        if messages[answerIndex].text.isEmpty {
+            messages[answerIndex].text = streamed
+        }
+        if let last = sentenceSplitter.flush() {
+            if !speechStarted {
+                speechStarted = true
+                beginStreamingSpeech()
+            }
+            speechPlayer.enqueue(last)
+        }
+
+        if speechStarted {
+            await speechPlayer.finish()
+            await endStreamingSpeech()
+        }
+        if activeSpeechPlayer === speechPlayer {
+            activeSpeechPlayer = nil
+        }
+
+        return messages[answerIndex].text
+    }
+
+    private func handleStreamingSpeechEvent(_ event: BridgeRuntimeEvent) {
+        switch event {
+        case .ttsStarted:
+            markVoicePerformanceIfMissing("ttsStarted")
+        case .audioPlaybackStarted:
+            markVoicePerformanceIfMissing("audioPlaybackStarted")
+        case .ttsFinished:
+            markVoicePerformance("ttsFinished")
+        default:
+            break
+        }
+    }
+
+    private func beginStreamingSpeech() {
+        setVoiceState(.jarvisSpeaking, reason: "tts_started")
+        markVoicePerformanceIfMissing("llmResponseFinished")
+        markVoicePerformance("ttsStarted")
+        logVoiceEvent("tts started timestamp=\(Date())")
+        isJarvisSpeaking = true
+        Task { await serverController.setVoiceSpeakingState(true) }
+    }
+
+    private func endStreamingSpeech() async {
+        markVoicePerformanceIfMissing("audioPlaybackStarted")
+        isJarvisSpeaking = false
+        await serverController.setVoiceSpeakingState(false)
+        if voiceState == .jarvisSpeaking {
+            logVoiceEvent("tts finished timestamp=\(Date())")
+            setVoiceState(.idle, reason: "tts_finished")
+        }
+        printVoicePerformanceReportIfVoiceRun()
+        scheduleNextVoiceListen()
     }
 
     private func ttsSegments(from text: String) -> [String] {
