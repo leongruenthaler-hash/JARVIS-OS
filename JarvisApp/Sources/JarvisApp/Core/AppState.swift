@@ -8,6 +8,11 @@ final class AppState: ObservableObject {
     @Published var selectedSection: JarvisSection = .home
     @Published var status: JarvisRuntimeStatus = .offline
     @Published var voiceState: JarvisVoiceState = .idle
+    /// Growing transcript text while `voiceState == .liveTranscribing` - fed by
+    /// `LocalServerController.startLiveTranscription(onPartial:)`. Not yet wired into any
+    /// capture flow (Etappe 3); exists now so ChatView's UI binding can be built/tested
+    /// independently of that wiring.
+    @Published var liveTranscriptText: String = ""
     @Published var messages: [ChatMessage] = [
         ChatMessage(role: .system, text: "Jarvis App bereit. Ich starte den lokalen Core automatisch. Sehr höflich von mir, finde ich.")
     ]

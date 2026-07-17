@@ -91,6 +91,12 @@ class AppleSpeechEngine(BaseSTTEngine):
             "threshold": 0.0,
         }
 
+    # KEEP IN SYNC: LocalServerController.ensureAppleSpeechHelperCompiled() in
+    # JarvisApp/Sources/JarvisApp/Core/LocalServerController.swift is a byte-for-byte
+    # port of this method's logic (same mtime comparison, same swiftc invocation) - it
+    # exists because the live-transcription path launches this binary directly from
+    # Swift, bypassing this Python engine (and therefore this lazy-compile check)
+    # entirely. If you change the compile logic here, change it there too.
     def _ensure_helper(self):
         if not self.source_file.exists():
             raise STTEngineError(f"Apple-Speech-Helper fehlt: {self.source_file}")
