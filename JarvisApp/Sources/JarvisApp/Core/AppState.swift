@@ -56,6 +56,9 @@ final class AppState: ObservableObject {
         guard let data = UserDefaults.standard.data(forKey: "JarvisWeatherLocation") else { return nil }
         return try? JSONDecoder().decode(GeocodedLocation.self, from: data)
     }()
+    @Published private(set) var todayActiveUsageMinutes: Double = ProductivityTracker.todayActiveMinutes()
+    /// `nil` means "not configured" - deliberately no built-in default, see ProductivityTracker.
+    @Published private(set) var dailyUsageGoalMinutes: Double? = ProductivityTracker.dailyGoalMinutes()
     @Published var fastVoiceMode = UserDefaults.standard.object(forKey: "JarvisFastVoiceMode") as? Bool ?? true
     @Published var alwaysListenEnabled = UserDefaults.standard.object(forKey: "JarvisAlwaysListenEnabled") as? Bool ?? false
     @Published var lastError: String?
@@ -199,6 +202,12 @@ final class AppState: ObservableObject {
         } catch {
             weatherCityError = error.localizedDescription
         }
+    }
+
+    /// Pass `nil` to clear the goal back to "not configured" (no built-in fallback value).
+    func updateDailyUsageGoal(_ minutes: Double?) {
+        dailyUsageGoalMinutes = (minutes.map { $0 > 0 } ?? false) ? minutes : nil
+        ProductivityTracker.setDailyGoalMinutes(dailyUsageGoalMinutes)
     }
 
     func saveFastVoiceModeToCore() async {
@@ -1357,6 +1366,12 @@ final class AppState: ObservableObject {
         answerIndex: Int,
         onTextChunk: ((String) -> Void)? = nil
     ) async throws -> String {
+        let interactionStart = Date()
+        defer {
+            ProductivityTracker.recordInteraction(seconds: Date().timeIntervalSince(interactionStart))
+            todayActiveUsageMinutes = ProductivityTracker.todayActiveMinutes()
+        }
+
         var sentenceSplitter = IncrementalSentenceSplitter()
         let speechPlayer = StreamingSpeechPlayer(controller: serverController)
         activeSpeechPlayer = speechPlayer

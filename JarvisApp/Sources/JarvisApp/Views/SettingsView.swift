@@ -6,6 +6,7 @@ struct SettingsView: View {
     @AppStorage("JarvisActiveTheme") private var activeThemeRaw = JarvisTheme.classic.rawValue
     @State private var apiKey = ""
     @State private var weatherCityDraft = ""
+    @State private var usageGoalDraft = ""
 
     var body: some View {
         ScrollView {
@@ -28,6 +29,9 @@ struct SettingsView: View {
         .onAppear {
             if weatherCityDraft.isEmpty {
                 weatherCityDraft = appState.weatherCityName
+            }
+            if usageGoalDraft.isEmpty, let goal = appState.dailyUsageGoalMinutes {
+                usageGoalDraft = String(Int(goal))
             }
         }
         .task {
@@ -161,6 +165,32 @@ struct SettingsView: View {
                 }
                 .onChange(of: appState.storeConversationEnabled) { _, newValue in
                     Task { await appState.setStoreConversationEnabled(newValue) }
+                }
+
+                Divider().opacity(0.4)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Tägliche Nutzungsanzeige")
+                        .font(.headline)
+                    Text("Rein informativ: zeigt dir, wie viel Zeit du heute im Gespräch mit Jarvis verbracht hast. Kein Vergleichswert ist voreingestellt - trag optional einen eigenen ein, wenn dir das hilft.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    HStack {
+                        TextField("z. B. 30", text: $usageGoalDraft, onCommit: submitUsageGoal)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 100)
+                        Text("Minuten")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        Button("Übernehmen") { submitUsageGoal() }
+                            .disabled(usageGoalDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        if appState.dailyUsageGoalMinutes != nil {
+                            Button("Zurücksetzen") {
+                                usageGoalDraft = ""
+                                appState.updateDailyUsageGoal(nil)
+                            }
+                        }
+                    }
                 }
             }
             .padding(14)
@@ -400,6 +430,12 @@ struct SettingsView: View {
 
     private func submitWeatherCity() {
         Task { await appState.updateWeatherCity(weatherCityDraft) }
+    }
+
+    private func submitUsageGoal() {
+        let trimmed = usageGoalDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let value = Double(trimmed), value > 0 else { return }
+        appState.updateDailyUsageGoal(value)
     }
 
     private func sectionHeader(_ title: String, subtitle: String) -> some View {
