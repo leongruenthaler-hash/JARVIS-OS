@@ -1,0 +1,11 @@
+Wetterdaten bereitgestellt von Open-Meteo.com
+
+Lizenz: Creative Commons Attribution 4.0 International (CC BY 4.0)
+https://creativecommons.org/licenses/by/4.0/
+
+Open-Meteo stellt Wetter- und Geokodierungsdaten kostenlos für die
+nicht-kommerzielle Nutzung bereit. Jarvis nutzt diese Daten ausschließlich
+für die Wetter-Karte im Dashboard und die einmalige Umrechnung eines vom
+Nutzer eingegebenen Stadtnamens in geografische Koordinaten.
+
+Weitere Informationen: https://open-meteo.com

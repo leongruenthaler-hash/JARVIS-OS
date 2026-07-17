@@ -33,6 +33,16 @@ struct LicensesView: View {
             documents: [
                 LicenseDocument(id: "qwen3-4b-license", title: "Apache License 2.0", resourceSubdirectory: "Licenses/qwen3-4b", resourceName: "LICENSE")
             ]
+        ),
+        LicenseModelEntry(
+            id: "open-meteo",
+            title: "Open-Meteo Wetterdaten",
+            licenseType: "CC BY 4.0",
+            summary: "Kostenlose Wetter- und Geokodierungsdaten für nicht-kommerzielle Nutzung – erfordert nur eine Namensnennung der Quelle.",
+            symbol: "cloud.sun.fill",
+            documents: [
+                LicenseDocument(id: "open-meteo-attribution", title: "Attribution", resourceSubdirectory: "Licenses/open-meteo", resourceName: "ATTRIBUTION")
+            ]
         )
     ]
 

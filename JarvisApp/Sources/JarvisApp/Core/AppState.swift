@@ -50,6 +50,12 @@ final class AppState: ObservableObject {
     @Published var language = UserDefaults.standard.string(forKey: "JarvisLanguage") ?? "Deutsch"
     @Published var userName = UserDefaults.standard.string(forKey: "JarvisUserName") ?? ""
     @Published var userSalutation = UserDefaults.standard.string(forKey: "JarvisUserSalutation") ?? "none"
+    @Published var weatherCityName = UserDefaults.standard.string(forKey: "JarvisWeatherCityName") ?? ""
+    @Published var weatherCityError: String?
+    @Published private(set) var weatherLocation: GeocodedLocation? = {
+        guard let data = UserDefaults.standard.data(forKey: "JarvisWeatherLocation") else { return nil }
+        return try? JSONDecoder().decode(GeocodedLocation.self, from: data)
+    }()
     @Published var fastVoiceMode = UserDefaults.standard.object(forKey: "JarvisFastVoiceMode") as? Bool ?? true
     @Published var alwaysListenEnabled = UserDefaults.standard.object(forKey: "JarvisAlwaysListenEnabled") as? Bool ?? false
     @Published var lastError: String?
@@ -165,6 +171,33 @@ final class AppState: ObservableObject {
             try await serverController.setUserProfile(userName: displayUserName, salutation: userSalutation)
         } catch {
             lastError = "Profil wurde lokal gespeichert. Der Core übernimmt es beim nächsten erfolgreichen Start."
+        }
+    }
+
+    /// One-time (or on-change) geocoding of the user's configured city, triggered only
+    /// from Settings when they set/change it - never on every weather poll. Persists the
+    /// resolved coordinates so future weather fetches don't need to re-geocode on every
+    /// app launch.
+    func updateWeatherCity(_ name: String) async {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        weatherCityName = trimmed
+        UserDefaults.standard.set(trimmed, forKey: "JarvisWeatherCityName")
+        weatherCityError = nil
+
+        guard !trimmed.isEmpty else {
+            weatherLocation = nil
+            UserDefaults.standard.removeObject(forKey: "JarvisWeatherLocation")
+            return
+        }
+
+        do {
+            let location = try await WeatherService.shared.geocodeCity(trimmed)
+            weatherLocation = location
+            if let data = try? JSONEncoder().encode(location) {
+                UserDefaults.standard.set(data, forKey: "JarvisWeatherLocation")
+            }
+        } catch {
+            weatherCityError = error.localizedDescription
         }
     }
 

@@ -5,6 +5,7 @@ struct SettingsView: View {
     @Environment(\.jarvisTheme) private var theme
     @AppStorage("JarvisActiveTheme") private var activeThemeRaw = JarvisTheme.classic.rawValue
     @State private var apiKey = ""
+    @State private var weatherCityDraft = ""
 
     var body: some View {
         ScrollView {
@@ -24,6 +25,11 @@ struct SettingsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(LiquidGlassBackground())
         .navigationTitle("Einstellungen")
+        .onAppear {
+            if weatherCityDraft.isEmpty {
+                weatherCityDraft = appState.weatherCityName
+            }
+        }
         .task {
             await appState.refreshConversationHistory()
         }
@@ -84,6 +90,33 @@ struct SettingsView: View {
                     Text("English").tag("English")
                 }
                 .pickerStyle(.segmented)
+
+                Divider().opacity(0.4)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Stadt (für die Wetter-Karte)")
+                        .font(.headline)
+                    Text("Wird einmalig in Koordinaten umgerechnet (Open-Meteo Geocoding) - nicht bei jeder Wetterabfrage erneut.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    HStack {
+                        TextField("z. B. Berlin", text: $weatherCityDraft, onCommit: submitWeatherCity)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 260)
+                        Button("Übernehmen") { submitWeatherCity() }
+                            .disabled(weatherCityDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                    if let location = appState.weatherLocation {
+                        Label("Aufgelöst: \(location.resolvedName)", systemImage: "checkmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                    }
+                    if let error = appState.weatherCityError {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
 
                 Divider().opacity(0.4)
 
@@ -363,6 +396,10 @@ struct SettingsView: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.16), lineWidth: 1)
         )
+    }
+
+    private func submitWeatherCity() {
+        Task { await appState.updateWeatherCity(weatherCityDraft) }
     }
 
     private func sectionHeader(_ title: String, subtitle: String) -> some View {
