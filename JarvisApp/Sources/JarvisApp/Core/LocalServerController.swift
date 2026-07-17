@@ -14,6 +14,7 @@ final class LocalServerController: ObservableObject {
     private let apiClient = JarvisAPIClient()
     private var serverProcess: Process?
     private var ttsProcess: Process?
+    private var synthesizeProcess: Process?
     private var warmupProcess: Process?
 
     var hasOwnedProcess: Bool { serverProcess != nil }
@@ -398,8 +399,20 @@ final class LocalServerController: ObservableObject {
     }
 
     func stopSpeaking() async {
-        guard let process = ttsProcess else { return }
-        ttsProcess = nil
+        await terminateProcess(at: \.ttsProcess)
+        try? await Task.sleep(for: .milliseconds(250))
+    }
+
+    /// Cancels an in-flight prefetch synthesis without touching current playback -
+    /// used when the streaming answer/queue is abandoned (e.g. user stops or sends a
+    /// new message) before a prefetched segment was ever played.
+    func cancelPendingSynthesis() async {
+        await terminateProcess(at: \.synthesizeProcess)
+    }
+
+    private func terminateProcess(at keyPath: ReferenceWritableKeyPath<LocalServerController, Process?>) async {
+        guard let process = self[keyPath: keyPath] else { return }
+        self[keyPath: keyPath] = nil
         if process.isRunning {
             process.terminate()
             await withTaskGroup(of: Void.self) { group in
@@ -418,7 +431,132 @@ final class LocalServerController: ObservableObject {
                 group.cancelAll()
             }
         }
-        try? await Task.sleep(for: .milliseconds(250))
+    }
+
+    /// Synthesizes `text` to an audio file WITHOUT playing it - lets a caller prefetch
+    /// the next segment's audio while a previous one is still playing via `playSpeechFile`.
+    /// Throws (e.g. if `tts_provider` isn't "edge") so callers can fall back to
+    /// `speakText` for that segment instead of silently losing audio.
+    func synthesizeSpeech(
+        _ text: String,
+        onEvent: (@MainActor (BridgeRuntimeEvent) -> Void)? = nil
+    ) async throws -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw BridgeError.processFailed("Kein Text zum Synthetisieren.")
+        }
+
+        let inputData = try JSONSerialization.data(withJSONObject: ["text": trimmed], options: [])
+        let (stdoutData, status, stderrPipe) = try await runTTSBridgeSubprocess(
+            arguments: ["--synthesize"],
+            stdinData: inputData,
+            trackAt: \.synthesizeProcess,
+            onEvent: onEvent
+        )
+
+        guard status == 0 else {
+            let errorData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+            let errorText = String(data: errorData, encoding: .utf8) ?? ""
+            throw BridgeError.processFailed(errorText.isEmpty ? "Sprachsynthese fehlgeschlagen." : errorText)
+        }
+
+        struct SynthesizeResponse: Decodable { let ok: Bool; let audio_file: String? }
+        guard let response = try? JSONDecoder().decode(SynthesizeResponse.self, from: stdoutData),
+              response.ok, let audioFile = response.audio_file else {
+            throw BridgeError.invalidJSON(String(data: stdoutData, encoding: .utf8) ?? "")
+        }
+        return audioFile
+    }
+
+    /// Plays a file previously produced by `synthesizeSpeech`. Shares `ttsProcess`
+    /// tracking with `speakText`, so `stopSpeaking()` interrupts this the same way.
+    func playSpeechFile(
+        _ path: String,
+        onEvent: (@MainActor (BridgeRuntimeEvent) -> Void)? = nil
+    ) async throws {
+        await stopSpeaking()
+
+        let inputData = try JSONSerialization.data(withJSONObject: ["audio_file": path], options: [])
+        let (_, status, stderrPipe) = try await runTTSBridgeSubprocess(
+            arguments: ["--play"],
+            stdinData: inputData,
+            trackAt: \.ttsProcess,
+            onEvent: onEvent
+        )
+
+        if status != 0 && status != 15 && status != 130 {
+            let errorData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+            let errorText = String(data: errorData, encoding: .utf8) ?? ""
+            throw BridgeError.processFailed(errorText.isEmpty ? "Audiodatei konnte nicht abgespielt werden." : errorText)
+        }
+    }
+
+    /// Shared subprocess plumbing behind `speakText`/`synthesizeSpeech`/`playSpeechFile`:
+    /// runs `app/tts_bridge.py` with the given arguments, feeds `stdinData` on stdin,
+    /// forwards stderr lines to `onEvent`, and returns stdout + exit status once done.
+    private func runTTSBridgeSubprocess(
+        arguments: [String],
+        stdinData: Data,
+        trackAt keyPath: ReferenceWritableKeyPath<LocalServerController, Process?>,
+        onEvent: (@MainActor (BridgeRuntimeEvent) -> Void)?
+    ) async throws -> (stdout: Data, status: Int32, stderrPipe: Pipe) {
+        let process = Process()
+        let stdinPipe = Pipe()
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.currentDirectoryURL = URL(fileURLWithPath: projectPath)
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        let argsSuffix = arguments.map { " \(Self.shellQuote($0))" }.joined()
+        process.arguments = [
+            "-lc",
+            "cd \(Self.shellQuote(projectPath)) && \(Self.shellQuote(projectPath))/.venv/bin/python3 app/tts_bridge.py\(argsSuffix)"
+        ]
+        process.standardInput = stdinPipe
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        self[keyPath: keyPath] = process
+        try process.run()
+        stdinPipe.fileHandleForWriting.write(stdinData)
+        try? stdinPipe.fileHandleForWriting.close()
+
+        let stderrReader = Task.detached {
+            let handle = stderrPipe.fileHandleForReading
+            var buffer = Data()
+            while true {
+                let data = handle.availableData
+                if data.isEmpty { break }
+                buffer.append(data)
+                while let newline = buffer.firstIndex(of: 10) {
+                    let lineData = buffer[..<newline]
+                    buffer.removeSubrange(...newline)
+                    guard let line = String(data: lineData, encoding: .utf8) else { continue }
+                    if let event = BridgeRuntimeEvent(line: line) {
+                        await MainActor.run { onEvent?(event) }
+                    }
+                }
+            }
+            if !buffer.isEmpty, let line = String(data: buffer, encoding: .utf8),
+               let event = BridgeRuntimeEvent(line: line) {
+                await MainActor.run { onEvent?(event) }
+            }
+        }
+
+        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+
+        let status: Int32 = await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                process.waitUntilExit()
+                continuation.resume(returning: process.terminationStatus)
+            }
+        }
+        _ = await stderrReader.result
+
+        if self[keyPath: keyPath] === process {
+            self[keyPath: keyPath] = nil
+        }
+
+        return (stdoutData, status, stderrPipe)
     }
 
     func warmVoicePipeline() {
@@ -854,6 +992,8 @@ enum BridgeRuntimeEvent {
     case ttsStarted
     case audioPlaybackStarted
     case ttsFinished
+    case ttsSynthesizeStarted
+    case ttsSynthesizeFinished
     case assistantDelta(String)
     case partialTranscript(String)
     case finalTranscript(String)
@@ -910,6 +1050,10 @@ enum BridgeRuntimeEvent {
             self = .audioPlaybackStarted
         } else if text.contains("VoicePerformanceEvent: ttsFinished") {
             self = .ttsFinished
+        } else if text.contains("VoicePerformanceEvent: ttsSynthesizeStarted") {
+            self = .ttsSynthesizeStarted
+        } else if text.contains("VoicePerformanceEvent: ttsSynthesizeFinished") {
+            self = .ttsSynthesizeFinished
         } else {
             return nil
         }
