@@ -51,6 +51,24 @@ func requestMicrophonePermission() {
     }
 }
 
+/// Emits a `JarvisPartialTranscript:`/`JarvisFinalTranscript:` line to stderr in the same
+/// wire format `LocalServerController.BridgeRuntimeEvent` already parses (originally used
+/// by the separate, orphaned Python live-transcript pipeline) - reusing that existing
+/// parser instead of inventing a new protocol. stdout is left untouched (still exactly one
+/// line at process exit) so the existing blocking Python callers (AppleSpeechEngine) keep
+/// working unchanged.
+struct TranscriptEventPayload: Encodable {
+    let text: String
+}
+
+func emitTranscriptEvent(prefix: String, text: String) {
+    guard let data = try? JSONEncoder().encode(TranscriptEventPayload(text: text)),
+          let json = String(data: data, encoding: .utf8) else {
+        return
+    }
+    fputs("\(prefix) \(json)\n", stderr)
+}
+
 func makeRecognizer(localeIdentifier: String) -> SFSpeechRecognizer {
     guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeIdentifier)) else {
         fail("Apple Speech recognizer is not available for locale \(localeIdentifier).", 3)
@@ -75,6 +93,12 @@ func runLive(localeIdentifier: String) {
     if #available(macOS 10.15, *) {
         request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
     }
+    fputs(
+        "Apple Speech Diagnose: isAvailable=\(recognizer.isAvailable) "
+        + "supportsOnDeviceRecognition=\(recognizer.supportsOnDeviceRecognition) "
+        + "requiresOnDeviceRecognition=\(request.requiresOnDeviceRecognition)\n",
+        stderr
+    )
 
     var finalText = ""
     var lastPartialText = ""
@@ -91,14 +115,19 @@ func runLive(localeIdentifier: String) {
 
     let task = recognizer.recognitionTask(with: request) { result, error in
         if let result = result {
-            lastPartialText = result.bestTranscription.formattedString
-            if result.isFinal && !result.bestTranscription.formattedString.isEmpty {
-                finalText = result.bestTranscription.formattedString
+            let text = result.bestTranscription.formattedString
+            if result.isFinal && !text.isEmpty {
+                finalText = text
+                emitTranscriptEvent(prefix: "JarvisFinalTranscript:", text: text)
                 doneSemaphore.signal()
+            } else if !text.isEmpty && text != lastPartialText {
+                emitTranscriptEvent(prefix: "JarvisPartialTranscript:", text: text)
             }
+            lastPartialText = text
         }
 
         if let error = error {
+            fputs("Apple Speech Diagnose: recognitionTask error=\(error)\n", stderr)
             finalError = error
             if hasSpeech {
                 doneSemaphore.signal()
@@ -154,7 +183,13 @@ func runLive(localeIdentifier: String) {
     }
 
     while true {
-        Thread.sleep(forTimeInterval: 0.05)
+        // Must service the run loop while waiting, not just block the thread: SFSpeechRecognizer
+        // dispatches recognitionTask's completion handler onto the main run loop/queue, so a bare
+        // Thread.sleep() here starves it forever - recognition completes internally but its
+        // callback never gets a chance to run, silently producing empty results with no error.
+        // Confirmed by isolated test (see commit message) - Thread.sleep() -> zero callback
+        // invocations ever; RunLoop.current.run(until:) -> callbacks fire normally.
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
 
         if doneSemaphore.wait(timeout: .now()) == .success && (!finalText.isEmpty || !lastPartialText.isEmpty) {
             break
@@ -173,9 +208,18 @@ func runLive(localeIdentifier: String) {
     inputNode.removeTap(onBus: 0)
     request.endAudio()
 
+    fputs(
+        "Apple Speech Diagnose: Aufnahmeschleife beendet nach \(String(format: "%.2f", Date().timeIntervalSince(startTime)))s, "
+        + "hasSpeech=\(hasSpeech), finalText=\"\(finalText)\", lastPartialText=\"\(lastPartialText)\"\n",
+        stderr
+    )
+
     _ = doneSemaphore.wait(timeout: .now() + 2.0)
     task.cancel()
 
+    if let error = finalError {
+        fputs("Apple Speech Diagnose: finalError=\(error)\n", stderr)
+    }
     if let error = finalError, finalText.isEmpty && lastPartialText.isEmpty {
         fail("Apple Speech failed: \(error.localizedDescription)", 6)
     }
