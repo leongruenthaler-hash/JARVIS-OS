@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -88,6 +89,34 @@ class VoiceOutput:
             audio_file = Path(tempfile.gettempdir()) / f"jarvis_edge_tts_{index}.mp3"
             asyncio.run(self._save_edge_audio(chunk, edge_voice, audio_file))
             self._play_audio_file(audio_file, wait=True)
+
+    def synthesize_edge_to_file(self, text: str, voice: str | None = None) -> Path:
+        """Synthesizes `text` via edge-TTS into a uniquely-named temp file and returns its
+        path, WITHOUT playing it - lets a caller prefetch the next segment's audio while
+        the current one is still playing. Raises if tts_provider isn't edge or synthesis
+        fails; callers should fall back to the combined speak() path in that case."""
+        text = str(text).strip()
+        if not text:
+            raise ValueError("Kein Text zum Synthetisieren angegeben.")
+
+        provider = str(self.config.get("tts_provider", "edge")).strip().lower()
+        if provider != "edge":
+            raise RuntimeError("synthesize_edge_to_file erfordert tts_provider=edge.")
+
+        edge_voice = str(
+            voice
+            or self.config.get("edge_voice")
+            or self.config.get("voice")
+            or "de-DE-ConradNeural"
+        ).strip()
+        audio_file = Path(tempfile.gettempdir()) / f"jarvis_edge_tts_{uuid.uuid4().hex}.mp3"
+        asyncio.run(self._save_edge_audio(text, edge_voice, audio_file))
+        return audio_file
+
+    def play_file(self, audio_file: Path | str) -> None:
+        """Plays a pre-synthesized audio file (e.g. from synthesize_edge_to_file) and
+        blocks until playback finishes."""
+        self._play_audio_file(Path(audio_file), wait=True)
 
     async def _save_edge_audio(self, text: str, voice: str, audio_file: Path):
         import edge_tts
