@@ -4,6 +4,7 @@ struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.jarvisTheme) private var theme
     @AppStorage("JarvisActiveTheme") private var activeThemeRaw = JarvisTheme.classic.rawValue
+    @AppStorage("JarvisDashboardLayoutEnabled") private var dashboardLayoutEnabled = false
     @State private var apiKey = ""
     @State private var weatherCityDraft = ""
     @State private var usageGoalDraft = ""
@@ -247,14 +248,34 @@ struct SettingsView: View {
 
     private var designSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            sectionHeader("Design", subtitle: "Wechsle zwischen der bestehenden Optik und dem neuen Jarvis-Vision-Look.")
+            sectionHeader("Design", subtitle: "Ansicht und Farbthema lassen sich unabhängig voneinander wählen.")
 
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Ansicht")
+                    .font(.headline)
+                Text("Dashboard ist eine komplett eigenständige Ansicht (Seitenleiste + Karten-Raster) mit fester warm-oranger Farbgebung - das Farbthema unten gilt nur für die klassische Ansicht.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Picker("Ansicht", selection: $dashboardLayoutEnabled) {
+                    Text("Klassisch").tag(false)
+                    Text("Dashboard").tag(true)
+                }
+                .pickerStyle(.segmented)
+            }
+
+            Divider().opacity(0.4)
+
+            Text("Farbthema")
+                .font(.headline)
             Picker("Design", selection: $activeThemeRaw) {
                 ForEach(JarvisTheme.allCases) { themeOption in
                     Text(themeOption.title).tag(themeOption.rawValue)
                 }
             }
             .pickerStyle(.segmented)
+            .disabled(dashboardLayoutEnabled)
+            .opacity(dashboardLayoutEnabled ? 0.5 : 1.0)
 
             HStack(alignment: .center, spacing: 14) {
                 if theme.isFuturistic {

@@ -38,6 +38,7 @@
 		A967EE67784809B6D279BE80 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 992C4FC6091295CB38DABD5C /* AppState.swift */; };
 		AC88AFFB19BB65617496152F /* LocalServerController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30E64A9827D02FDF81834A79 /* LocalServerController.swift */; };
 		BB56C742007B2B0006A915D4 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FED92BDBA779BC8A1F4138B2 /* RootView.swift */; };
+		48D758B3A86E4F01A6565628 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 760C71EFC090439CB0914410 /* DashboardView.swift */; };
 		BEEDA8D544E9F2D2E159BD20 /* MainShellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F69298EA3305AA688AC9E91 /* MainShellView.swift */; };
 		C162A819C69FA27CFA196662 /* ServerStatusCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECD6CEA34720D0375415009B /* ServerStatusCard.swift */; };
 		8401EAA29BF80DAE1B953483 /* SetupProgressCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A82EFFD2741E4DAD6415FC96 /* SetupProgressCard.swift */; };
@@ -93,6 +94,7 @@
 		EDB9A78B15C2C04E8B5296A0 /* JarvisMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisMacApp.swift; sourceTree = "<group>"; };
 		FEC5ED5093EF18C40845EC9F /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		FED92BDBA779BC8A1F4138B2 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		760C71EFC090439CB0914410 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
 		2707426F09591592CE237BB0 /* ollama-runtime */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/JarvisApp/Resources/ollama-runtime; sourceTree = SOURCE_ROOT; };
 		7C761675FE88A65AA049132A /* bundled-models */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/JarvisApp/Resources/bundled-models; sourceTree = SOURCE_ROOT; };
 		76D4F0EC3378BF4EE09AAFAC /* Licenses */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/JarvisApp/Resources/Licenses; sourceTree = SOURCE_ROOT; };
@@ -158,6 +160,7 @@
 					1A2B3C4D5E6F708192A3B4C8 /* PhotosView.swift */,
 					85002DF6FCD359EC134EC4F9 /* PrivacyView.swift */,
 				FED92BDBA779BC8A1F4138B2 /* RootView.swift */,
+				760C71EFC090439CB0914410 /* DashboardView.swift */,
 				CE436B2B3FAF9DED68E8828A /* SettingsView.swift */,
 			);
 			path = Views;
@@ -348,6 +351,7 @@
 				EB19DCFF8A89B08FA0E5BE7E /* OnboardingView.swift in Sources */,
 				9B3222560E60EFA286A779D5 /* PrivacyView.swift in Sources */,
 				BB56C742007B2B0006A915D4 /* RootView.swift in Sources */,
+				48D758B3A86E4F01A6565628 /* DashboardView.swift in Sources */,
 				4492D0E9C2B33074CA9E4E61 /* SettingsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
