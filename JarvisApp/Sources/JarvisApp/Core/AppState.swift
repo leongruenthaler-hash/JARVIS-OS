@@ -430,8 +430,20 @@ final class AppState: ObservableObject {
 
         defer { liveTranscriptText = "" }
 
+        // Partials can arrive many times per second (9 callbacks for a 7-word sentence in
+        // testing) - each one is a @Published mutation that re-evaluates all of ChatView's
+        // body, since it observes AppState at the top level. Throttling to ~150ms keeps the
+        // UI update rate visually smooth without needing every single intermediate partial;
+        // this is a live preview, not authoritative text, so dropped in-between updates are
+        // harmless (cleared entirely once the turn finishes either way).
+        var lastUIUpdate = Date.distantPast
+        let minUIUpdateInterval: TimeInterval = 0.15
+
         do {
             let text = try await serverController.startLiveTranscription(locale: "de-DE") { [weak self] partial in
+                let now = Date()
+                guard now.timeIntervalSince(lastUIUpdate) >= minUIUpdateInterval else { return }
+                lastUIUpdate = now
                 self?.liveTranscriptText = partial
             }
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -542,12 +542,17 @@ final class LocalServerController: ObservableObject {
             }
         }
 
-        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-
-        let status: Int32 = await withCheckedContinuation { continuation in
+        // Must read stdout and wait for exit off the main thread: readDataToEndOfFile()
+        // is a synchronous, blocking call with no async variant - calling it directly here
+        // would block this @MainActor-isolated function's caller (i.e. the real main
+        // thread) for the process's whole lifetime, freezing the entire app UI. Confirmed
+        // as the root cause of a full UI freeze during every TTS synth/playback call - see
+        // commit message.
+        let (stdoutData, status): (Data, Int32) = await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
+                let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
                 process.waitUntilExit()
-                continuation.resume(returning: process.terminationStatus)
+                continuation.resume(returning: (data, process.terminationStatus))
             }
         }
         _ = await stderrReader.result
@@ -607,12 +612,16 @@ final class LocalServerController: ObservableObject {
             return fullText
         }
 
-        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-
-        let status: Int32 = await withCheckedContinuation { continuation in
+        // Same fix as runTTSBridgeSubprocess: read stdout and wait for exit off the main
+        // thread, not directly here - this call runs up to ~14s (the live-transcription
+        // window), and a blocking readDataToEndOfFile() on the main thread for that long
+        // was confirmed to freeze the entire app UI (no clicks, no redraws) for the whole
+        // duration.
+        let (stdoutData, status): (Data, Int32) = await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
+                let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
                 process.waitUntilExit()
-                continuation.resume(returning: process.terminationStatus)
+                continuation.resume(returning: (data, process.terminationStatus))
             }
         }
         let stderrText = await stderrReader.value
