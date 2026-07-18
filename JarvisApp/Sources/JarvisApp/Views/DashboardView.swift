@@ -231,9 +231,8 @@ struct DashboardView: View {
                     .font(.system(size: 13))
                     .foregroundStyle(DashboardPalette.textSecondary)
                 Spacer(minLength: 0)
-                Image(systemName: "mic.fill")
-                    .font(.system(size: 12))
-                    .foregroundStyle(DashboardPalette.textSecondary)
+                alwaysListenButton
+                micButton
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -268,6 +267,45 @@ struct DashboardView: View {
                 }
             }
         }
+    }
+
+    /// Same trigger as the Chat mic button (`ChatView.swift`'s `micDisabled`/mic `Button`) -
+    /// this is a second access point to `listenOnce()`, not a parallel recording path.
+    private var micDisabled: Bool {
+        switch appState.voiceState {
+        case .preparingMicrophone, .listening, .userSpeaking, .liveTranscribing, .transcribing, .thinking:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private var micButton: some View {
+        Button {
+            Task { await appState.listenOnce() }
+        } label: {
+            Image(systemName: "mic.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(micDisabled ? DashboardPalette.textSecondary.opacity(0.5) : DashboardPalette.textSecondary)
+        }
+        .buttonStyle(.plain)
+        .disabled(micDisabled)
+        .help("Mit Jarvis sprechen")
+    }
+
+    /// Same mechanism as the Chat status ribbon's "Immer an/aus" toggleChip
+    /// (`ChatView.swift`'s `statusRibbon`) - just a second, faster access point.
+    private var alwaysListenButton: some View {
+        Button {
+            appState.alwaysListenEnabled.toggle()
+            Task { await appState.applyAlwaysListenChange() }
+        } label: {
+            Image(systemName: appState.alwaysListenEnabled ? "ear.fill" : "ear.trianglebadge.exclamationmark")
+                .font(.system(size: 12))
+                .foregroundStyle(appState.alwaysListenEnabled ? DashboardPalette.accent : DashboardPalette.textSecondary)
+        }
+        .buttonStyle(.plain)
+        .help(appState.alwaysListenEnabled ? "Immer-Zuhören-Modus deaktivieren" : "Immer-Zuhören-Modus aktivieren")
     }
 
     private var greetedName: String {
