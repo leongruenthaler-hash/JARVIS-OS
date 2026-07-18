@@ -29,13 +29,13 @@ struct ServerStatusCard: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .background(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(theme.isFuturistic ? Color.black.opacity(0.22) : Color.clear)
+                .fill(theme.isDark ? Color.black.opacity(0.22) : Color.clear)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(theme.isFuturistic ? theme.primaryAccent.opacity(0.36) : Color.white.opacity(0.16), lineWidth: 1)
+                .strokeBorder(theme.isDark ? theme.primaryAccent.opacity(0.36) : Color.white.opacity(0.16), lineWidth: 1)
         )
-        .shadow(color: theme.primaryAccent.opacity(theme.isFuturistic ? 0.16 : 0.08), radius: theme.isFuturistic ? 22 : 16, x: 0, y: 8)
+        .shadow(color: theme.primaryAccent.opacity(theme.isDark ? 0.16 : 0.08), radius: theme.isDark ? 22 : 16, x: 0, y: 8)
     }
 
     private func statusChip(title: String, tint: Color) -> some View {
@@ -46,7 +46,7 @@ struct ServerStatusCard: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(.thinMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(theme.isFuturistic ? theme.primaryAccent.opacity(0.24) : Color.white.opacity(0.12), lineWidth: 1))
+            .overlay(Capsule().strokeBorder(theme.isDark ? theme.primaryAccent.opacity(0.24) : Color.white.opacity(0.12), lineWidth: 1))
     }
 
     private var symbol: String {

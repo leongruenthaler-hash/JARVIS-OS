@@ -30,12 +30,12 @@ struct SetupProgressCard: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .background(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(theme.isFuturistic ? Color.black.opacity(0.22) : Color.clear)
+                .fill(theme.isDark ? Color.black.opacity(0.22) : Color.clear)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(Color.blue.opacity(0.32), lineWidth: 1)
         )
-        .shadow(color: Color.blue.opacity(theme.isFuturistic ? 0.16 : 0.08), radius: theme.isFuturistic ? 22 : 16, x: 0, y: 8)
+        .shadow(color: Color.blue.opacity(theme.isDark ? 0.16 : 0.08), radius: theme.isDark ? 22 : 16, x: 0, y: 8)
     }
 }

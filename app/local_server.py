@@ -406,55 +406,79 @@ class JarvisLocalServer:
         return index.local_vision_status()
 
     def calendar_overview(self) -> dict[str, Any]:
-        try:
-            upcoming = list_upcoming_calendar_items(limit=5).get("items", [])
-            calendar_error = ""
-        except Exception as exc:
-            upcoming = []
-            calendar_error = str(exc)
+        if self.permissions.is_allowed("calendar"):
+            try:
+                upcoming = list_upcoming_calendar_items(limit=5).get("items", [])
+                calendar_error = ""
+            except Exception as exc:
+                upcoming = []
+                calendar_error = str(exc)
+            calendar_message = "Nächste Termine geladen." if upcoming else "Keine kommenden Termine gefunden."
+        else:
+            upcoming, calendar_error = [], ""
+            calendar_message = "Kalender-Zugriff noch nicht aktiviert."
 
-        try:
-            reminders = list_open_reminders(limit=5).get("items", [])
-            reminder_error = ""
-        except Exception as exc:
-            reminders = []
-            reminder_error = str(exc)
+        if self.permissions.is_allowed("reminders"):
+            try:
+                reminders = list_open_reminders(limit=5).get("items", [])
+                reminder_error = ""
+            except Exception as exc:
+                reminders = []
+                reminder_error = str(exc)
+            reminder_message = "Offene Erinnerungen geladen." if reminders else "Keine offenen Erinnerungen gefunden."
+        else:
+            reminders, reminder_error = [], ""
+            reminder_message = "Erinnerungen-Zugriff noch nicht aktiviert."
 
         return {
             "calendar": {
                 "items": upcoming,
                 "count": len(upcoming),
-                "message": "Nächste Termine geladen." if upcoming else "Keine kommenden Termine gefunden.",
+                "message": calendar_message,
                 "error": calendar_error,
             },
             "reminders": {
                 "items": reminders,
                 "count": len(reminders),
-                "message": "Offene Erinnerungen geladen." if reminders else "Keine offenen Erinnerungen gefunden.",
+                "message": reminder_message,
                 "error": reminder_error,
             },
         }
 
     def daily_briefing(self) -> dict[str, Any]:
-        try:
-            calendar_items = list_upcoming_calendar_items(limit=5).get("items", [])
-        except Exception:
+        # Each integration only gets touched (live AppleScript) once its own
+        # Datenschutz toggle is on - a briefing request must never be what
+        # silently first-triggers Kalender/Erinnerungen/Mail access.
+        if self.permissions.is_allowed("calendar"):
+            try:
+                calendar_items = list_upcoming_calendar_items(limit=5).get("items", [])
+            except Exception:
+                calendar_items = []
+        else:
             calendar_items = []
-        try:
-            reminder_items = list_open_reminders(limit=5).get("items", [])
-        except Exception:
+
+        if self.permissions.is_allowed("reminders"):
+            try:
+                reminder_items = list_open_reminders(limit=5).get("items", [])
+            except Exception:
+                reminder_items = []
+        else:
             reminder_items = []
+
+        mail_summary = self._mail_background_status().get("message", "") if self.permissions.is_allowed("mail") else ""
 
         briefing = build_daily_briefing(
             calendar_items=calendar_items,
             reminders=reminder_items,
-            mail_summary=self._mail_background_status().get("message", ""),
+            mail_summary=mail_summary,
             system_summary=f"Modell: {self.models.active_model}. Provider: {self.models.provider}.",
         )
         return {
             "briefing": briefing,
             "calendar_count": len(calendar_items),
             "reminders_count": len(reminder_items),
+            "calendar_allowed": self.permissions.is_allowed("calendar"),
+            "reminders_allowed": self.permissions.is_allowed("reminders"),
         }
 
     def start_local_photo_vision_analysis(self, max_items: int | None = None) -> dict[str, Any]:
@@ -703,6 +727,32 @@ class JarvisLocalServer:
                 error_message=str(exc) or type(exc).__name__,
             )
         self._save_scan_status(self._file_scan_status_path, status)
+
+    def probe_permission(self, permission: str) -> None:
+        """Makes exactly one minimal live call for a freshly-granted integration,
+        so the native macOS consent dialog appears right now - at the moment the
+        user opted in via the Datenschutz toggle - instead of silently the next
+        time some background call happens to touch it. Best-effort: swallows
+        errors, since a macOS "Don't Allow" here is a legitimate outcome, not a
+        bug, and must not break the toggle response."""
+        try:
+            if permission == "calendar":
+                list_upcoming_calendar_items(limit=1)
+            elif permission == "reminders":
+                list_open_reminders(limit=1)
+            elif permission == "mail":
+                list_mailboxes()
+            elif permission == "contacts":
+                from contacts_client import list_contacts
+                list_contacts(limit=1)
+            elif permission == "music":
+                from music_client import list_playlists
+                list_playlists(limit=1)
+            # "notes" has no side-effect-free read - its first real create/append
+            # command is what triggers the OS prompt instead, which still matches
+            # "on first actual use".
+        except Exception:
+            pass
 
     def _ensure_mail_worker(self) -> MailBackgroundWorker:
         if self.mail_worker is None:
@@ -1806,7 +1856,12 @@ class Handler(BaseHTTPRequestHandler):
                 permission = str(payload.get("permission") or "")
                 allowed = bool(payload.get("allowed"))
                 if allowed:
+                    first_time = not SERVER.permissions.is_requested(permission)
                     SERVER.permissions.grant(permission)
+                    if first_time:
+                        # The toggle flip itself is the explicit user action -
+                        # this is the one place a live probe is appropriate.
+                        SERVER.probe_permission(permission)
                 else:
                     SERVER.permissions.revoke(permission)
                 self._json(200, {"permissions": SERVER.permissions.export()})

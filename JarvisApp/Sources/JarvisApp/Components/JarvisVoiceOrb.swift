@@ -142,11 +142,12 @@ struct JarvisVoiceOrb: View {
     private var middleOpacity: Double { middleRingOpacity }
     private var innerRingOpacity: Double { innerRingOpacityValue }
     private var coreTint: Color {
-        if theme.isFuturistic {
+        if theme.isDark {
             switch state {
             case .error: return .red
             case .userSpeaking, .liveTranscribing: return theme.secondaryAccent
-            case .jarvisSpeaking: return Color(red: 0.38, green: 0.78, blue: 1.0)
+            // Futuristic keeps its hardcoded blue speaking glow; dashboard uses its own accent.
+            case .jarvisSpeaking: return theme.isFuturistic ? Color(red: 0.38, green: 0.78, blue: 1.0) : theme.secondaryAccent
             default: return theme.primaryAccent
             }
         }

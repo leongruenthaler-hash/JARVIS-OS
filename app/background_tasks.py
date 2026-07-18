@@ -9,11 +9,13 @@ from typing import Any
 
 from mail_calendar_actions import create_calendar_actions_from_messages
 from mail_client import MailAccessError, MailMessage, list_inbox_messages
+from permission_manager import PermissionManager
 
 
 class MailBackgroundWorker:
     def __init__(self, config: dict[str, Any], base_path: Path | None = None):
         self.config = config
+        self.permissions = PermissionManager(base_path)
         self.enabled = bool(config.get("background_mail_enabled", True))
         self.morning_time = str(config.get("background_mail_morning_time", "07:00"))
         self.overnight_time = str(config.get("background_mail_overnight_time", "02:30"))
@@ -122,6 +124,14 @@ class MailBackgroundWorker:
 
     def _run_loop(self):
         while not self.stop_event.is_set():
+            # Automatic (unattended) scans only run once the user has explicitly
+            # turned Mail on in Datenschutz - request_scan()/scan_now() (user- or
+            # command-triggered) are intentionally NOT gated here, since those ARE
+            # the "first actual use" that's allowed to surface the OS prompt.
+            if not self.permissions.is_allowed("mail"):
+                self.stop_event.wait(60)
+                continue
+
             now = datetime.now()
             cache = self._load_cache()
             today = now.date().isoformat()

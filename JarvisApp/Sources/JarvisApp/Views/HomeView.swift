@@ -292,29 +292,68 @@ struct HomeView: View {
         .liquidGlassPanel(tint: .cyan)
     }
 
+    /// Calendar+Reminders must both be explicitly on before the briefing is allowed to
+    /// touch either - otherwise this card would be exactly the every-launch proactive
+    /// trigger it's meant to avoid (see `connectPrompt`).
+    private var calendarAndRemindersAllowed: Bool {
+        (appState.permissions["calendar"]?.allowed ?? false) && (appState.permissions["reminders"]?.allowed ?? false)
+    }
+
     private var briefingCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             sectionHeader("Tagesbriefing", subtitle: "Morgens und abends auf einen Blick. Jetzt erstmal kompakt, später noch schlauer.")
-            Text(appState.dailyBriefingText)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Button {
-                    Task { await appState.refreshDailyBriefing() }
-                } label: {
-                    Label("Aktualisieren", systemImage: "arrow.clockwise")
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
+            if calendarAndRemindersAllowed {
+                Text(appState.dailyBriefingText)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Button {
+                        Task { await appState.refreshDailyBriefing() }
+                    } label: {
+                        Label("Aktualisieren", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
 
-                Spacer()
+                    Spacer()
+                }
+            } else {
+                connectPrompt
             }
         }
         .padding(14)
         .liquidGlassPanel(tint: .indigo)
-        .task {
-            await appState.refreshDailyBriefing()
+        .task(id: calendarAndRemindersAllowed) {
+            if calendarAndRemindersAllowed {
+                await appState.refreshDailyBriefing()
+            }
+        }
+    }
+
+    /// Tapping "Verbinden" is the explicit user action that's allowed to trigger the
+    /// native macOS consent dialogs for Kalender/Erinnerungen - never the card just
+    /// appearing on screen.
+    private var connectPrompt: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Kalender & Erinnerungen verbinden")
+                    .font(.subheadline.weight(.semibold))
+                Text("Damit kann Jarvis dein Tagesbriefing mit echten Terminen und offenen Erinnerungen befüllen.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 12)
+            Button("Verbinden") {
+                Task {
+                    await appState.setPermission("calendar", allowed: true)
+                    await appState.setPermission("reminders", allowed: true)
+                    await appState.refreshDailyBriefing()
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
         }
     }
 

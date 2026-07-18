@@ -50,6 +50,7 @@
 		A9DCE0625F9E7DA36BD1F013 /* ollama-runtime in Resources */ = {isa = PBXBuildFile; fileRef = 2707426F09591592CE237BB0 /* ollama-runtime */; };
 		17A6B63198F9AE63395D0FCB /* bundled-models in Resources */ = {isa = PBXBuildFile; fileRef = 7C761675FE88A65AA049132A /* bundled-models */; };
 		754EEEC1B4E65CA705A0B83A /* Licenses in Resources */ = {isa = PBXBuildFile; fileRef = 76D4F0EC3378BF4EE09AAFAC /* Licenses */; };
+		1D311D8055F64F1BA6F5C74C /* Images in Resources */ = {isa = PBXBuildFile; fileRef = 887606F4384B4D53BFEA33C3 /* Images */; };
 		C16D1BD16AFC989DE48E7456 /* LicensesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D045C8D752CE886EE4E99A82 /* LicensesView.swift */; };
 /* End PBXBuildFile section */
 
@@ -98,6 +99,7 @@
 		2707426F09591592CE237BB0 /* ollama-runtime */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/JarvisApp/Resources/ollama-runtime; sourceTree = SOURCE_ROOT; };
 		7C761675FE88A65AA049132A /* bundled-models */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/JarvisApp/Resources/bundled-models; sourceTree = SOURCE_ROOT; };
 		76D4F0EC3378BF4EE09AAFAC /* Licenses */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/JarvisApp/Resources/Licenses; sourceTree = SOURCE_ROOT; };
+		887606F4384B4D53BFEA33C3 /* Images */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/JarvisApp/Resources/Images; sourceTree = SOURCE_ROOT; };
 		D045C8D752CE886EE4E99A82 /* LicensesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LicensesView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -215,6 +217,7 @@
 				2707426F09591592CE237BB0 /* ollama-runtime */,
 				7C761675FE88A65AA049132A /* bundled-models */,
 				76D4F0EC3378BF4EE09AAFAC /* Licenses */,
+				887606F4384B4D53BFEA33C3 /* Images */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -281,6 +284,7 @@
 				A9DCE0625F9E7DA36BD1F013 /* ollama-runtime in Resources */,
 				17A6B63198F9AE63395D0FCB /* bundled-models in Resources */,
 				754EEEC1B4E65CA705A0B83A /* Licenses in Resources */,
+				1D311D8055F64F1BA6F5C74C /* Images in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

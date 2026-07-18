@@ -31,6 +31,10 @@ PERMISSION_DEFINITIONS: dict[str, str] = {
 @dataclass
 class PermissionState:
     allowed: bool = False
+    # True once the user (or an on-demand probe) has actually engaged with this
+    # permission - distinguishes "never touched" from "explicitly turned off",
+    # so callers can tell "not yet requested" apart from "denied".
+    requested: bool = False
     explanation_shown: bool = False
     updated_at: str | None = None
 
@@ -82,6 +86,9 @@ class PermissionManager:
     def is_allowed(self, permission: str) -> bool:
         return bool(self.data.get(permission, {}).get("allowed", False))
 
+    def is_requested(self, permission: str) -> bool:
+        return bool(self.data.get(permission, {}).get("requested", False))
+
     def explanation(self, permission: str) -> str:
         return PERMISSION_DEFINITIONS.get(permission, "Jarvis braucht diese Berechtigung für die angefragte Funktion.")
 
@@ -100,7 +107,20 @@ class PermissionManager:
     def _set(self, permission: str, allowed: bool):
         state = self.data.setdefault(permission, PermissionState().__dict__)
         state["allowed"] = bool(allowed)
+        state["requested"] = True
         state["explanation_shown"] = True
+        state["updated_at"] = datetime.now().isoformat(timespec="seconds")
+        self._save()
+
+    def reset_to_not_requested(self, permission: str):
+        """Internal-bookkeeping-only reset: clears Jarvis's own "may I attempt
+        this" state back to untouched. Does NOT and CANNOT revoke the actual
+        macOS system permission grant (TCC) - that lives entirely outside this
+        JSON file and is unaffected."""
+        state = self.data.setdefault(permission, PermissionState().__dict__)
+        state["allowed"] = False
+        state["requested"] = False
+        state["explanation_shown"] = False
         state["updated_at"] = datetime.now().isoformat(timespec="seconds")
         self._save()
 
@@ -108,6 +128,7 @@ class PermissionManager:
         return {
             name: {
                 "allowed": bool(self.data.get(name, {}).get("allowed", False)),
+                "requested": bool(self.data.get(name, {}).get("requested", False)),
                 "explanation": explanation,
                 "updated_at": self.data.get(name, {}).get("updated_at"),
             }

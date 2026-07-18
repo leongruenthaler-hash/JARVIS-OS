@@ -84,7 +84,7 @@ struct ChatView: View {
                     .foregroundStyle(.white)
             }
             .frame(width: 44, height: 44)
-            .shadow(color: activeVoiceTint.opacity(theme.isFuturistic ? 0.34 : 0.18), radius: theme.isFuturistic ? 16 : 10, x: 0, y: 6)
+            .shadow(color: activeVoiceTint.opacity(theme.isDark ? 0.34 : 0.18), radius: theme.isDark ? 16 : 10, x: 0, y: 6)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("Jarvis")
@@ -132,8 +132,8 @@ struct ChatView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(.thinMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(theme.isFuturistic ? activeVoiceTint.opacity(0.42) : Color.white.opacity(0.16), lineWidth: 1))
-            .shadow(color: activeVoiceTint.opacity(theme.isFuturistic ? 0.18 : 0.10), radius: 10, x: 0, y: 4)
+            .overlay(Capsule().strokeBorder(theme.isDark ? activeVoiceTint.opacity(0.42) : Color.white.opacity(0.16), lineWidth: 1))
+            .shadow(color: activeVoiceTint.opacity(theme.isDark ? 0.18 : 0.10), radius: 10, x: 0, y: 4)
     }
 
     private func modelBadge(title: String, tint: Color) -> some View {
@@ -155,9 +155,9 @@ struct ChatView: View {
                         .fill(.ultraThinMaterial)
                         .overlay(
                             RoundedRectangle(cornerRadius: 36, style: .continuous)
-                                .strokeBorder(theme.isFuturistic ? theme.primaryAccent.opacity(0.36) : Color.white.opacity(0.14), lineWidth: 1)
+                                .strokeBorder(theme.isDark ? theme.primaryAccent.opacity(0.36) : Color.white.opacity(0.14), lineWidth: 1)
                         )
-                        .shadow(color: activeVoiceTint.opacity(theme.isFuturistic ? 0.16 : 0.08), radius: 24, x: 0, y: 10)
+                        .shadow(color: activeVoiceTint.opacity(theme.isDark ? 0.16 : 0.08), radius: 24, x: 0, y: 10)
 
                     VStack(spacing: 14) {
                         Group {
@@ -209,7 +209,7 @@ struct ChatView: View {
                     .controlSize(.large)
                     .disabled(micDisabled)
                     .keyboardShortcut(.space, modifiers: [.command])
-                    .shadow(color: activeVoiceTint.opacity(theme.isFuturistic ? 0.20 : 0.10), radius: 10, x: 0, y: 6)
+                    .shadow(color: activeVoiceTint.opacity(theme.isDark ? 0.20 : 0.10), radius: 10, x: 0, y: 6)
 
                     Button {
                         Task { await appState.stopAutoListening() }
@@ -507,12 +507,12 @@ struct ChatView: View {
     }
 
     private var activeVoiceTint: Color {
-        theme.isFuturistic ? theme.primaryAccent : appState.voiceState.tint
+        theme.isDark ? theme.primaryAccent : appState.voiceState.tint
     }
 
     private var themedDivider: some View {
         Group {
-            if theme.isFuturistic {
+            if theme.isDark {
                 JarvisDividerLine(tint: theme.primaryAccent)
             } else {
                 Divider()
@@ -522,7 +522,7 @@ struct ChatView: View {
 
     private var themedVerticalDivider: some View {
         Group {
-            if theme.isFuturistic {
+            if theme.isDark {
                 Rectangle()
                     .fill(
                         LinearGradient(

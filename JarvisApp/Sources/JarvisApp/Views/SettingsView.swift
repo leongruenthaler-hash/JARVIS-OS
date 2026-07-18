@@ -269,7 +269,9 @@ struct SettingsView: View {
             Text("Farbthema")
                 .font(.headline)
             Picker("Design", selection: $activeThemeRaw) {
-                ForEach(JarvisTheme.allCases) { themeOption in
+                // `.dashboard` is intentionally excluded: it is not a selectable classic-shell
+                // theme, it is applied only as an environment override inside DashboardView.
+                ForEach(JarvisTheme.allCases.filter { $0 != .dashboard }) { themeOption in
                     Text(themeOption.title).tag(themeOption.rawValue)
                 }
             }
@@ -305,7 +307,7 @@ struct SettingsView: View {
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(theme.isFuturistic ? theme.primaryAccent.opacity(0.36) : Color.white.opacity(0.16), lineWidth: 1)
+                    .strokeBorder(theme.isDark ? theme.primaryAccent.opacity(0.36) : Color.white.opacity(0.16), lineWidth: 1)
             )
         }
         .liquidGlassPanel(tint: .cyan)
