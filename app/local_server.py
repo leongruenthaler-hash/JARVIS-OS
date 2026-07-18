@@ -23,7 +23,7 @@ from core.daily_briefing import build_daily_briefing
 from files_client import configured_roots, move_indexed_matches_to_folder, normalize_name, search_file_index_entries, search_files
 from llm_client import LLMClient
 from jarvis_personality import JARVIS_SYSTEM_PROMPT, message_shape, normalize_jarvis_messages, text_summary
-from mail_client import list_inbox_messages, list_mailboxes
+from mail_client import list_inbox_messages, list_mailboxes, unread_inbox_count
 from memory import Memory
 from model_manager import ModelManager, ollama_base_url
 from model_router import ModelRouter
@@ -444,6 +444,25 @@ class JarvisLocalServer:
                 "error": reminder_error,
             },
         }
+
+    def mail_overview(self) -> dict[str, Any]:
+        """Dashboard Mail card data - unread count + a couple of recent subjects.
+        Gated behind is_allowed("mail") the same way calendar_overview() is gated,
+        so this never fires Mail.app AppleScript before the user has explicitly
+        opted in via Datenschutz."""
+        if not self.permissions.is_allowed("mail"):
+            return {"unread_count": 0, "messages": [], "message": "Mail-Zugriff noch nicht aktiviert.", "error": ""}
+        try:
+            unread = unread_inbox_count()
+            recent = list_inbox_messages(max_messages=3)
+            return {
+                "unread_count": unread,
+                "messages": [{"sender": m.sender, "subject": m.subject} for m in recent],
+                "message": f"{unread} ungelesen." if unread else "Keine ungelesenen Mails.",
+                "error": "",
+            }
+        except Exception as exc:
+            return {"unread_count": 0, "messages": [], "message": "Mail konnte nicht geladen werden.", "error": str(exc)}
 
     def daily_briefing(self) -> dict[str, Any]:
         # Each integration only gets touched (live AppleScript) once its own
@@ -1777,6 +1796,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, SERVER.local_photo_vision_status())
             elif path == "/api/calendar/overview":
                 self._json(200, SERVER.calendar_overview())
+            elif path == "/api/mail/overview":
+                self._json(200, SERVER.mail_overview())
             elif path == "/api/conversation-history":
                 self._json(200, SERVER.conversation_history())
             else:

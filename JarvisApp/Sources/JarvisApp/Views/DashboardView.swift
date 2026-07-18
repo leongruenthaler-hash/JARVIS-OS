@@ -58,6 +58,21 @@ struct DashboardView: View {
         .task { await pollSystemStats() }
         .task { await pollNowPlaying() }
         .task(id: appState.weatherLocation) { await pollWeather() }
+        .task { await appState.refreshPermissions() }
+        .task(id: calendarOrRemindersAllowed) {
+            if calendarOrRemindersAllowed { await appState.refreshCalendarOverview() }
+        }
+        .task(id: mailAllowed) {
+            if mailAllowed { await appState.refreshMailOverview() }
+        }
+    }
+
+    private var calendarOrRemindersAllowed: Bool {
+        (appState.permissions["calendar"]?.allowed ?? false) || (appState.permissions["reminders"]?.allowed ?? false)
+    }
+
+    private var mailAllowed: Bool {
+        appState.permissions["mail"]?.allowed ?? false
     }
 
     // MARK: - Live data polling (Etappe 3)
@@ -357,8 +372,20 @@ struct DashboardView: View {
     /// pixel-by-pixel, not guessed from a text description.
     private var row1: some View {
         HStack(spacing: 16) {
-            DashboardCard(title: "Kalender", symbol: "calendar", badge: true)
-            DashboardCard(title: "Mail", symbol: "envelope.fill", badge: true)
+            DashboardCard(title: "Kalender", symbol: "calendar", badge: true) {
+                KalenderCardContent(
+                    hasPermission: appState.permissions["calendar"]?.allowed ?? false,
+                    overview: appState.calendarOverview.calendar,
+                    openSettings: { activeSection = .section(.privacy) }
+                )
+            }
+            DashboardCard(title: "Mail", symbol: "envelope.fill", badge: true) {
+                MailCardContent(
+                    hasPermission: appState.permissions["mail"]?.allowed ?? false,
+                    overview: appState.mailOverview,
+                    openSettings: { activeSection = .section(.privacy) }
+                )
+            }
             DashboardCard(title: "Wetter", symbol: "cloud.sun.fill", multicolor: true) {
                 WeatherCardContent(
                     hasLocation: appState.weatherLocation != nil,
@@ -394,8 +421,14 @@ struct DashboardView: View {
                 )
             }
             .frame(width: wideWidth)
-            DashboardCard(title: "Aufgaben", symbol: "checklist", trailingSymbol: "plus")
-                .frame(width: narrowWidth)
+            DashboardCard(title: "Aufgaben", symbol: "checklist", trailingSymbol: "plus") {
+                AufgabenCardContent(
+                    hasPermission: appState.permissions["reminders"]?.allowed ?? false,
+                    overview: appState.calendarOverview.reminders,
+                    openSettings: { activeSection = .section(.privacy) }
+                )
+            }
+            .frame(width: narrowWidth)
         }
     }
 
@@ -693,6 +726,110 @@ private struct WeatherCardContent: View {
         case 95: return "Gewitter"
         case 96, 99: return "Gewitter mit Hagel"
         default: return "Unbekannt"
+        }
+    }
+}
+
+private struct KalenderCardContent: View {
+    let hasPermission: Bool
+    let overview: CalendarOverviewSection
+    var openSettings: (() -> Void)?
+
+    var body: some View {
+        if !hasPermission {
+            DashboardPlaceholder(text: "Kalender nicht verbunden - hier tippen.", action: openSettings)
+        } else if overview.message == "Noch nicht geladen." {
+            DashboardLoadingPlaceholder()
+        } else if overview.items.isEmpty {
+            DashboardPlaceholder(text: overview.message)
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(overview.items.prefix(3)) { item in
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(item.title)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                        if let when = item.start ?? item.end {
+                            Text(when)
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(DashboardPalette.textSecondary)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 64, alignment: .topLeading)
+        }
+    }
+}
+
+private struct MailCardContent: View {
+    let hasPermission: Bool
+    let overview: MailOverviewPayload
+    var openSettings: (() -> Void)?
+
+    var body: some View {
+        if !hasPermission {
+            DashboardPlaceholder(text: "Mail nicht verbunden - hier tippen.", action: openSettings)
+        } else if overview.message == "Noch nicht geladen." {
+            DashboardLoadingPlaceholder()
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("\(overview.unreadCount) ungelesen")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white)
+                if overview.messages.isEmpty {
+                    Text(overview.unreadCount == 0 ? "Keine ungelesenen Mails." : overview.message)
+                        .font(.system(size: 11))
+                        .foregroundStyle(DashboardPalette.textSecondary)
+                } else {
+                    ForEach(overview.messages.prefix(3)) { message in
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(message.sender)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                            Text(message.subject)
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(DashboardPalette.textSecondary)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 64, alignment: .topLeading)
+        }
+    }
+}
+
+private struct AufgabenCardContent: View {
+    let hasPermission: Bool
+    let overview: CalendarOverviewSection
+    var openSettings: (() -> Void)?
+
+    var body: some View {
+        if !hasPermission {
+            DashboardPlaceholder(text: "Erinnerungen nicht verbunden - hier tippen.", action: openSettings)
+        } else if overview.message == "Noch nicht geladen." {
+            DashboardLoadingPlaceholder()
+        } else if overview.items.isEmpty {
+            DashboardPlaceholder(text: overview.message)
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(overview.items.prefix(4)) { item in
+                    HStack(spacing: 6) {
+                        Image(systemName: "circle")
+                            .font(.system(size: 8))
+                            .foregroundStyle(DashboardPalette.accent)
+                        Text(item.title)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 64, alignment: .topLeading)
         }
     }
 }

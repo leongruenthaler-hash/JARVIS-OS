@@ -288,6 +288,51 @@ def list_inbox_messages(
     return _parse_messages(raw_output)
 
 
+def unread_inbox_count(account_name: str | None = None, mailbox_name: str | None = None) -> int:
+    """Just the unread count, without pulling any message content - used by the
+    Dashboard's Mail card, which only needs a number plus a couple of recent
+    subjects (from `list_inbox_messages`), not full message bodies."""
+    configured_account = _escape_applescript_text(account_name or "")
+    configured_mailbox = _escape_applescript_text(mailbox_name or "")
+    script = f"""
+    set configuredAccount to "{configured_account}"
+    set configuredMailbox to "{configured_mailbox}"
+
+    tell application "Mail"
+        set targetMailbox to missing value
+
+        if configuredAccount is not "" and configuredMailbox is not "" then
+            repeat with accountRef in every account
+                set accountText to name of accountRef as string
+                if accountText is configuredAccount then
+                    repeat with mailboxRef in every mailbox of accountRef
+                        set mailboxText to name of mailboxRef as string
+                        if mailboxText is configuredMailbox then
+                            set targetMailbox to mailboxRef
+                            exit repeat
+                        end if
+                    end repeat
+                end if
+            end repeat
+        end if
+
+        if targetMailbox is missing value then
+            try
+                set targetMailbox to inbox
+            end try
+        end if
+
+        if targetMailbox is missing value then return "0"
+        return (unread count of targetMailbox) as string
+    end tell
+    """
+    raw_output = _run_applescript(script)
+    try:
+        return int(raw_output.strip())
+    except ValueError:
+        return 0
+
+
 def fetch_message_previews(
     message_ids: list[str],
     preview_chars: int = 700,

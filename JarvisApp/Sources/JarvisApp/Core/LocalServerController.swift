@@ -888,6 +888,10 @@ final class LocalServerController: ObservableObject {
         try await apiClient.calendarOverview()
     }
 
+    func mailOverview() async throws -> MailOverviewPayload {
+        try await apiClient.mailOverview()
+    }
+
     func dailyBriefing() async throws -> DailyBriefingPayload {
         try await apiClient.dailyBriefing()
     }

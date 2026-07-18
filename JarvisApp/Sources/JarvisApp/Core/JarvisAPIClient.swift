@@ -106,6 +106,10 @@ struct JarvisAPIClient {
         try await get("/api/calendar/overview")
     }
 
+    func mailOverview() async throws -> MailOverviewPayload {
+        try await get("/api/mail/overview")
+    }
+
     func conversationHistory() async throws -> ConversationHistoryPayload {
         try await get("/api/conversation-history")
     }
@@ -412,6 +416,25 @@ struct CalendarOverviewItem: Decodable, Identifiable, Equatable {
     var id: String {
         [calendar ?? list ?? "", title, start ?? due ?? ""].joined(separator: "|")
     }
+}
+
+struct MailOverviewPayload: Decodable, Equatable {
+    let unreadCount: Int
+    let messages: [MailOverviewMessage]
+    let message: String
+    let error: String
+
+    enum CodingKeys: String, CodingKey {
+        case unreadCount = "unread_count"
+        case messages, message, error
+    }
+}
+
+struct MailOverviewMessage: Decodable, Identifiable, Equatable {
+    let sender: String
+    let subject: String
+
+    var id: String { sender + "|" + subject }
 }
 
 struct VoiceTranscriptionResponse: Decodable {
