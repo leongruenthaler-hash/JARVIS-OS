@@ -3685,14 +3685,6 @@ def extract_calendar_title(text: str) -> str:
         cleaned,
         flags=re.IGNORECASE,
     )
-    cleaned = re.sub(
-        r"\b(?:heute|morgen|übermorgen|uebermorgen|nächsten|naechsten|montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag)\b.*$",
-        " ",
-        cleaned,
-        flags=re.IGNORECASE,
-    )
-    cleaned = re.sub(r"\b(?:am|um)\s+\d{1,2}(?::\d{2})?\s*(?:uhr)?\b.*$", " ", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\b\d{1,2}[.\/-]\d{1,2}(?:[.\/-]\d{2,4})?\b.*$", " ", cleaned)
     return clean_calendar_title(cleaned)
 
 
