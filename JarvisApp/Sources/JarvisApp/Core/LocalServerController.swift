@@ -934,6 +934,10 @@ final class LocalServerController: ObservableObject {
         try await apiClient.mailOverview()
     }
 
+    func musicOverview() async throws -> MusicOverviewPayload {
+        try await apiClient.musicOverview()
+    }
+
     func dailyBriefing() async throws -> DailyBriefingPayload {
         try await apiClient.dailyBriefing()
     }

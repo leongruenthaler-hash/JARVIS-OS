@@ -41,6 +41,7 @@ final class AppState: ObservableObject {
         reminders: CalendarOverviewSection(items: [], count: 0, message: "Noch nicht geladen.", error: "")
     )
     @Published var mailOverview = MailOverviewPayload(unreadCount: 0, messages: [], message: "Noch nicht geladen.", error: "")
+    @Published var musicOverview = MusicOverviewPayload(track: nil, message: "Noch nicht geladen.", error: "")
     @Published var dailyBriefingText = "Noch kein Tagesbriefing geladen."
     @Published var conversationHistory = ConversationHistoryPayload(recordingEnabled: false, turns: [])
     @Published var conversationHistoryLoading = false
@@ -929,6 +930,15 @@ final class AppState: ObservableObject {
             mailOverview = try await serverController.mailOverview()
         } catch {
             lastError = "Mailübersicht konnte nicht geladen werden."
+        }
+    }
+
+    func refreshMusicOverview() async {
+        await ensureServerConnected()
+        do {
+            musicOverview = try await serverController.musicOverview()
+        } catch {
+            lastError = "Musikübersicht konnte nicht geladen werden."
         }
     }
 

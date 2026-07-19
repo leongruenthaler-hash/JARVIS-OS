@@ -6,9 +6,12 @@ import SwiftUI
 /// OWN view tree, not a recolor of MainShellView via `JarvisTheme` - see DashboardPalette
 /// below, which is a fixed palette independent of the classic/futuristicBlue color themes.
 ///
-/// Etappe 3 (this file): the four already-verified data sources (SystemMonitor,
-/// WeatherService, NowPlayingService, ProductivityTracker) are wired into their matching
-/// cards. Kalender/Mail/Aufgaben have no verified data source yet and stay placeholders.
+/// Etappe 3 (this file): SystemMonitor, WeatherService and ProductivityTracker are wired
+/// into their matching cards. Musik goes through the local server's AppleScript-based
+/// music_client.py (like Kalender/Mail/Aufgaben) rather than an in-process Swift service -
+/// the original in-process NowPlayingService (private MediaRemote API) was removed after
+/// mediaremoted was confirmed to reject it for any third-party process, see project memory
+/// "dashboard now-playing private-api blocked".
 struct DashboardView: View {
     @EnvironmentObject private var appState: AppState
     @State private var activeSection: DashboardSection = .overview
@@ -20,7 +23,6 @@ struct DashboardView: View {
 
     @State private var systemStats: SystemStats?
     @State private var weatherSnapshot: WeatherSnapshot?
-    @State private var nowPlaying: NowPlayingInfo?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -56,7 +58,6 @@ struct DashboardView: View {
         // directly). The shared components recolor via @Environment(\.jarvisTheme).
         .environment(\.jarvisTheme, .dashboard)
         .task { await pollSystemStats() }
-        .task { await pollNowPlaying() }
         .task(id: appState.weatherLocation) { await pollWeather() }
         .task { await appState.refreshPermissions() }
         .task(id: calendarOrRemindersAllowed) {
@@ -65,6 +66,7 @@ struct DashboardView: View {
         .task(id: mailAllowed) {
             if mailAllowed { await appState.refreshMailOverview() }
         }
+        .task(id: musicAllowed) { await pollMusicOverview() }
     }
 
     private var calendarOrRemindersAllowed: Bool {
@@ -73,6 +75,10 @@ struct DashboardView: View {
 
     private var mailAllowed: Bool {
         appState.permissions["mail"]?.allowed ?? false
+    }
+
+    private var musicAllowed: Bool {
+        appState.permissions["music"]?.allowed ?? false
     }
 
     // MARK: - Live data polling (Etappe 3)
@@ -86,12 +92,19 @@ struct DashboardView: View {
         }
     }
 
-    /// One-shot snapshot API, no push/observation - has to be polled. 2s keeps the
-    /// play/pause state and track title feeling live without hammering the private API.
-    private func pollNowPlaying() async {
+    /// Was previously NowPlayingService's private-MediaRemote-API in-process call (2s
+    /// poll, no permission gate) - confirmed via Console/mediaremoted logs that private API
+    /// is rejected with "Operation not permitted" for any third-party process (entitlements=0),
+    /// including this app itself, not just a wiring bug. Replaced with the same
+    /// AppleScript-via-local-server approach music_client.py already used for playback
+    /// control, gated behind is_allowed("music") like the other overview cards. 3s (instead
+    /// of the old 2s) since each poll is now a real subprocess (osascript), not an in-process
+    /// call - still feels live without spawning more processes than needed.
+    private func pollMusicOverview() async {
+        guard musicAllowed else { return }
         while !Task.isCancelled {
-            nowPlaying = NowPlayingService.currentInfo()
-            try? await Task.sleep(for: .seconds(2))
+            await appState.refreshMusicOverview()
+            try? await Task.sleep(for: .seconds(3))
         }
     }
 
@@ -444,7 +457,11 @@ struct DashboardView: View {
 
         return HStack(spacing: spacing) {
             DashboardCard(title: "Musik", symbol: "music.note") {
-                MusicCardContent(info: nowPlaying)
+                MusicCardContent(
+                    hasPermission: musicAllowed,
+                    overview: appState.musicOverview,
+                    openSettings: { activeSection = .section(.privacy) }
+                )
             }
             .frame(width: musicWidth)
             quickLaunchGrid
@@ -910,28 +927,32 @@ private struct BatteryCardContent: View {
 }
 
 private struct MusicCardContent: View {
-    let info: NowPlayingInfo?
+    let hasPermission: Bool
+    let overview: MusicOverviewPayload
+    var openSettings: (() -> Void)?
 
     var body: some View {
-        if let info {
+        if !hasPermission {
+            DashboardPlaceholder(text: "Musik nicht verbunden - hier tippen.", action: openSettings)
+        } else if overview.message == "Noch nicht geladen." {
+            DashboardLoadingPlaceholder()
+        } else if let track = overview.track {
             VStack(alignment: .leading, spacing: 6) {
-                Text(info.title)
+                Text(track.title)
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
-                if let artist = info.artist {
+                if let artist = track.artist {
                     Text(artist)
                         .font(.system(size: 12))
                         .foregroundStyle(DashboardPalette.textSecondary)
                         .lineLimit(1)
                 }
                 HStack(spacing: 6) {
-                    Image(systemName: (info.isPlaying ?? false) ? "play.fill" : "pause.fill")
+                    Image(systemName: track.isPlaying ? "play.fill" : "pause.fill")
                         .font(.system(size: 10))
-                    if let appName = info.appName {
-                        Text(appName)
-                            .font(.system(size: 11))
-                    }
+                    Text("Apple Music")
+                        .font(.system(size: 11))
                 }
                 .foregroundStyle(DashboardPalette.accent)
             }

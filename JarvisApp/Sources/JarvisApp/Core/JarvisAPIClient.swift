@@ -110,6 +110,10 @@ struct JarvisAPIClient {
         try await get("/api/mail/overview")
     }
 
+    func musicOverview() async throws -> MusicOverviewPayload {
+        try await get("/api/music/overview")
+    }
+
     func conversationHistory() async throws -> ConversationHistoryPayload {
         try await get("/api/conversation-history")
     }
@@ -435,6 +439,24 @@ struct MailOverviewMessage: Decodable, Identifiable, Equatable {
     let subject: String
 
     var id: String { sender + "|" + subject }
+}
+
+struct MusicOverviewPayload: Decodable, Equatable {
+    let track: MusicTrack?
+    let message: String
+    let error: String
+}
+
+struct MusicTrack: Decodable, Equatable {
+    let title: String
+    let artist: String?
+    let album: String?
+    let isPlaying: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case title, artist, album
+        case isPlaying = "is_playing"
+    }
 }
 
 struct VoiceTranscriptionResponse: Decodable {

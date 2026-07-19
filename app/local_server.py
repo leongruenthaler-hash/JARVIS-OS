@@ -27,6 +27,7 @@ from mail_client import list_inbox_messages, list_mailboxes, unread_inbox_count
 from memory import Memory
 from model_manager import ModelManager, ollama_base_url
 from model_router import ModelRouter
+from music_client import now_playing as music_now_playing
 from photos_client import PhotoIndex
 from permission_manager import PermissionManager
 from privacy_dashboard import PrivacyDashboard
@@ -463,6 +464,22 @@ class JarvisLocalServer:
             }
         except Exception as exc:
             return {"unread_count": 0, "messages": [], "message": "Mail konnte nicht geladen werden.", "error": str(exc)}
+
+    def music_overview(self) -> dict[str, Any]:
+        """Dashboard Musik card data. Gated behind is_allowed("music") the same way
+        calendar_overview()/mail_overview() are gated - the private MediaRemote API
+        NowPlayingService.swift used before this couldn't work at all for a third-party
+        app (mediaremoted rejects it with "Operation not permitted", confirmed via
+        Console - see project memory), so this replaces it with the same AppleScript
+        approach music_client.py already used for playback control."""
+        if not self.permissions.is_allowed("music"):
+            return {"track": None, "message": "Musik-Zugriff noch nicht aktiviert.", "error": ""}
+        try:
+            track = music_now_playing()
+            message = "Wiedergabe läuft." if track else "Gerade läuft nichts."
+            return {"track": track, "message": message, "error": ""}
+        except Exception as exc:
+            return {"track": None, "message": "Musik-Status konnte nicht geladen werden.", "error": str(exc)}
 
     def daily_briefing(self) -> dict[str, Any]:
         # Each integration only gets touched (live AppleScript) once its own
@@ -1798,6 +1815,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, SERVER.calendar_overview())
             elif path == "/api/mail/overview":
                 self._json(200, SERVER.mail_overview())
+            elif path == "/api/music/overview":
+                self._json(200, SERVER.music_overview())
             elif path == "/api/conversation-history":
                 self._json(200, SERVER.conversation_history())
             else:

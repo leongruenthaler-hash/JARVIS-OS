@@ -147,6 +147,40 @@ def play_search(query: str) -> str:
     return f"Ich spiele {query}."
 
 
+def now_playing() -> dict | None:
+    """Current track + playback state for the Dashboard Musik card. Checks via System
+    Events first so this never auto-launches Music.app just by being polled - "nothing
+    playing" (app not running, or running but stopped) is a normal state, not an error."""
+    script = """
+    tell application "System Events"
+        set musicRunning to (name of processes) contains "Music"
+    end tell
+    if musicRunning is false then return "NOT_RUNNING"
+
+    tell application "Music"
+        if player state is stopped then return "STOPPED"
+        set trackName to name of current track
+        set trackArtist to artist of current track
+        set trackAlbum to album of current track
+        set stateText to player state as string
+    end tell
+    return trackName & "\t" & trackArtist & "\t" & trackAlbum & "\t" & stateText
+    """
+    output = _run_applescript(script)
+    if output in ("NOT_RUNNING", "STOPPED", ""):
+        return None
+    parts = output.split("\t")
+    if len(parts) < 4:
+        return None
+    title, artist, album, state = parts[0], parts[1], parts[2], parts[3]
+    return {
+        "title": title,
+        "artist": artist or None,
+        "album": album or None,
+        "is_playing": state == "playing",
+    }
+
+
 def _run_applescript(script: str) -> str:
     try:
         result = subprocess.run(

@@ -21,7 +21,6 @@
 		8F9B0F06A4C10AB2852852AC /* TTSService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60FEA70A8BF10CD876B81319 /* TTSService.swift */; };
 		39327D9A91C54B11A9811D18 /* SystemMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 380F1B7481894FA3941E51D4 /* SystemMonitor.swift */; };
 		AFA7B1FEE1D440FDA11611BD /* WeatherService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BB589FFC6CB49BFB81F6B45 /* WeatherService.swift */; };
-		842A6A43E5C04370A978B862 /* NowPlayingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C99A6DC0E044E34BCC58A05 /* NowPlayingService.swift */; };
 		1D7B4FAEE7C845C595E694D7 /* ProductivityTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = D230151F7A564ED1A15C7540 /* ProductivityTracker.swift */; };
 		F92E41D4CED148F6BFE90541 /* IncrementalSentenceSplitter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12BA400734464153A152E833 /* IncrementalSentenceSplitter.swift */; };
 		040334C3C8D44C55B8438044 /* StreamingSpeechPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60732A47B2F44DF78EB935BF /* StreamingSpeechPlayer.swift */; };
@@ -69,7 +68,6 @@
 		60FEA70A8BF10CD876B81319 /* TTSService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/JarvisApp/Core/TTSService.swift; sourceTree = SOURCE_ROOT; };
 		380F1B7481894FA3941E51D4 /* SystemMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/JarvisApp/Core/SystemMonitor.swift; sourceTree = SOURCE_ROOT; };
 		7BB589FFC6CB49BFB81F6B45 /* WeatherService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/JarvisApp/Core/WeatherService.swift; sourceTree = SOURCE_ROOT; };
-		9C99A6DC0E044E34BCC58A05 /* NowPlayingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/JarvisApp/Core/NowPlayingService.swift; sourceTree = SOURCE_ROOT; };
 		D230151F7A564ED1A15C7540 /* ProductivityTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/JarvisApp/Core/ProductivityTracker.swift; sourceTree = SOURCE_ROOT; };
 		12BA400734464153A152E833 /* IncrementalSentenceSplitter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/JarvisApp/Core/IncrementalSentenceSplitter.swift; sourceTree = SOURCE_ROOT; };
 		60732A47B2F44DF78EB935BF /* StreamingSpeechPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/JarvisApp/Core/StreamingSpeechPlayer.swift; sourceTree = SOURCE_ROOT; };
@@ -205,7 +203,6 @@
 				60732A47B2F44DF78EB935BF /* StreamingSpeechPlayer.swift */,
 				380F1B7481894FA3941E51D4 /* SystemMonitor.swift */,
 				7BB589FFC6CB49BFB81F6B45 /* WeatherService.swift */,
-				9C99A6DC0E044E34BCC58A05 /* NowPlayingService.swift */,
 				D230151F7A564ED1A15C7540 /* ProductivityTracker.swift */,
 			);
 			path = Core;
@@ -339,7 +336,6 @@
 				8F9B0F06A4C10AB2852852AC /* TTSService.swift in Sources */,
 				39327D9A91C54B11A9811D18 /* SystemMonitor.swift in Sources */,
 				AFA7B1FEE1D440FDA11611BD /* WeatherService.swift in Sources */,
-				842A6A43E5C04370A978B862 /* NowPlayingService.swift in Sources */,
 				1D7B4FAEE7C845C595E694D7 /* ProductivityTracker.swift in Sources */,
 				F92E41D4CED148F6BFE90541 /* IncrementalSentenceSplitter.swift in Sources */,
 				040334C3C8D44C55B8438044 /* StreamingSpeechPlayer.swift in Sources */,
