@@ -1897,13 +1897,13 @@ class Handler(BaseHTTPRequestHandler):
                 allowed = bool(payload.get("allowed"))
                 if allowed:
                     first_time = not SERVER.permissions.is_requested(permission)
-                    SERVER.permissions.grant(permission)
+                    SERVER.permissions.grant(permission, source="dashboard_toggle")
                     if first_time:
                         # The toggle flip itself is the explicit user action -
                         # this is the one place a live probe is appropriate.
                         SERVER.probe_permission(permission)
                 else:
-                    SERVER.permissions.revoke(permission)
+                    SERVER.permissions.revoke(permission, source="dashboard_toggle")
                 self._json(200, {"permissions": SERVER.permissions.export()})
             elif path == "/api/openai-key/set":
                 key = str(payload.get("api_key") or "").strip()

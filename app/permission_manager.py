@@ -8,6 +8,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from privacy_logger import PrivacyLogger
+
 
 PERMISSION_DEFINITIONS: dict[str, str] = {
     "microphone": "Jarvis braucht das Mikrofon, um deine Sprachbefehle lokal zu erkennen.",
@@ -45,6 +47,33 @@ class PermissionManager:
         self.base_path.mkdir(parents=True, exist_ok=True)
         self.path = self.base_path / "privacy_permissions.json"
         self.data = self._load()
+        self._audit_logger = PrivacyLogger(self.base_path / "logs", enabled=self._logging_enabled())
+
+    @staticmethod
+    def _logging_enabled() -> bool:
+        # Same privacy_logging_enabled flag jarvis.py's own PRIVACY_LOGGER respects -
+        # reused, not a new setting. Best-effort: if config.json can't be read for any
+        # reason, default to logging on rather than silently losing audit coverage.
+        try:
+            from settings import load_config
+            return bool(load_config().get("privacy_logging_enabled", True))
+        except Exception:
+            return True
+
+    def _audit(self, permission: str, *, old_allowed: bool, new_allowed: bool, old_requested: bool, new_requested: bool, source: str):
+        try:
+            self._audit_logger.log(
+                "permission_manager",
+                "state_change",
+                permission=permission,
+                old_allowed=old_allowed,
+                new_allowed=new_allowed,
+                old_requested=old_requested,
+                new_requested=new_requested,
+                source=source,
+            )
+        except Exception:
+            pass
 
     def _load(self) -> dict[str, Any]:
         if not self.path.exists():
@@ -92,11 +121,11 @@ class PermissionManager:
     def explanation(self, permission: str) -> str:
         return PERMISSION_DEFINITIONS.get(permission, "Jarvis braucht diese Berechtigung für die angefragte Funktion.")
 
-    def grant(self, permission: str):
-        self._set(permission, True)
+    def grant(self, permission: str, source: str = "unknown"):
+        self._set(permission, True, source=source)
 
-    def revoke(self, permission: str):
-        self._set(permission, False)
+    def revoke(self, permission: str, source: str = "unknown"):
+        self._set(permission, False, source=source)
 
     def mark_explanation_shown(self, permission: str):
         state = self.data.setdefault(permission, PermissionState().__dict__)
@@ -104,25 +133,45 @@ class PermissionManager:
         state["updated_at"] = datetime.now().isoformat(timespec="seconds")
         self._save()
 
-    def _set(self, permission: str, allowed: bool):
+    def _set(self, permission: str, allowed: bool, source: str = "unknown"):
         state = self.data.setdefault(permission, PermissionState().__dict__)
+        old_allowed = bool(state.get("allowed", False))
+        old_requested = bool(state.get("requested", False))
         state["allowed"] = bool(allowed)
         state["requested"] = True
         state["explanation_shown"] = True
         state["updated_at"] = datetime.now().isoformat(timespec="seconds")
         self._save()
+        self._audit(
+            permission,
+            old_allowed=old_allowed,
+            new_allowed=bool(allowed),
+            old_requested=old_requested,
+            new_requested=True,
+            source=source,
+        )
 
-    def reset_to_not_requested(self, permission: str):
+    def reset_to_not_requested(self, permission: str, source: str = "session_reset"):
         """Internal-bookkeeping-only reset: clears Jarvis's own "may I attempt
         this" state back to untouched. Does NOT and CANNOT revoke the actual
         macOS system permission grant (TCC) - that lives entirely outside this
         JSON file and is unaffected."""
         state = self.data.setdefault(permission, PermissionState().__dict__)
+        old_allowed = bool(state.get("allowed", False))
+        old_requested = bool(state.get("requested", False))
         state["allowed"] = False
         state["requested"] = False
         state["explanation_shown"] = False
         state["updated_at"] = datetime.now().isoformat(timespec="seconds")
         self._save()
+        self._audit(
+            permission,
+            old_allowed=old_allowed,
+            new_allowed=False,
+            old_requested=old_requested,
+            new_requested=False,
+            source=source,
+        )
 
     def export(self) -> dict[str, Any]:
         return {

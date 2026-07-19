@@ -195,6 +195,13 @@ def permissions_required() -> bool:
     return bool(CONFIG.get("privacy_require_permissions", True))
 
 
+# A pending permission confirmation ("Sag ja zum Erlauben") used to stay open
+# indefinitely - any later, completely unrelated "ja"/"okay" could silently confirm
+# it. 5 minutes is generous for a real back-and-forth but short enough that it can't
+# survive into an unrelated later conversation.
+PENDING_PERMISSION_TTL_SECONDS = 300
+
+
 def ensure_permission(memory: Memory, permission: str, action_summary: str) -> str | None:
     if not permissions_required():
         return None
@@ -206,9 +213,11 @@ def ensure_permission(memory: Memory, permission: str, action_summary: str) -> s
     settings["pending_permission"] = {
         "permission": permission,
         "action": action_summary,
+        "set_at": time.time(),
     }
     memory.set("settings", settings)
     manager.mark_explanation_shown(permission)
+    privacy_log("permission_manager", "pending_permission_set", permission=permission, action=action_summary)
     return (
         f"Dafür brauche ich deine ausdrückliche Zustimmung für {permission}. "
         f"Warum: {manager.explanation(permission)} "
@@ -2366,6 +2375,24 @@ def handle_pending_action_flow(
     pending_permission = settings.get("pending_permission")
     if isinstance(pending_permission, dict):
         permission = str(pending_permission.get("permission") or "").strip()
+        # A permission request left standing indefinitely means any later, completely
+        # unrelated "ja"/"okay" could silently confirm it - expire it instead of trusting
+        # staleness. Entries from before this field existed (no "set_at") are treated as
+        # expired too, since their real age is unknown.
+        set_at = pending_permission.get("set_at")
+        age_seconds = (time.time() - set_at) if isinstance(set_at, (int, float)) else None
+        if age_seconds is None or age_seconds > PENDING_PERMISSION_TTL_SECONDS:
+            settings.pop("pending_permission", None)
+            memory.set("settings", settings)
+            privacy_log(
+                "permission_manager",
+                "pending_permission_expired",
+                permission=permission,
+                age_seconds=round(age_seconds, 1) if age_seconds is not None else "unknown",
+            )
+            if is_confirm or is_cancel:
+                return "Die Berechtigungsanfrage ist inzwischen abgelaufen. Bitte stelle deine Anfrage noch einmal, falls du sie noch erlauben möchtest."
+            return None
         if is_cancel:
             settings.pop("pending_permission", None)
             memory.set("settings", settings)
@@ -2373,7 +2400,7 @@ def handle_pending_action_flow(
         if not is_confirm:
             return "Ich warte auf deine Entscheidung. Sag ja zum Erlauben oder nein zum Abbrechen."
         if permission:
-            PermissionManager().grant(permission)
+            PermissionManager().grant(permission, source="chat_pending_permission_confirm")
             settings.pop("pending_permission", None)
             memory.set("settings", settings)
             privacy_log("permission", "granted", permission=permission)
