@@ -338,17 +338,21 @@ final class AppState: ObservableObject {
         let isFirstTimeSetup = !serverController.venvPythonExists
         if isFirstTimeSetup {
             bootstrapStatus = "Einmalige Ersteinrichtung wird vorbereitet ..."
-            lastError = nil
         } else {
-            bootstrapStatus = nil
-            lastError = "Ich starte den lokalen Core ..."
+            bootstrapStatus = "Ich starte den lokalen Core ..."
         }
+        lastError = nil
         _ = serverController.start()
 
-        let maxAttempts = isFirstTimeSetup ? 1800 : 40
+        // Non-first-time launches used to give up after 20s (40 x 500ms). That was too
+        // tight for the dependency-import check, which can legitimately take well past
+        // that under system load without being hung (see server-selfspawn-unreliable
+        // memory, Cause B) - 90s gives that room to finish while staying far short of
+        // first-time setup's own 15-minute budget for CLT/venv/pip work.
+        let maxAttempts = isFirstTimeSetup ? 1800 : 180
         for _ in 0..<maxAttempts {
             try? await Task.sleep(for: .milliseconds(500))
-            if isFirstTimeSetup, let bootstrap = serverController.currentBootstrapStatus() {
+            if let bootstrap = serverController.currentBootstrapStatus() {
                 bootstrapStatus = bootstrap.message
                 if bootstrap.stage == "error" {
                     status = .offline

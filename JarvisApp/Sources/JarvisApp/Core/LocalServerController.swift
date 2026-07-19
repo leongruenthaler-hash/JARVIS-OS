@@ -239,7 +239,29 @@ final class LocalServerController: ObservableObject {
                 fi
                 python3 -m venv .venv
             fi
-            if ! .venv/bin/python3 -c "import numpy, sounddevice, dotenv, openai, edge_tts, miniaudio, faster_whisper, torch" >/dev/null 2>&1; then
+            # This import check is normally fast (~a few seconds), but faster_whisper/torch
+            # do real device/backend probing on import, not just a trivial import - under
+            # system load (heavy CPU/IO contention from other processes) it can legitimately
+            # take much longer without being hung. Run it in the background and poll so we
+            # can tell the user it's still working instead of leaving the app silently on
+            # "Nicht verbunden" - same write_status mechanism used for the CLT/venv bootstrap
+            # above.
+            write_status "checking_dependencies" "Python-Umgebung wird geprueft ..."
+            .venv/bin/python3 -c "import numpy, sounddevice, dotenv, openai, edge_tts, miniaudio, faster_whisper, torch" >/dev/null 2>&1 &
+            DEP_CHECK_PID=$!
+            DEP_CHECK_WAITED=0
+            DEP_CHECK_WARNED=0
+            while kill -0 "$DEP_CHECK_PID" 2>/dev/null; do
+                /bin/sleep 2
+                DEP_CHECK_WAITED=$((DEP_CHECK_WAITED + 2))
+                if [ "$DEP_CHECK_WAITED" -ge 16 ] && [ "$DEP_CHECK_WARNED" -eq 0 ]; then
+                    write_status "checking_dependencies" "Python-Umgebung wird vorbereitet - kann bei hoher Systemlast laenger dauern ..."
+                    DEP_CHECK_WARNED=1
+                fi
+            done
+            DEP_CHECK_STATUS=0
+            wait "$DEP_CHECK_PID" || DEP_CHECK_STATUS=$?
+            if [ "$DEP_CHECK_STATUS" -ne 0 ]; then
                 write_status "installing_packages" "Einmalige Ersteinrichtung: Python-Pakete werden vorbereitet ..."
                 .venv/bin/python3 -m pip install --upgrade pip >/dev/null 2>&1 || true
                 TOTAL=$(grep -vc '^[[:space:]]*$' requirements.txt)
