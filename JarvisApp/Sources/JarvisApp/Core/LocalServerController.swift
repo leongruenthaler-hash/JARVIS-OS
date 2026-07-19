@@ -122,9 +122,29 @@ final class LocalServerController: ObservableObject {
                 printf '%s|%s|%s\n' "$(date +%s)" "$1" "$2" > "$STATUS_FILE.tmp"
                 mv "$STATUS_FILE.tmp" "$STATUS_FILE"
             }
-            if [ -x .venv/bin/python3 ] && /usr/bin/curl -fsS --max-time 2 http://127.0.0.1:8765/api/health >/dev/null 2>&1; then
-                echo "Jarvis local server already running."
-                exit 0
+            health_ok() {
+                /usr/bin/curl -fsS --max-time 2 http://127.0.0.1:8765/api/health >/dev/null 2>&1
+            }
+            # A single successful health check isn't proof of a stable server - it can
+            # also be a just-killed previous instance still answering for a few hundred ms
+            # before its socket actually releases (SIGTERM isn't synchronous). Confirm the
+            # health check keeps succeeding across a short window before trusting it and
+            # skipping the real start below - same "verify actual liveness, don't trust a
+            # single snapshot" standard the Ollama readiness loops further down already use.
+            if [ -x .venv/bin/python3 ] && health_ok; then
+                STILL_UP=1
+                for _ in 1 2 3; do
+                    /bin/sleep 1
+                    if ! health_ok; then
+                        STILL_UP=0
+                        break
+                    fi
+                done
+                if [ "$STILL_UP" -eq 1 ]; then
+                    echo "Jarvis local server already running."
+                    exit 0
+                fi
+                echo "Health check succeeded once but stopped responding during confirmation (likely a dying previous instance) - continuing with a fresh start."
             fi
 
             try_system_ollama() {
