@@ -48,6 +48,7 @@
 		F77A288475FF33BA98017C16 /* ChatBubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92E35ED0C4D6DD7D7322A890 /* ChatBubble.swift */; };
 		A9DCE0625F9E7DA36BD1F013 /* ollama-runtime in Resources */ = {isa = PBXBuildFile; fileRef = 2707426F09591592CE237BB0 /* ollama-runtime */; };
 		17A6B63198F9AE63395D0FCB /* bundled-models in Resources */ = {isa = PBXBuildFile; fileRef = 7C761675FE88A65AA049132A /* bundled-models */; };
+		FBE55DC1E6394344AA1F4B5E /* JarvisBackend in Resources */ = {isa = PBXBuildFile; fileRef = 5B5262ECDE1540D7A9E19B23 /* JarvisBackend */; };
 		754EEEC1B4E65CA705A0B83A /* Licenses in Resources */ = {isa = PBXBuildFile; fileRef = 76D4F0EC3378BF4EE09AAFAC /* Licenses */; };
 		1D311D8055F64F1BA6F5C74C /* Images in Resources */ = {isa = PBXBuildFile; fileRef = 887606F4384B4D53BFEA33C3 /* Images */; };
 		C16D1BD16AFC989DE48E7456 /* LicensesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D045C8D752CE886EE4E99A82 /* LicensesView.swift */; };
@@ -96,6 +97,7 @@
 		760C71EFC090439CB0914410 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
 		2707426F09591592CE237BB0 /* ollama-runtime */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/JarvisApp/Resources/ollama-runtime; sourceTree = SOURCE_ROOT; };
 		7C761675FE88A65AA049132A /* bundled-models */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/JarvisApp/Resources/bundled-models; sourceTree = SOURCE_ROOT; };
+		5B5262ECDE1540D7A9E19B23 /* JarvisBackend */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/JarvisApp/Resources/JarvisBackend; sourceTree = SOURCE_ROOT; };
 		76D4F0EC3378BF4EE09AAFAC /* Licenses */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/JarvisApp/Resources/Licenses; sourceTree = SOURCE_ROOT; };
 		887606F4384B4D53BFEA33C3 /* Images */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/JarvisApp/Resources/Images; sourceTree = SOURCE_ROOT; };
 		D045C8D752CE886EE4E99A82 /* LicensesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LicensesView.swift; sourceTree = "<group>"; };
@@ -213,6 +215,7 @@
 			children = (
 				2707426F09591592CE237BB0 /* ollama-runtime */,
 				7C761675FE88A65AA049132A /* bundled-models */,
+				5B5262ECDE1540D7A9E19B23 /* JarvisBackend */,
 				76D4F0EC3378BF4EE09AAFAC /* Licenses */,
 				887606F4384B4D53BFEA33C3 /* Images */,
 			);
@@ -228,6 +231,7 @@
 			buildPhases = (
 				E4F78730D65EE9F55E2BAC2F /* Sources */,
 				7B8633C7EB6F5CB13673C25D /* Frameworks */,
+				7A15A109732B4661B7FC89B9 /* Stage JarvisBackend Resources */,
 				C52ABA055DA4D0050382EB56 /* Resources */,
 				E8D2BD7C640558C55FEA4EDE /* Strip Extended Attributes From Bundled Resources */,
 			);
@@ -280,6 +284,7 @@
 			files = (
 				A9DCE0625F9E7DA36BD1F013 /* ollama-runtime in Resources */,
 				17A6B63198F9AE63395D0FCB /* bundled-models in Resources */,
+				FBE55DC1E6394344AA1F4B5E /* JarvisBackend in Resources */,
 				754EEEC1B4E65CA705A0B83A /* Licenses in Resources */,
 				1D311D8055F64F1BA6F5C74C /* Images in Resources */,
 			);
@@ -287,6 +292,26 @@
 		};
 /* End PBXResourcesBuildPhase section */
 /* Begin PBXShellScriptBuildPhase section */
+		7A15A109732B4661B7FC89B9 /* Stage JarvisBackend Resources */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Stage JarvisBackend Resources";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(SOURCE_ROOT)/Sources/JarvisApp/Resources/JarvisBackend",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nSRC=\"${SOURCE_ROOT}/../app\"\nDEST=\"${SOURCE_ROOT}/Sources/JarvisApp/Resources/JarvisBackend\"\nrm -rf \"$DEST\"\nmkdir -p \"$DEST/app\"\nrsync -a \\\n    --exclude='__pycache__/' \\\n    --exclude='*.pyc' \\\n    --exclude='*.wav' \\\n    --exclude='.DS_Store' \\\n    --exclude='/backups/' \\\n    --exclude='/app/' \\\n    --exclude='/nano app/' \\\n    --exclude='/config.json' \\\n    --exclude='/apple_speech' \\\n    --exclude='/Jarvis Photos Helper.app' \\\n    --exclude='/mic_test.py' \\\n    --exclude='/sound_test.py' \\\n    --exclude='/vad_audio_test.py' \\\n    --exclude='/voice_test.py' \\\n    --exclude='/openai_test.py' \\\n    --exclude='/voice_jarvis.py' \\\n    --exclude='/voice_jarvis_wake.py' \\\n    --exclude='/openai_jarvis.py' \\\n    --exclude='/openai_jarvis_backup.py' \\\n    --exclude='/openai_jarvis_v1_working.py' \\\n    --exclude='/openai_jarvis_vad.py' \\\n    --exclude='/openai_jarvis_vad_backup_aktivierungswort.py' \\\n    \"$SRC/\" \"$DEST/app/\"\ncp \"${SOURCE_ROOT}/../requirements.txt\" \"$DEST/requirements.txt\"\n";
+		};
 		E8D2BD7C640558C55FEA4EDE /* Strip Extended Attributes From Bundled Resources */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
@@ -443,7 +468,7 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -499,7 +524,7 @@
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;

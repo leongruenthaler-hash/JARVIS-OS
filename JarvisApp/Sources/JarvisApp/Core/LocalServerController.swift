@@ -10,7 +10,15 @@ final class LocalServerController: ObservableObject {
     private static let bootstrapStatusPath = "/tmp/jarvis_app_bootstrap_status.txt"
     private static let voiceBootstrapStatusPath = "/tmp/jarvis_app_voice_bootstrap_status.txt"
 
-    private let projectPath = LocalServerController.detectProjectPath()
+    /// Read-only: where `app/` (the Python source) lives. Either the bundled,
+    /// signed-app copy (`Contents/Resources/JarvisBackend`) or, for developers running
+    /// from a source checkout, the live `app/` folder next to `.git`.
+    private let backendSourcePath = LocalServerController.detectBackendSourcePath()
+    /// Writable: where the venv, memory, cache, config, and compiled helper binaries
+    /// live - never inside the (potentially read-only, code-signed) app bundle.
+    private let dataDirectory = LocalServerController.detectDataDirectory()
+    private var venvPath: String { dataDirectory + "/venv" }
+
     private let apiClient = JarvisAPIClient()
     private var serverProcess: Process?
     private var ttsProcess: Process?
@@ -22,7 +30,17 @@ final class LocalServerController: ObservableObject {
     /// Whether the Python backend's venv has already been set up. `false` on a fresh
     /// install where `start()` will need to bootstrap it first (slow: several minutes).
     var venvPythonExists: Bool {
-        FileManager.default.fileExists(atPath: projectPath + "/.venv/bin/python3")
+        FileManager.default.fileExists(atPath: venvPath + "/bin/python3")
+    }
+
+    /// Merges `JARVIS_DATA_DIR` into the current environment for subprocesses that
+    /// invoke `.venv/bin/python3` outside of `start()`'s own script (which exports it
+    /// itself before the final `exec`). Each of these spawns its own independent
+    /// `Process()`, so this has to be set explicitly at every one of them.
+    private func pythonEnvironment() -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        env["JARVIS_DATA_DIR"] = dataDirectory
+        return env
     }
 
     struct BootstrapStatus {
@@ -74,6 +92,7 @@ final class LocalServerController: ObservableObject {
         var pathsToCheck: [String] = [Bundle.main.bundlePath]
         if let resourcePath = Bundle.main.resourcePath {
             pathsToCheck.append(resourcePath + "/ollama-runtime/ollama")
+            pathsToCheck.append(resourcePath + "/JarvisBackend/app/jarvis.py")
             let bundledModelsPath = resourcePath + "/bundled-models"
             if let enumerator = fileManager.enumerator(atPath: bundledModelsPath) {
                 for case let relativePath as String in enumerator {
@@ -93,7 +112,7 @@ final class LocalServerController: ObservableObject {
     }
 
     @discardableResult
-    func start(projectPath: String? = nil) -> Bool {
+    func start() -> Bool {
         // Only trust an already-running process if its venv is still intact - otherwise
         // a zombie process left over from a deleted/replaced JARVIS-OS folder (e.g. after
         // extracting a fresh export on top of an old one) silently blocks every future
@@ -104,10 +123,11 @@ final class LocalServerController: ObservableObject {
             return true
         }
 
-        let resolvedProjectPath = projectPath ?? self.projectPath
-        let quotedProjectPath = Self.shellQuote(resolvedProjectPath)
+        let quotedBackendSourcePath = Self.shellQuote(backendSourcePath)
+        let quotedDataDirectory = Self.shellQuote(dataDirectory)
+        let quotedVenvPath = Self.shellQuote(venvPath)
         let process = Process()
-        process.currentDirectoryURL = URL(fileURLWithPath: resolvedProjectPath)
+        process.currentDirectoryURL = URL(fileURLWithPath: backendSourcePath)
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = [
             "-lc",
@@ -115,13 +135,30 @@ final class LocalServerController: ObservableObject {
             LOG_FILE=\(Self.shellQuote(Self.startLogPath))
             exec >"$LOG_FILE" 2>&1
             set -e
-            cd \(quotedProjectPath)
+            cd \(quotedBackendSourcePath)
+            DATA_DIR=\(quotedDataDirectory)
+            VENV_DIR=\(quotedVenvPath)
+            mkdir -p "$DATA_DIR"
             STATUS_FILE=\(Self.shellQuote(Self.bootstrapStatusPath))
             rm -f "$STATUS_FILE"
             write_status() {
                 printf '%s|%s|%s\n' "$(date +%s)" "$1" "$2" > "$STATUS_FILE.tmp"
                 mv "$STATUS_FILE.tmp" "$STATUS_FILE"
             }
+            # One-time migration for testers upgrading from the old "manual folder at
+            # ~/Desktop/JARVIS-OS" setup: copy (never move) their existing memory/cache/
+            # config into the new Application Support location, guarded so it only ever
+            # runs once. The old folder is left untouched as a safety net.
+            OLD_ROOT="$HOME/Desktop/JARVIS-OS"
+            if [ -d "$OLD_ROOT/memory" ] && [ ! -d "$DATA_DIR/memory" ]; then
+                cp -R "$OLD_ROOT/memory" "$DATA_DIR/memory" 2>/dev/null || true
+            fi
+            if [ -d "$OLD_ROOT/.cache" ] && [ ! -d "$DATA_DIR/.cache" ]; then
+                cp -R "$OLD_ROOT/.cache" "$DATA_DIR/.cache" 2>/dev/null || true
+            fi
+            if [ -f "$OLD_ROOT/config.json" ] && [ ! -f "$DATA_DIR/config.json" ]; then
+                cp "$OLD_ROOT/config.json" "$DATA_DIR/config.json" 2>/dev/null || true
+            fi
             health_ok() {
                 /usr/bin/curl -fsS --max-time 2 http://127.0.0.1:8765/api/health >/dev/null 2>&1
             }
@@ -131,7 +168,7 @@ final class LocalServerController: ObservableObject {
             # health check keeps succeeding across a short window before trusting it and
             # skipping the real start below - same "verify actual liveness, don't trust a
             # single snapshot" standard the Ollama readiness loops further down already use.
-            if [ -x .venv/bin/python3 ] && health_ok; then
+            if [ -x "$VENV_DIR/bin/python3" ] && health_ok; then
                 STILL_UP=1
                 for _ in 1 2 3; do
                     /bin/sleep 1
@@ -207,7 +244,7 @@ final class LocalServerController: ObservableObject {
             fi
 
             NEEDS_BOOTSTRAP=0
-            [ ! -x .venv/bin/python3 ] && NEEDS_BOOTSTRAP=1
+            [ ! -x "$VENV_DIR/bin/python3" ] && NEEDS_BOOTSTRAP=1
             if [ "$NEEDS_BOOTSTRAP" -eq 1 ]; then
                 write_status "checking_clt" "Pruefe, ob Xcode Command Line Tools installiert sind ..."
                 if ! xcode-select -p >/dev/null 2>&1; then
@@ -230,14 +267,14 @@ final class LocalServerController: ObservableObject {
                 fi
             fi
 
-            if [ ! -x .venv/bin/python3 ]; then
+            if [ ! -x "$VENV_DIR/bin/python3" ]; then
                 write_status "creating_venv" "Einmalige Ersteinrichtung: Python-Umgebung wird angelegt ..."
                 if ! command -v python3 >/dev/null 2>&1; then
                     write_status "error" "python3 ist auf diesem Mac nicht installiert. Bitte im Terminal 'xcode-select --install' ausfuehren und Jarvis danach erneut starten."
                     echo "FEHLER: python3 ist auf diesem Mac nicht installiert."
                     exit 1
                 fi
-                python3 -m venv .venv
+                python3 -m venv "$VENV_DIR"
             fi
             # This import check is normally fast (~a few seconds), but faster_whisper/torch
             # do real device/backend probing on import, not just a trivial import - under
@@ -247,7 +284,7 @@ final class LocalServerController: ObservableObject {
             # "Nicht verbunden" - same write_status mechanism used for the CLT/venv bootstrap
             # above.
             write_status "checking_dependencies" "Python-Umgebung wird geprueft ..."
-            .venv/bin/python3 -c "import numpy, sounddevice, dotenv, openai, edge_tts, miniaudio, faster_whisper, torch" >/dev/null 2>&1 &
+            "$VENV_DIR/bin/python3" -c "import numpy, sounddevice, dotenv, openai, edge_tts, miniaudio, faster_whisper, torch" >/dev/null 2>&1 &
             DEP_CHECK_PID=$!
             DEP_CHECK_WAITED=0
             DEP_CHECK_WARNED=0
@@ -263,18 +300,19 @@ final class LocalServerController: ObservableObject {
             wait "$DEP_CHECK_PID" || DEP_CHECK_STATUS=$?
             if [ "$DEP_CHECK_STATUS" -ne 0 ]; then
                 write_status "installing_packages" "Einmalige Ersteinrichtung: Python-Pakete werden vorbereitet ..."
-                .venv/bin/python3 -m pip install --upgrade pip >/dev/null 2>&1 || true
+                "$VENV_DIR/bin/python3" -m pip install --upgrade pip >/dev/null 2>&1 || true
                 TOTAL=$(grep -vc '^[[:space:]]*$' requirements.txt)
                 N=0
                 while IFS= read -r PKG; do
                     [ -z "$PKG" ] && continue
                     N=$((N + 1))
                     write_status "installing_packages" "Einmalige Ersteinrichtung: Installiere Paket $N von $TOTAL ($PKG) - kann insgesamt 10-15 Minuten dauern. Mac bitte nicht in den Ruhezustand versetzen."
-                    .venv/bin/python3 -m pip install "$PKG"
+                    "$VENV_DIR/bin/python3" -m pip install "$PKG"
                 done < requirements.txt
             fi
             write_status "starting_server" "Python-Umgebung bereit, Jarvis-Kern startet ..."
-            exec \(quotedProjectPath)/.venv/bin/python3 app/jarvis.py --local-server
+            export JARVIS_DATA_DIR="$DATA_DIR"
+            exec "$VENV_DIR/bin/python3" app/jarvis.py --local-server
             """
         ]
         process.standardOutput = Pipe()
@@ -384,11 +422,12 @@ final class LocalServerController: ObservableObject {
         let process = Process()
         let stdinPipe = Pipe()
         let stderrPipe = Pipe()
-        process.currentDirectoryURL = URL(fileURLWithPath: projectPath)
+        process.currentDirectoryURL = URL(fileURLWithPath: backendSourcePath)
+        process.environment = pythonEnvironment()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = [
             "-lc",
-            "cd \(Self.shellQuote(projectPath)) && \(Self.shellQuote(projectPath))/.venv/bin/python3 app/tts_bridge.py"
+            "cd \(Self.shellQuote(backendSourcePath)) && \(Self.shellQuote(venvPath))/bin/python3 app/tts_bridge.py"
         ]
         process.standardInput = stdinPipe
         process.standardOutput = Pipe()
@@ -546,12 +585,13 @@ final class LocalServerController: ObservableObject {
         let stdinPipe = Pipe()
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
-        process.currentDirectoryURL = URL(fileURLWithPath: projectPath)
+        process.currentDirectoryURL = URL(fileURLWithPath: backendSourcePath)
+        process.environment = pythonEnvironment()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         let argsSuffix = arguments.map { " \(Self.shellQuote($0))" }.joined()
         process.arguments = [
             "-lc",
-            "cd \(Self.shellQuote(projectPath)) && \(Self.shellQuote(projectPath))/.venv/bin/python3 app/tts_bridge.py\(argsSuffix)"
+            "cd \(Self.shellQuote(backendSourcePath)) && \(Self.shellQuote(venvPath))/bin/python3 app/tts_bridge.py\(argsSuffix)"
         ]
         process.standardInput = stdinPipe
         process.standardOutput = stdoutPipe
@@ -622,7 +662,7 @@ final class LocalServerController: ObservableObject {
         try await ensureAppleSpeechHelperCompiled()
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: projectPath + "/app/apple_speech")
+        process.executableURL = URL(fileURLWithPath: dataDirectory + "/apple_speech")
         process.arguments = ["--live", locale]
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
@@ -682,9 +722,10 @@ final class LocalServerController: ObservableObject {
     // bypassing the Python engine (and therefore Python's lazy-compile check) entirely.
     // If you change the compile logic here, change it there too.
     private func ensureAppleSpeechHelperCompiled() async throws {
-        let sourceFile = projectPath + "/app/apple_speech.swift"
-        let binaryFile = projectPath + "/app/apple_speech"
+        let sourceFile = backendSourcePath + "/app/apple_speech.swift"
+        let binaryFile = dataDirectory + "/apple_speech"
         let fileManager = FileManager.default
+        try? fileManager.createDirectory(atPath: dataDirectory, withIntermediateDirectories: true)
 
         guard fileManager.fileExists(atPath: sourceFile) else {
             throw BridgeError.processFailed("Apple-Speech-Helper fehlt: \(sourceFile)")
@@ -750,11 +791,12 @@ final class LocalServerController: ObservableObject {
 
         let process = Process()
         let stdinPipe = Pipe()
-        process.currentDirectoryURL = URL(fileURLWithPath: projectPath)
+        process.currentDirectoryURL = URL(fileURLWithPath: backendSourcePath)
+        process.environment = pythonEnvironment()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = [
             "-lc",
-            "cd \(Self.shellQuote(projectPath)) && \(Self.shellQuote(projectPath))/.venv/bin/python3 app/tts_bridge.py"
+            "cd \(Self.shellQuote(backendSourcePath)) && \(Self.shellQuote(venvPath))/bin/python3 app/tts_bridge.py"
         ]
         process.standardInput = stdinPipe
         process.standardOutput = Pipe()
@@ -1063,7 +1105,7 @@ final class LocalServerController: ObservableObject {
         payload: [String: Any] = [:],
         onEvent: (@MainActor (BridgeRuntimeEvent) -> Void)? = nil
     ) async throws -> T {
-        try await Task.detached(priority: .userInitiated) { [projectPath] in
+        try await Task.detached(priority: .userInitiated) { [backendSourcePath, venvPath, dataDirectory] in
             var request = payload
             request["command"] = command
             let inputData = try JSONSerialization.data(withJSONObject: request, options: [])
@@ -1072,11 +1114,14 @@ final class LocalServerController: ObservableObject {
             let stdinPipe = Pipe()
             let stdoutPipe = Pipe()
             let stderrPipe = Pipe()
-            process.currentDirectoryURL = URL(fileURLWithPath: projectPath)
+            process.currentDirectoryURL = URL(fileURLWithPath: backendSourcePath)
+            var env = ProcessInfo.processInfo.environment
+            env["JARVIS_DATA_DIR"] = dataDirectory
+            process.environment = env
             process.executableURL = URL(fileURLWithPath: "/bin/zsh")
             process.arguments = [
                 "-lc",
-                "cd \(Self.shellQuote(projectPath)) && \(Self.shellQuote(projectPath))/.venv/bin/python3 app/app_bridge.py"
+                "cd \(Self.shellQuote(backendSourcePath)) && \(Self.shellQuote(venvPath))/bin/python3 app/app_bridge.py"
             ]
             process.standardInput = stdinPipe
             process.standardOutput = stdoutPipe
@@ -1130,10 +1175,23 @@ final class LocalServerController: ObservableObject {
 }
 
 private extension LocalServerController {
-    nonisolated static func detectProjectPath() -> String {
+    /// Where `app/` (the read-only Python source) lives. The bundled copy inside the
+    /// signed `.app` wins whenever present (covers both a real `/Applications` install
+    /// and an Xcode debug run, since both go through the same Resources build phase) -
+    /// the walk-up candidates below only matter for `swift run`/`swift build` via the
+    /// legacy SPM entry point, and `~/Desktop/JARVIS-OS` is kept purely as a transitional
+    /// fallback for testers who haven't yet received a build with the bundled backend.
+    nonisolated static func detectBackendSourcePath() -> String {
         let fileManager = FileManager.default
-        var candidates: [URL] = []
 
+        if let resourcePath = Bundle.main.resourcePath {
+            let bundled = resourcePath + "/JarvisBackend"
+            if fileManager.fileExists(atPath: bundled + "/app/jarvis.py") {
+                return bundled
+            }
+        }
+
+        var candidates: [URL] = []
         let sourceFile = URL(fileURLWithPath: #filePath)
         candidates.append(sourceFile)
         candidates.append(URL(fileURLWithPath: fileManager.currentDirectoryPath))
@@ -1153,6 +1211,19 @@ private extension LocalServerController {
         }
 
         return fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Desktop/JARVIS-OS").path
+    }
+
+    /// Writable location for the venv, memory, cache, config, and compiled helper
+    /// binaries - `~/Library/Application Support/<bundle id>`. Deliberately a different,
+    /// sibling folder from the existing `~/Library/Application Support/Jarvis/ollama-models`
+    /// (used for the bundled phi4-mini model) rather than unifying the two - that
+    /// existing path is already working and untouched by this change.
+    nonisolated static func detectDataDirectory() -> String {
+        let base = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
+        let identifier = Bundle.main.bundleIdentifier ?? "com.leon.jarvis"
+        return base.appendingPathComponent(identifier).path
     }
 
     nonisolated static func shellQuote(_ value: String) -> String {

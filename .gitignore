@@ -27,6 +27,14 @@ JarvisApp/.swiftpm/
 *.xcuserstate
 **/xcuserdata/
 
+# Voice recordings / audio test fixtures (biometric, never belongs in git)
+*.wav
+*.mp3
+
+# Old manual backup dumps and large export archives
+/ Jarvis App 1/
+*.zip
+
 # Bundled Ollama runtime + model weights (multi-GB binaries, not fit for git -
 # assembled locally before an export/build). Licenses/ stays tracked (small
 # text files).
