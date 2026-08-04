@@ -160,3 +160,25 @@ Bewusst nicht umgesetzt: Umstellung auf eine echte Datenbank, Token-basiertes
 statt zeichenbasiertes Kontextbudget, automatische Löschung abgelaufener
 Fakten (nur Ausblendung aus dem Kontext), Beziehungsgraph über
 `related_entities`. Siehe `docs/context-and-memory.md`, letzter Abschnitt.
+
+## 10. Phase-C-Status (2026-08-04)
+
+Phase C (Briefing/Proaktivität) ist umgesetzt: deterministische
+`ProactivityEngine` (`app/core/proactivity_engine.py`) mit vier Prioritätsstufen,
+Ruhezeiten, Drosselung, Abkühlzeit/Deduplizierung, Snooze und dauerhaftem
+Ausblenden, protokolliert in `memory/proactivity_events.json`. Vier
+eingebaute Regeln (`app/core/proactivity_rules.py`): Speicherplatz knapp,
+unbestätigte Mail-Kalender-Vorschläge, unbestätigte Erinnerungen, neue
+ungelesene Mails. Authentifizierte API (`/api/proactivity/...`), Einbindung
+ins Tagesbriefing, periodisches Abfragen (alle 5 Minuten) in der SwiftUI-App
+mit Anzeige als System-Chat-Nachricht. 25 neue automatisierte Tests. Details:
+`docs/proactivity.md`.
+
+Bewusst nicht umgesetzt: kalenderzeit-basierte Trigger ("Termin beginnt
+bald", Terminüberschneidungen) - blockiert auf einer sichereren,
+eigenständigen Änderung an `calendar_client.py`s AppleScript-Datumsausgabe,
+die nicht ungetestet in derselben Änderung wie die neue Engine laufen sollte
+(siehe die heute bereits einmal aufgetretene Kalender-Regression, Commit
+`45dc902`). Evening Review, macOS-Systembenachrichtigungen, dedizierte
+Ruhezeiten-Einstellung in der App-Oberfläche. Siehe `docs/proactivity.md`,
+letzter Abschnitt.

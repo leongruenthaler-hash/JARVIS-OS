@@ -1109,6 +1109,20 @@ final class LocalServerController: ObservableObject {
         try await apiClient.deleteMemoryFact(id: id)
     }
 
+    func proactivityEvents() async throws -> [ProactiveEvent] {
+        try await apiClient.proactivityEvents()
+    }
+
+    @discardableResult
+    func snoozeProactivityEvent(dedupKey: String, minutes: Int = 60) async throws -> Bool {
+        try await apiClient.snoozeProactivityEvent(dedupKey: dedupKey, minutes: minutes)
+    }
+
+    @discardableResult
+    func dismissProactivityEvent(dedupKey: String) async throws -> Bool {
+        try await apiClient.dismissProactivityEvent(dedupKey: dedupKey)
+    }
+
     func setOpenAIKey(_ apiKey: String) async throws {
         try await apiClient.setOpenAIKey(apiKey)
     }

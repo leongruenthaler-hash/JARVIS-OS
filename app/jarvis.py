@@ -978,25 +978,29 @@ def clean_memory_subject(text: str) -> str:
     return cleaned.strip(" .,!?:;\"'")
 
 
-def classify_memory_category(text: str) -> str:
+def classify_memory_category(text: str) -> tuple[str, str]:
+    """Returns (category, sensitivity). Sensitivity mirrors memory.SENSITIVITY_LEVELS
+    and is a best-effort default based on the category alone - it does not replace
+    SENSITIVE_FACT_MARKERS / _passes_sensitive_content_filter, which still gate whether
+    a fact is stored at all."""
     normalized = normalize_text(text)
     if any(word in normalized for word in ("musik", "stimme", "tts", "antwort", "sprich", "sprache", "ansprech", "humor", "tone", "stil")):
-        return "Vorlieben"
+        return "Vorlieben", "normal"
     if any(word in normalized for word in ("mail", "e mail", "rechnung", "versicherung", "abo", "abonnement")):
-        return "Mail"
+        return "Mail", "normal"
     if any(word in normalized for word in ("foto", "bilder", "desktop", "schreibtisch", "datei", "ordner")):
-        return "Dateien"
+        return "Dateien", "normal"
     if any(word in normalized for word in ("kontakt", "anruf", "telefon", "kalender", "notiz")):
-        return "Organisation"
+        return "Organisation", "normal"
     if any(word in normalized for word in ("ich heiße", "ich heisse", "mein name", "meine adresse", "mein geburtstag", "leon hat", "leon ist", "katze", "katzen")):
-        return "Profil"
-    return "Auto"
+        return "Profil", "personal"
+    return "Auto", "normal"
 
 
-def extract_auto_memory_facts(text: str) -> list[tuple[str, str]]:
+def extract_auto_memory_facts(text: str) -> list[tuple[str, str, str]]:
     original = strip_wake_word_from_text(text).strip(" .,!?:;")
     normalized = normalize_text(original)
-    facts: list[tuple[str, str]] = []
+    facts: list[tuple[str, str, str]] = []
     user_name = configured_user_name()
 
     # should_skip_auto_memory() gate gilt nur fuer die directive-artigen (anchored) Muster -
@@ -1100,7 +1104,8 @@ def extract_auto_memory_facts(text: str) -> list[tuple[str, str]]:
 
             fact = normalize_memory_fact(builder(match))
             if fact:
-                facts.append((classify_memory_category(fact), fact))
+                category, sensitivity = classify_memory_category(fact)
+                facts.append((category, fact, sensitivity))
             break
         if facts:
             break
@@ -1109,7 +1114,8 @@ def extract_auto_memory_facts(text: str) -> list[tuple[str, str]]:
         cleaned_norm = normalize_text(cleaned_subject)
         if "immer" in cleaned_norm and any(marker in cleaned_norm for marker in ("soll", "sprich", "ansprech", "verwende", "nutze")):
             fact = normalize_memory_fact(f"Dauerhafte Vorgabe von {user_name}: {cleaned_subject}.")
-            facts.append((classify_memory_category(fact), fact))
+            category, sensitivity = classify_memory_category(fact)
+            facts.append((category, fact, sensitivity))
 
     return facts[:2]
 
@@ -1229,15 +1235,43 @@ def _run_llm_memory_extraction(user_text: str, base_path: Path, user_name: str) 
     if not fact:
         return
 
-    if not _passes_sensitive_content_filter(fact) or not _looks_self_referential(fact, user_name):
-        logger.log("auto_memory_llm", "filtered", success=True, reason="sensitive_or_third_party")
+    # Fakten primär über eine andere Person werden weiterhin komplett verworfen - das ist
+    # kein Fall, den der Nutzer für sich selbst bestätigen/ablehnen könnte, sondern ein
+    # Datenschutzproblem gegenüber Dritten.
+    if not _looks_self_referential(fact, user_name):
+        logger.log("auto_memory_llm", "filtered", success=True, reason="third_party")
         return
 
     memory_system = JarvisMemorySystem(base_path)
-    category = classify_memory_category(fact)
-    result = memory_system.maybe_remember(fact, category=category, source="auto-llm")
+    category, sensitivity = classify_memory_category(fact)
+    is_sensitive = not _passes_sensitive_content_filter(fact)
+    if is_sensitive:
+        # Landet auf einem SENSITIVE_FACT_MARKERS-Treffer (Gesundheit, Konto, Passwort, ...).
+        # Wird nicht mehr stillschweigend verworfen, sondern wie jeder andere LLM-Fakt als
+        # pending_confirmation gespeichert - zusätzlich mit sensitivity="confidential", damit
+        # er in der Gedächtnis-Ansicht erkennbar als sensibel markiert ist. Der Nutzer
+        # entscheidet selbst, ob er bestätigt oder ablehnt.
+        sensitivity = "confidential"
+
+    # LLM-Extraktion ist unsicherer als die regelbasierte (Halluzinationsrisiko, keine
+    # feste Satzstruktur) - deshalb niedrigere confidence und erst pending_confirmation,
+    # statt sofort als bestätigt zu gelten. Der Nutzer bestätigt/lehnt in der
+    # Gedächtnis-Ansicht ab (siehe docs/context-and-memory.md).
+    result = memory_system.maybe_remember(
+        fact,
+        category=category,
+        source="auto-llm",
+        confidence=0.7,
+        sensitivity=sensitivity,
+        status="pending_confirmation",
+    )
     if result in ("created", "updated"):
-        print(f"Memory (LLM): {result} unter {category}: {fact}")
+        logger.log(
+            "auto_memory_llm",
+            "sensitive_pending_confirmation" if is_sensitive else "pending_confirmation",
+            success=True,
+        )
+        print(f"Memory (LLM): {result} unter {category} (pending_confirmation): {fact}")
 
 
 def auto_update_memory(memory: Memory, user_text: str, assistant_text: str = "") -> list[str]:
@@ -1260,8 +1294,8 @@ def auto_update_memory(memory: Memory, user_text: str, assistant_text: str = "")
             notes.append(f"Memory: {removed} passende Erinnerung geloescht.")
         return notes
 
-    for category, fact in extract_auto_memory_facts(user_text):
-        result = memory_system.maybe_remember(fact, category=category, source="auto")
+    for category, fact, sensitivity in extract_auto_memory_facts(user_text):
+        result = memory_system.maybe_remember(fact, category=category, source="auto", sensitivity=sensitivity)
         if result == "created":
             notes.append(f"Memory: gespeichert unter {category}: {fact}")
         elif result == "updated":

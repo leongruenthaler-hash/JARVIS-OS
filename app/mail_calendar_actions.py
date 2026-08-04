@@ -108,6 +108,11 @@ def create_calendar_actions_from_messages(
                 "when": plan["when"].isoformat(timespec="minutes"),
                 "notes": plan["notes"],
                 "source": f"{message.sender}: {message.subject}",
+                # Separate from "when" (the calendar event's own time, which can be in
+                # the future) - this is when the proposal itself was created, used by
+                # the Proactivity Engine to nudge about proposals that have sat
+                # unconfirmed for a while.
+                "proposed_at": datetime.now().isoformat(timespec="seconds"),
             }
         )
 

@@ -23,6 +23,7 @@ from data_dir import data_root
 from fast_intent_router import FastIntentRouter
 from core.conversation_manager import ConversationManager
 from core.daily_briefing import build_daily_briefing
+from core.proactivity_engine import PROACTIVITY_ENGINE
 from files_client import configured_roots, move_indexed_matches_to_folder, normalize_name, search_file_index_entries, search_files
 from llm_client import LLMClient
 from jarvis_personality import JARVIS_SYSTEM_PROMPT, message_shape, normalize_jarvis_messages, text_summary
@@ -99,6 +100,17 @@ def datetime_now_from_timestamp(timestamp: float) -> str:
 
 def _safe_error(exc: Exception) -> str:
     return type(exc).__name__
+
+
+def _minutes_since(iso_timestamp: str | None) -> float:
+    if not iso_timestamp:
+        return float("inf")
+    from datetime import datetime
+
+    try:
+        return (datetime.now() - datetime.fromisoformat(str(iso_timestamp))).total_seconds() / 60
+    except ValueError:
+        return float("inf")
 
 
 def _safe_error_detail(exc: Exception) -> str:
@@ -581,18 +593,41 @@ class JarvisLocalServer:
 
         mail_summary = self._mail_background_status().get("message", "") if self.permissions.is_allowed("mail") else ""
 
+        # Reads the events already surfaced by the periodic /api/proactivity/events
+        # poll (recent_history()), rather than calling evaluate() again here - evaluate()
+        # applies cooldown/throttle as a side effect (marks events "shown"), so calling
+        # it from two different endpoints would make whichever fires first silently
+        # swallow the notification for the other.
+        try:
+            recent_proactive = [
+                entry
+                for entry in PROACTIVITY_ENGINE.recent_history(limit=20)
+                if _minutes_since(entry.get("created_at")) <= 30
+            ]
+        except Exception:
+            recent_proactive = []
+        proactivity_summary = ""
+        if recent_proactive:
+            noun = "Hinweis" if len(recent_proactive) == 1 else "Hinweise"
+            proactivity_summary = f"{len(recent_proactive)} proaktive(r) {noun}: " + "; ".join(
+                str(entry.get("message") or "") for entry in recent_proactive[:3]
+            )
+
         briefing = build_daily_briefing(
             calendar_items=calendar_items,
             reminders=reminder_items,
             mail_summary=mail_summary,
             system_summary=f"Modell: {self.models.active_model}. Provider: {self.models.provider}.",
         )
+        if proactivity_summary:
+            briefing = f"{briefing} {proactivity_summary}."
         return {
             "briefing": briefing,
             "calendar_count": len(calendar_items),
             "reminders_count": len(reminder_items),
             "calendar_allowed": self.permissions.is_allowed("calendar"),
             "reminders_allowed": self.permissions.is_allowed("reminders"),
+            "proactive_events": recent_proactive,
         }
 
     def start_local_photo_vision_analysis(self, max_items: int | None = None) -> dict[str, Any]:
@@ -887,6 +922,53 @@ class JarvisLocalServer:
         return self._ensure_mail_worker().resolve_pending_calendar_action(
             action_key, approve=bool(payload.get("approve"))
         )
+
+    def _proactivity_context(self) -> dict[str, Any]:
+        """Only ever reads data sources the user has already consented to via the
+        Permission Manager - proactivity must never be what silently first-triggers
+        a Mail/Calendar access the user hasn't opted into."""
+        pending_calendar_actions: list[dict[str, Any]] = []
+        new_mail_messages: list[dict[str, Any]] = []
+        if self.permissions.is_allowed("mail"):
+            try:
+                pending_calendar_actions = self._ensure_mail_worker().pending_calendar_actions()
+                new_mail_messages = self._mail_background_status().get("new_messages", []) or []
+            except Exception:
+                pass
+
+        pending_confirmation_facts = [
+            fact
+            for fact in self.memory.all_facts(include_expired=True, include_rejected=True)
+            if fact.get("status") == "pending_confirmation"
+        ]
+
+        return {
+            "config": self.config,
+            "pending_calendar_actions": pending_calendar_actions,
+            "new_mail_messages": new_mail_messages,
+            "pending_confirmation_facts": pending_confirmation_facts,
+        }
+
+    def proactivity_events(self) -> dict[str, Any]:
+        events = PROACTIVITY_ENGINE.evaluate(self._proactivity_context(), self.config)
+        return {"events": [event.to_dict() for event in events]}
+
+    def proactivity_history(self) -> dict[str, Any]:
+        return {"events": PROACTIVITY_ENGINE.recent_history()}
+
+    def snooze_proactivity_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        dedup_key = str(payload.get("dedup_key") or "")
+        if not dedup_key:
+            return {"ok": False, "error": "missing_dedup_key"}
+        PROACTIVITY_ENGINE.snooze(dedup_key, minutes=int(payload.get("minutes") or 60))
+        return {"ok": True}
+
+    def dismiss_proactivity_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        dedup_key = str(payload.get("dedup_key") or "")
+        if not dedup_key:
+            return {"ok": False, "error": "missing_dedup_key"}
+        PROACTIVITY_ENGINE.dismiss_forever(dedup_key)
+        return {"ok": True}
 
     def _mail_background_status(self) -> dict[str, Any]:
         worker = self._ensure_mail_worker()
@@ -1925,6 +2007,10 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/memory/facts":
                 query_params = dict(parse_qsl(urlparse(self.path).query))
                 self._json(200, SERVER.list_memory_facts(query_params))
+            elif path == "/api/proactivity/events":
+                self._json(200, SERVER.proactivity_events())
+            elif path == "/api/proactivity/history":
+                self._json(200, SERVER.proactivity_history())
             else:
                 self._json(404, {"error": "not_found"})
         except Exception as exc:
@@ -1989,6 +2075,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, SERVER.reject_memory_fact(payload))
             elif path == "/api/memory/facts/delete":
                 self._json(200, SERVER.delete_memory_fact(payload))
+            elif path == "/api/proactivity/snooze":
+                self._json(200, SERVER.snooze_proactivity_event(payload))
+            elif path == "/api/proactivity/dismiss":
+                self._json(200, SERVER.dismiss_proactivity_event(payload))
             elif path == "/api/photos/scan":
                 self._json(200, SERVER.start_photo_index_scan())
             elif path == "/api/photos/permission":

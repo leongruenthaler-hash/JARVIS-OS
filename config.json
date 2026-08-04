@@ -131,5 +131,16 @@
             "categories": ["Organisation", "Dateien"],
             "tags": ["jarvis-projekt"]
         }
-    }
+    },
+    "proactivity_enabled": true,
+    "proactivity_quiet_hours_start": "",
+    "proactivity_quiet_hours_end": "",
+    "proactivity_quiet_hours_allow_kritisch": true,
+    "proactivity_cooldown_minutes": 60,
+    "proactivity_max_per_hour": 4,
+    "proactivity_low_disk_percent_threshold": 10,
+    "proactivity_critical_disk_percent_threshold": 3,
+    "proactivity_pending_calendar_action_hours": 2,
+    "proactivity_pending_facts_min_count": 3,
+    "proactivity_new_mail_min_count": 3
 }

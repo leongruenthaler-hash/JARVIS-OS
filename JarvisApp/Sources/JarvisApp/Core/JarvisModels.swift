@@ -182,6 +182,30 @@ struct MemoryFactsResponse: Codable {
     let total: Int
 }
 
+/// A deterministic, rule-based nudge from the Proactivity Engine (Phase C, see
+/// app/core/proactivity_engine.py). `reason` is always populated - every nudge must be
+/// traceable back to a concrete rule and the data that triggered it, never "the AI felt
+/// like it".
+struct ProactiveEvent: Codable, Identifiable, Equatable {
+    let id: String
+    let trigger: String
+    let priority: String
+    let message: String
+    let reason: String
+    let dedupKey: String
+    let createdAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, trigger, priority, message, reason
+        case dedupKey = "dedup_key"
+        case createdAt = "created_at"
+    }
+}
+
+struct ProactiveEventsResponse: Codable {
+    let events: [ProactiveEvent]
+}
+
 struct FileSearchPayload: Codable, Equatable {
     let query: String
     let message: String

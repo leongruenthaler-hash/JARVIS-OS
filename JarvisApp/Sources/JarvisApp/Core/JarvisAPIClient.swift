@@ -347,6 +347,31 @@ struct JarvisAPIClient {
         return response.ok
     }
 
+    func proactivityEvents() async throws -> [ProactiveEvent] {
+        let response: ProactiveEventsResponse = try await get("/api/proactivity/events")
+        return response.events
+    }
+
+    @discardableResult
+    func snoozeProactivityEvent(dedupKey: String, minutes: Int = 60) async throws -> Bool {
+        struct Request: Encodable { let dedupKey: String; let minutes: Int
+            enum CodingKeys: String, CodingKey { case dedupKey = "dedup_key"; case minutes }
+        }
+        struct Response: Decodable { let ok: Bool }
+        let response: Response = try await post("/api/proactivity/snooze", body: Request(dedupKey: dedupKey, minutes: minutes))
+        return response.ok
+    }
+
+    @discardableResult
+    func dismissProactivityEvent(dedupKey: String) async throws -> Bool {
+        struct Request: Encodable { let dedupKey: String
+            enum CodingKeys: String, CodingKey { case dedupKey = "dedup_key" }
+        }
+        struct Response: Decodable { let ok: Bool }
+        let response: Response = try await post("/api/proactivity/dismiss", body: Request(dedupKey: dedupKey))
+        return response.ok
+    }
+
     private func get<T: Decodable>(_ path: String, retryingAuth: Bool = true) async throws -> T {
         var request = URLRequest(url: makeURL(path))
         if let token = loadToken() {

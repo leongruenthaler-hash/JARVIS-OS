@@ -61,6 +61,27 @@ entscheidet, *ob* etwas automatisch gespeichert wird. Phase B ändert nur,
 in der App einsehbar und korrigierbar - sie lockert die bestehenden
 Sensibilitätsfilter nicht.
 
+Seit dem Phase-B-Folgeschritt "LLM-Fakten unsicherer behandeln" gilt
+zusätzlich: `classify_memory_category()` liefert neben der Kategorie auch
+eine Standard-`sensitivity` (z. B. Kategorie "Profil" -> `personal`), die an
+`remember_fact()`/`upsert_fact()` durchgereicht wird. Fakten aus der
+regelbasierten Extraktion (`source="auto"`) werden weiterhin sofort als
+`status="confirmed"` gespeichert. Fakten aus der LLM-Extraktion
+(`source="auto-llm"`) werden dagegen mit `confidence=0.7` und
+`status="pending_confirmation"` gespeichert, weil diese Extraktion
+unsicherer ist als die regelbasierte - der Nutzer bestätigt oder lehnt sie
+in der Gedächtnis-Ansicht (`MemoryView.swift`) ab, statt dass sie
+automatisch als bestätigt gilt.
+
+Fakten, die auf einen `SENSITIVE_FACT_MARKERS`-Treffer laufen (Gesundheit,
+Konto, Passwort, ...), werden seither ebenfalls nicht mehr stillschweigend
+verworfen, sondern - genauso als `status="pending_confirmation"` - mit
+`sensitivity="confidential"` gespeichert, damit sie in der Gedächtnis-Ansicht
+klar als sensibel erkennbar sind und der Nutzer selbst entscheidet, ob sie
+bleiben. Fakten primär über eine andere, namentlich genannte Person werden
+weiterhin komplett verworfen (Datenschutz gegenüber Dritten, keine
+Nutzer-Entscheidung möglich).
+
 ## Memory-Verwaltung (Gedächtnis-Ansicht)
 
 Neue authentifizierte Endpunkte in `app/local_server.py`:

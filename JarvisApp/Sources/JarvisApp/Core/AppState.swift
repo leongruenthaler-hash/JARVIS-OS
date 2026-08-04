@@ -21,6 +21,7 @@ final class AppState: ObservableObject {
     @Published var permissions: [String: PermissionInfo] = [:]
     @Published var memoryFacts: [MemoryFact] = []
     @Published var memoryFactsTotal = 0
+    @Published var proactiveEvents: [ProactiveEvent] = []
     @Published var memoryIsLoading = false
     @Published var mailResult = "Noch keine Mail-Aktion ausgeführt."
     @Published var mailIsLoading = false
@@ -92,6 +93,8 @@ final class AppState: ObservableObject {
     private var microphoneWarmupTask: Task<Bool, Never>?
     private var nextVoiceListenTask: Task<Void, Never>?
     private var backgroundReconnectTask: Task<Void, Never>?
+    private var proactivityPollingTask: Task<Void, Never>?
+    private var shownProactiveEventIDs: Set<String> = []
     private var voiceStopGeneration = 0
     private var debugLoggingEnabled: Bool {
         UserDefaults.standard.bool(forKey: "JarvisDebugLogging")
@@ -112,6 +115,7 @@ final class AppState: ObservableObject {
         keepListeningAfterGreeting = true
         await presentStartupGreetingIfNeeded()
         startBackgroundReconnectLoop()
+        startProactivityPollingLoop()
 
         if alwaysListenEnabled {
             let granted = await wakeWordListener.requestPermissionIfNeeded()
@@ -137,6 +141,56 @@ final class AppState: ObservableObject {
                     await self.refreshStatus(startIfOffline: true)
                 }
             }
+        }
+    }
+
+    /// Phase C: polls the Proactivity Engine every 5 minutes - frequent enough that a
+    /// nudge (low disk space, mail-derived calendar proposals waiting, ...) surfaces
+    /// within a reasonable time, infrequent enough not to matter on an 8 GB machine
+    /// (this is a tiny JSON GET, not a model call). New events become one system chat
+    /// message each; already-seen event IDs are skipped so a repeat poll never
+    /// duplicates a message the user already saw.
+    private func startProactivityPollingLoop() {
+        guard proactivityPollingTask == nil else { return }
+        proactivityPollingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                await self.refreshProactivityEvents()
+                try? await Task.sleep(for: .seconds(300))
+            }
+        }
+    }
+
+    func refreshProactivityEvents() async {
+        guard status != .offline else { return }
+        do {
+            let events = try await serverController.proactivityEvents()
+            proactiveEvents = events
+            for event in events where !shownProactiveEventIDs.contains(event.id) {
+                shownProactiveEventIDs.insert(event.id)
+                messages.append(ChatMessage(role: .system, text: "💡 \(event.message)"))
+            }
+        } catch {
+            // Best-effort - a failed proactivity poll must never surface as a user-facing
+            // error the way a failed chat/voice action would.
+        }
+    }
+
+    func snoozeProactiveEvent(_ event: ProactiveEvent, minutes: Int = 60) async {
+        do {
+            try await serverController.snoozeProactivityEvent(dedupKey: event.dedupKey, minutes: minutes)
+            proactiveEvents.removeAll { $0.id == event.id }
+        } catch {
+            lastError = "Hinweis konnte nicht zurückgestellt werden."
+        }
+    }
+
+    func dismissProactiveEventForever(_ event: ProactiveEvent) async {
+        do {
+            try await serverController.dismissProactivityEvent(dedupKey: event.dedupKey)
+            proactiveEvents.removeAll { $0.id == event.id }
+        } catch {
+            lastError = "Hinweis konnte nicht dauerhaft ausgeblendet werden."
         }
     }
 

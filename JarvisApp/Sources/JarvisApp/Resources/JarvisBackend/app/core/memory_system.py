@@ -11,8 +11,24 @@ class JarvisMemorySystem:
     def __init__(self, base_path: Path | None = None):
         self.memory = Memory(base_path)
 
-    def remember_user_fact(self, content: str, category: str = "facts", source: str = "manual") -> str:
-        return self.memory.upsert_fact(content, category=category, source=source)
+    def remember_user_fact(
+        self,
+        content: str,
+        category: str = "facts",
+        source: str = "manual",
+        *,
+        confidence: float = 1.0,
+        sensitivity: str = "normal",
+        status: str = "confirmed",
+    ) -> str:
+        return self.memory.upsert_fact(
+            content,
+            category=category,
+            source=source,
+            confidence=confidence,
+            sensitivity=sensitivity,
+            status=status,
+        )
 
     def should_store_fact(self, content: str) -> bool:
         text = " ".join(str(content or "").split()).strip()
@@ -56,10 +72,26 @@ class JarvisMemorySystem:
             ) or "Keine wichtigen Langzeitnotizen."
         return "Keine wichtigen Langzeitnotizen."
 
-    def maybe_remember(self, content: str, category: str = "facts", source: str = "auto") -> str:
+    def maybe_remember(
+        self,
+        content: str,
+        category: str = "facts",
+        source: str = "auto",
+        *,
+        confidence: float = 1.0,
+        sensitivity: str = "normal",
+        status: str = "confirmed",
+    ) -> str:
         if not self.should_store_fact(content):
             return "ignored"
-        return self.remember_user_fact(content, category=category, source=source)
+        return self.remember_user_fact(
+            content,
+            category=category,
+            source=source,
+            confidence=confidence,
+            sensitivity=sensitivity,
+            status=status,
+        )
 
     def maybe_forget(self, query: str) -> int:
         return self.memory.forget_facts_matching(query)
