@@ -83,7 +83,9 @@ class PermissionManager:
             return data
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
+            if not isinstance(data, dict):
+                raise ValueError("privacy_permissions.json is not a JSON object")
+        except (json.JSONDecodeError, ValueError):
             broken = self.path.with_suffix(".json.broken")
             self.path.rename(broken)
             data = {name: PermissionState().__dict__ for name in PERMISSION_DEFINITIONS}
@@ -123,9 +125,13 @@ class PermissionManager:
         return PERMISSION_DEFINITIONS.get(permission, "Jarvis braucht diese Berechtigung für die angefragte Funktion.")
 
     def grant(self, permission: str, source: str = "unknown"):
+        if permission not in PERMISSION_DEFINITIONS:
+            raise ValueError(f"Unbekannte Berechtigung: {permission}")
         self._set(permission, True, source=source)
 
     def revoke(self, permission: str, source: str = "unknown"):
+        if permission not in PERMISSION_DEFINITIONS:
+            raise ValueError(f"Unbekannte Berechtigung: {permission}")
         self._set(permission, False, source=source)
 
     def mark_explanation_shown(self, permission: str):

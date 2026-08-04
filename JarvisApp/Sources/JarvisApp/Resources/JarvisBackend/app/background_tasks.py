@@ -191,8 +191,11 @@ class MailBackgroundWorker:
             elif not first_scan:
                 calendar_messages = new_messages
 
-        existing_action_keys = set(previous_cache.get("created_calendar_action_keys", []))
-        calendar_actions, new_action_keys = create_calendar_actions_from_messages(
+        # "seen" keys stop the same mail from being re-proposed on every scan; they are
+        # NOT the same as "created" - a proposal only moves to created/dismissed once the
+        # user explicitly resolves it (see resolve_pending_calendar_action below).
+        existing_action_keys = set(previous_cache.get("seen_calendar_action_keys", []))
+        proposed_actions, new_action_keys = create_calendar_actions_from_messages(
             calendar_messages,
             self.config,
             existing_action_keys,
@@ -201,24 +204,55 @@ class MailBackgroundWorker:
         known_limit = int(self.config.get("background_mail_known_id_limit", 1000))
         all_known_ids = list(dict.fromkeys([*current_ids, *list(known_ids)]))[:known_limit]
 
+        pending_actions = list(previous_cache.get("pending_calendar_actions", []))
+        pending_actions.extend(proposed_actions)
+
         cache = {
             **previous_cache,
             "last_scan_at": datetime.now().isoformat(timespec="seconds"),
             "last_reason": reason,
             "last_error": "",
             "known_message_ids": all_known_ids,
-            "created_calendar_action_keys": all_action_keys,
-            "calendar_actions": calendar_actions[-20:],
+            "seen_calendar_action_keys": all_action_keys,
+            "pending_calendar_actions": pending_actions[-50:],
             "messages": [self._message_to_dict(message) for message in messages[:20]],
             "new_messages": [self._message_to_dict(message) for message in new_messages[:10]],
-            "summary": self._build_summary(messages, new_messages, calendar_actions),
+            "summary": self._build_summary(messages, new_messages, proposed_actions),
         }
         self._save_cache(cache)
-        created_count = len([action for action in calendar_actions if action.get("status") == "created"])
         print(
             f"Hintergrund-Mailcheck fertig: {len(messages)} gelesen, "
-            f"{len(new_messages)} neu, {created_count} Kalender/Erinnerungen."
+            f"{len(new_messages)} neu, {len(proposed_actions)} neue Kalender-/Erinnerungs-Vorschläge "
+            "(noch nicht bestätigt)."
         )
+
+    def pending_calendar_actions(self) -> list[dict[str, str]]:
+        return list(self._load_cache().get("pending_calendar_actions", []))
+
+    def resolve_pending_calendar_action(self, action_key: str, approve: bool) -> dict[str, Any]:
+        """Explicit user confirmation gate: only this method may actually create a
+        Calendar event / Reminder from a mail-derived proposal (or discard it)."""
+        from mail_calendar_actions import execute_planned_calendar_action
+
+        with self.lock:
+            cache = self._load_cache()
+            pending = list(cache.get("pending_calendar_actions", []))
+            match = next((action for action in pending if action.get("action_key") == action_key), None)
+            if match is None:
+                return {"ok": False, "error": "not_found"}
+
+            remaining = [action for action in pending if action.get("action_key") != action_key]
+            if approve:
+                result = execute_planned_calendar_action(match, self.config)
+            else:
+                result = {**match, "status": "dismissed"}
+
+            resolved = list(cache.get("resolved_calendar_actions", []))
+            resolved.append(result)
+            cache["pending_calendar_actions"] = remaining
+            cache["resolved_calendar_actions"] = resolved[-50:]
+            self._save_cache(cache)
+            return {"ok": True, "action": result}
 
     def _build_summary(
         self,
@@ -230,9 +264,6 @@ class MailBackgroundWorker:
             return "Ich sehe aktuell keine Mails im vorbereiteten Posteingang."
 
         calendar_actions = calendar_actions or []
-        created_actions = [
-            action for action in calendar_actions if action.get("status") == "created"
-        ]
         focus = new_messages or messages[:5]
         intro = (
             f"Ich sehe {len(new_messages)} neue Mail(s)."
@@ -244,10 +275,13 @@ class MailBackgroundWorker:
             for message in focus[:5]
         )
         calendar_text = ""
-        if created_actions:
-            titles = "; ".join(action["title"] for action in created_actions[:3])
-            noun = "Eintrag" if len(created_actions) == 1 else "Einträge"
-            calendar_text = f" Ich habe außerdem {len(created_actions)} Kalender- oder Erinnerungs-{noun} angelegt: {titles}."
+        if calendar_actions:
+            titles = "; ".join(action["title"] for action in calendar_actions[:3])
+            noun = "Vorschlag" if len(calendar_actions) == 1 else "Vorschläge"
+            calendar_text = (
+                f" Ich habe außerdem {len(calendar_actions)} Kalender-/Erinnerungs-{noun} aus deinen Mails "
+                f"erkannt, aber noch nicht angelegt: {titles}. Bestätige sie im Dashboard, bevor ich sie anlege."
+            )
 
         return f"{intro} Wichtigste Übersicht: {snippets}.{calendar_text}"
 

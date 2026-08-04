@@ -256,6 +256,9 @@ def move_indexed_matches_to_folder(
             if not source.exists() or not source.is_file():
                 skipped.append(str(entry.get("name") or source.name))
                 continue
+            if not _is_within_configured_roots(source, config):
+                skipped.append(str(entry.get("name") or source.name))
+                continue
             if source.resolve().parent == target_folder.resolve():
                 skipped.append(source.name)
                 continue
@@ -575,6 +578,24 @@ def join_human_list(items: list[str]) -> str:
     if len(items) == 2:
         return f"{items[0]} und {items[1]}"
     return ", ".join(items[:-1]) + f" und {items[-1]}"
+
+def _is_within_configured_roots(path: Path, config: dict | None = None) -> bool:
+    """Guards against a stale/corrupted file_index.json entry (or a symlink) pointing
+    outside the folders Jarvis is actually allowed to touch. Unlike safe_child(), which
+    only checks a name against one already-chosen root, this checks an absolute path
+    (as stored in the index) against every configured root."""
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return False
+    for root in configured_roots(config).values():
+        try:
+            resolved.relative_to(root.resolve())
+            return True
+        except ValueError:
+            continue
+    return False
+
 
 def safe_child(root: Path, child_name: str) -> Path:
     if not child_name or "/" in child_name or "\\" in child_name:

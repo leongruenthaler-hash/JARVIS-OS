@@ -3,9 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 import importlib.util
+import os
 import subprocess
 import tempfile
 import time
+import uuid
 import wave
 
 import numpy as np
@@ -36,31 +38,41 @@ class AppleSpeechEngine(BaseSTTEngine):
         self._ensure_helper()
 
     def transcribe(self, audio: np.ndarray) -> str:
-        audio_file = Path(tempfile.gettempdir()) / "jarvis_apple_speech.wav"
+        # Unique, owner-only filename: a fixed name in the shared system temp dir would
+        # let another local account read (or race-overwrite) the user's most recent
+        # voice recording, and it was never cleaned up afterwards either.
+        audio_file = Path(tempfile.gettempdir()) / f"jarvis_apple_speech_{uuid.uuid4().hex}.wav"
         flat_audio = _flatten_audio(audio)
         _write_wav(audio_file, flat_audio, sample_rate=16000)
+        try:
+            os.chmod(audio_file, 0o600)
+        except OSError:
+            pass
 
-        result = subprocess.run(
-            [str(self.binary_file), str(audio_file), self.locale],
-            capture_output=True,
-            text=True,
-            timeout=25,
-        )
-        if result.returncode != 0:
-            error_text = (result.stderr or result.stdout).strip()
-            if not error_text:
-                return ""
-            raise STTEngineError(f"Apple Speech konnte nicht transkribieren: {error_text}")
-
-        transcript = result.stdout.strip()
-        if not transcript:
-            duration = len(flat_audio) / 16000
-            print(
-                "Apple Speech hat keinen Text geliefert "
-                f"(Audio {duration:.2f}s, Datei {audio_file.stat().st_size} Bytes)."
+        try:
+            result = subprocess.run(
+                [str(self.binary_file), str(audio_file), self.locale],
+                capture_output=True,
+                text=True,
+                timeout=25,
             )
+            if result.returncode != 0:
+                error_text = (result.stderr or result.stdout).strip()
+                if not error_text:
+                    return ""
+                raise STTEngineError(f"Apple Speech konnte nicht transkribieren: {error_text}")
 
-        return transcript
+            transcript = result.stdout.strip()
+            if not transcript:
+                duration = len(flat_audio) / 16000
+                print(
+                    "Apple Speech hat keinen Text geliefert "
+                    f"(Audio {duration:.2f}s, Datei {audio_file.stat().st_size} Bytes)."
+                )
+
+            return transcript
+        finally:
+            audio_file.unlink(missing_ok=True)
 
     def listen_and_transcribe(self) -> tuple[str, dict[str, float]]:
         print("Jarvis hört zu...")

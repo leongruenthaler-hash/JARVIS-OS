@@ -1,11 +1,23 @@
 from __future__ import annotations
 
 import json
+import os
+import threading
 from pathlib import Path
 from typing import Any
 from datetime import datetime
 
 from data_dir import data_root
+
+
+def _restrict_to_owner(path: Path) -> None:
+    """Personal facts and conversation history have no encryption at rest, so file
+    permissions are the only thing standing between another local account (or an
+    unencrypted backup) and this data. 0600 = only this user can read/write it."""
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
 
 
 class Memory:
@@ -48,6 +60,13 @@ class Memory:
         }
 
         self.data: dict[str, Any] = {}
+        # The HTTP server (local_server.py) handles requests on a fresh thread each,
+        # all sharing this one Memory instance. Without a lock, two concurrent
+        # read-modify-write calls (e.g. remember_fact + set("settings", ...)) can
+        # interleave and lose one of the writes - reentrant so a method that both
+        # mutates data and calls self.save()/self.set() from the same thread doesn't
+        # deadlock on itself.
+        self._lock = threading.RLock()
         self.load_all()
 
     def load_all(self):
@@ -70,12 +89,14 @@ class Memory:
         if key not in self.files:
             raise KeyError(f"Unbekannter Memory-Bereich: {key}")
 
-        temp_file = self.files[key].with_suffix(self.files[key].suffix + ".tmp")
-        temp_file.write_text(
-            json.dumps(self.data[key], indent=4, ensure_ascii=False),
-            encoding="utf-8",
-        )
-        temp_file.replace(self.files[key])
+        with self._lock:
+            temp_file = self.files[key].with_suffix(self.files[key].suffix + ".tmp")
+            temp_file.write_text(
+                json.dumps(self.data[key], indent=4, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            _restrict_to_owner(temp_file)
+            temp_file.replace(self.files[key])
 
     def save_all(self):
         for key in self.files:
@@ -88,8 +109,9 @@ class Memory:
         if key not in self.files:
             raise KeyError(f"Unbekannter Memory-Bereich: {key}")
 
-        self.data[key] = value
-        self.save(key)
+        with self._lock:
+            self.data[key] = value
+            self.save(key)
 
     def remember(self, category: str, key: str, value: str):
         long_memory = self.data["long_memory"]

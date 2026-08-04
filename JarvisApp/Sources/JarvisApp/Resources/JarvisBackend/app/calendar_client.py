@@ -93,12 +93,17 @@ def create_reminder(
 def list_upcoming_calendar_items(limit: int = 5, until: datetime | None = None) -> dict[str, list[dict[str, str]]]:
     limit = max(1, int(limit))
     until_setup = ""
-    until_check = ""
+    whose_until = ""
     if until is not None:
         until_literal = _escape_applescript_text(_german_date_literal(until))
         until_setup = f'\n    set untilDate to date "{until_literal}"'
-        until_check = " and startDate is less than untilDate"
+        whose_until = " and start date < untilDate"
 
+    # A plain "every event of calendarRef" makes Calendar.app materialize every event
+    # ever created in that calendar (years of history) before the loop below gets a
+    # chance to early-return via maxItems - on a calendar with a long history this can
+    # take a very long time or hit the caller's timeout. "whose start date > nowDate"
+    # lets Calendar.app do that filtering itself, so only upcoming events are pulled.
     script = f"""
     set fieldSeparator to ASCII character 31
     set recordSeparator to ASCII character 30
@@ -109,14 +114,13 @@ def list_upcoming_calendar_items(limit: int = 5, until: datetime | None = None) 
 
     tell application "Calendar"
         repeat with calendarRef in calendars
-            repeat with eventRef in (every event of calendarRef)
+            if itemCount is greater than or equal to maxItems then return outputText
+            set upcomingEvents to (every event of calendarRef whose start date > nowDate{whose_until})
+            repeat with eventRef in upcomingEvents
                 if itemCount is greater than or equal to maxItems then return outputText
                 try
-                    set startDate to start date of eventRef
-                    if startDate is greater than nowDate{until_check} then
-                        set outputText to outputText & name of calendarRef as string & fieldSeparator & summary of eventRef as string & fieldSeparator & startDate as string & fieldSeparator & end date of eventRef as string & recordSeparator
-                        set itemCount to itemCount + 1
-                    end if
+                    set outputText to outputText & name of calendarRef as string & fieldSeparator & summary of eventRef as string & fieldSeparator & start date of eventRef as string & fieldSeparator & end date of eventRef as string & recordSeparator
+                    set itemCount to itemCount + 1
                 end try
             end repeat
         end repeat

@@ -76,19 +76,28 @@ class VoiceOutput:
 
         chunks = self._split_for_tts(text)
         if len(chunks) <= 1:
-            audio_file = Path(tempfile.gettempdir()) / "jarvis_edge_tts.mp3"
-            asyncio.run(self._save_edge_audio(text, edge_voice, audio_file))
-            self._play_audio_file(audio_file)
+            # Unique per-call filename (not a fixed "jarvis_edge_tts.mp3") so two
+            # overlapping speak() calls - or another local user/process - can't read or
+            # collide with each other's half-written audio in the shared system temp dir.
+            audio_file = Path(tempfile.gettempdir()) / f"jarvis_edge_tts_{uuid.uuid4().hex}.mp3"
+            try:
+                asyncio.run(self._save_edge_audio(text, edge_voice, audio_file))
+                self._play_audio_file(audio_file)
+            finally:
+                audio_file.unlink(missing_ok=True)
             return
 
         self.is_speaking = True
-        for index, chunk in enumerate(chunks):
+        for chunk in chunks:
             if not chunk:
                 continue
 
-            audio_file = Path(tempfile.gettempdir()) / f"jarvis_edge_tts_{index}.mp3"
-            asyncio.run(self._save_edge_audio(chunk, edge_voice, audio_file))
-            self._play_audio_file(audio_file, wait=True)
+            audio_file = Path(tempfile.gettempdir()) / f"jarvis_edge_tts_{uuid.uuid4().hex}.mp3"
+            try:
+                asyncio.run(self._save_edge_audio(chunk, edge_voice, audio_file))
+                self._play_audio_file(audio_file, wait=True)
+            finally:
+                audio_file.unlink(missing_ok=True)
 
     def synthesize_edge_to_file(self, text: str, voice: str | None = None) -> Path:
         """Synthesizes `text` via edge-TTS into a uniquely-named temp file and returns its

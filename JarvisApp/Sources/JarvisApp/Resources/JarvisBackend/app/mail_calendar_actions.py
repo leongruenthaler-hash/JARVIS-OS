@@ -78,9 +78,16 @@ def create_calendar_actions_from_messages(
     config: dict[str, Any],
     existing_keys: set[str] | None = None,
 ) -> tuple[list[dict[str, str]], list[str]]:
+    """Detects invoice/event/deadline mentions in inbound mail and turns them into
+    *proposals*, not real Calendar/Reminders entries. Inbound email is untrusted content
+    (trivially spoofable subject/body), so nothing here calls create_calendar_event/
+    create_reminder directly - unlike every other mutating action in this codebase
+    (ACTION_ENGINE.propose/resolve), silently writing real Calendar entries off the back
+    of unauthenticated mail content would be the one unconfirmed automated-action path.
+    A caller must invoke execute_planned_calendar_action() after explicit user consent."""
     existing_keys = existing_keys or set()
-    created: list[dict[str, str]] = []
-    created_keys: list[str] = []
+    proposed: list[dict[str, str]] = []
+    proposed_keys: list[str] = []
 
     for message in messages:
         plan = plan_calendar_action(message, config)
@@ -91,46 +98,53 @@ def create_calendar_actions_from_messages(
         if action_key in existing_keys:
             continue
 
-        try:
-            if plan["kind"] == "event":
-                create_calendar_event(
-                    plan["title"],
-                    plan["when"],
-                    duration_minutes=int(config.get("auto_calendar_event_duration_minutes", 60)),
-                    calendar_name=config.get("calendar_name"),
-                    notes=plan["notes"],
-                )
-            else:
-                create_reminder(
-                    plan["title"],
-                    plan["when"],
-                    list_name=config.get("reminders_list_name"),
-                    notes=plan["notes"],
-                )
-        except CalendarAccessError as exc:
-            created.append(
-                {
-                    "status": "error",
-                    "kind": plan["kind"],
-                    "title": plan["title"],
-                    "when": plan["when"].isoformat(timespec="minutes"),
-                    "error": str(exc),
-                }
-            )
-            continue
-
-        created_keys.append(action_key)
-        created.append(
+        proposed_keys.append(action_key)
+        proposed.append(
             {
-                "status": "created",
+                "status": "proposed",
+                "action_key": action_key,
                 "kind": plan["kind"],
                 "title": plan["title"],
                 "when": plan["when"].isoformat(timespec="minutes"),
+                "notes": plan["notes"],
                 "source": f"{message.sender}: {message.subject}",
             }
         )
 
-    return created, created_keys
+    return proposed, proposed_keys
+
+
+def execute_planned_calendar_action(action: dict[str, Any], config: dict[str, Any]) -> dict[str, str]:
+    """Actually creates the Calendar event / Reminder for a single previously-proposed
+    action. Only call this after the user has explicitly confirmed it (see
+    MailBackgroundWorker.resolve_pending_calendar_action in background_tasks.py)."""
+    from datetime import datetime as _datetime
+
+    kind = str(action.get("kind") or "")
+    title = str(action.get("title") or "")
+    when = _datetime.fromisoformat(str(action.get("when")))
+    notes = str(action.get("notes") or "")
+
+    try:
+        if kind == "event":
+            create_calendar_event(
+                title,
+                when,
+                duration_minutes=int(config.get("auto_calendar_event_duration_minutes", 60)),
+                calendar_name=config.get("calendar_name"),
+                notes=notes,
+            )
+        else:
+            create_reminder(
+                title,
+                when,
+                list_name=config.get("reminders_list_name"),
+                notes=notes,
+            )
+    except CalendarAccessError as exc:
+        return {**action, "status": "error", "error": str(exc)}
+
+    return {**action, "status": "created"}
 
 
 def plan_calendar_action(message: MailMessage, config: dict[str, Any]) -> dict[str, Any] | None:

@@ -3,10 +3,20 @@ from __future__ import annotations
 import getpass
 import os
 import subprocess
+import sys
+import time
 from pathlib import Path
 from typing import Any
 
 from data_dir import data_root
+
+
+def _log_keyring_fallback(action: str, exc: Exception) -> None:
+    # Never a hard failure (there's a "security" CLI fallback right after each of
+    # these), but a real keychain error (locked keychain, revoked permission,
+    # corrupted keychain) was previously invisible - silently falling through made
+    # it indistinguishable from "keyring just isn't installed".
+    print(f"Keychain-Zugriff über 'keyring' fehlgeschlagen ({action}): {type(exc).__name__}", file=sys.stderr)
 
 
 SERVICE_NAME = "JarvisOS"
@@ -39,8 +49,8 @@ def set_secret(name: str, value: str) -> None:
         try:
             keyring.set_password(SERVICE_NAME, cleaned_name, cleaned_value)
             return
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_keyring_fallback("set_password", exc)
 
     _security_add_or_update(cleaned_name, cleaned_value)
 
@@ -53,8 +63,8 @@ def get_secret(name: str) -> str | None:
             value = keyring.get_password(SERVICE_NAME, cleaned_name)
             if value:
                 return value
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_keyring_fallback("get_password", exc)
 
     return _security_find(cleaned_name)
 
@@ -66,28 +76,48 @@ def delete_secret(name: str) -> bool:
     if keyring is not None:
         try:
             keyring.delete_password(SERVICE_NAME, cleaned_name)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_keyring_fallback("delete_password", exc)
     _security_delete(cleaned_name)
     return existed
 
 
+_OPENAI_KEY_CACHE: tuple[float, str | None] = (0.0, None)
+_OPENAI_KEY_CACHE_TTL_SECONDS = 5.0
+
+
 def set_openai_api_key(value: str) -> None:
+    global _OPENAI_KEY_CACHE
     set_secret(OPENAI_KEY_NAME, value)
+    _OPENAI_KEY_CACHE = (0.0, None)
 
 
 def get_openai_api_key() -> str | None:
+    """Every chat turn ends up calling this at least twice (ModelManager._load() and
+    the .provider property both read it, and both get reconstructed on most requests -
+    see llm_client.py's _refresh_model_state), and each call is a real Keychain/`security`
+    CLI round-trip. The key only ever changes via set/delete above (both invalidate this
+    cache immediately), so a few seconds of staleness is safe and removes that latency
+    from the hot chat path."""
+    global _OPENAI_KEY_CACHE
+    cached_at, cached_value = _OPENAI_KEY_CACHE
+    if time.monotonic() - cached_at < _OPENAI_KEY_CACHE_TTL_SECONDS:
+        return cached_value
+
     try:
         key = get_secret(OPENAI_KEY_NAME)
     except SecureStorageError:
         raise
-    if key:
-        return key
-    # Session-only fallback for advanced users. Do not store or log this value.
-    return os.getenv(OPENAI_KEY_NAME) or None
+    if not key:
+        # Session-only fallback for advanced users. Do not store or log this value.
+        key = os.getenv(OPENAI_KEY_NAME) or None
+    _OPENAI_KEY_CACHE = (time.monotonic(), key)
+    return key
 
 
 def delete_openai_api_key() -> bool:
+    global _OPENAI_KEY_CACHE
+    _OPENAI_KEY_CACHE = (0.0, None)
     return delete_secret(OPENAI_KEY_NAME)
 
 

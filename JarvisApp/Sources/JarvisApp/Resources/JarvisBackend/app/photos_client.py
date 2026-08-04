@@ -5,6 +5,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import threading
 from dataclasses import dataclass
@@ -315,6 +316,20 @@ class PhotoIndex:
     def analyze_with_openai_vision(self, max_items: int | None = None) -> tuple[int, int]:
         if not bool(self.config.get("openai_photo_vision_enabled", False)):
             raise PhotosAccessError("OpenAI-Fotoanalyse ist deaktiviert. Aktiviere openai_photo_vision_enabled in config.json.")
+
+        # openai_photo_vision_enabled alone was previously enough to start sending photo
+        # previews to OpenAI - no explicit consent moment, unlike every other
+        # data-leaves-the-device path in this codebase, which is gated behind the
+        # Datenschutz permission system (see PERMISSION_DEFINITIONS["external_api"]).
+        # Same gate here, so flipping the config flag alone can no longer trigger it.
+        from permission_manager import PermissionManager
+
+        if not PermissionManager().is_allowed("external_api"):
+            raise PhotosAccessError(
+                "Für die OpenAI-Fotoanalyse fehlt noch deine Zustimmung. Aktiviere die "
+                "Berechtigung 'Externe APIs' im Datenschutz-Bereich - erst danach verlassen "
+                "Foto-Vorschaubilder dein Gerät."
+            )
 
         try:
             from openai import OpenAI
@@ -832,8 +847,11 @@ class PhotoIndex:
                 text=True,
                 timeout=20,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            # Not fatal (codesign below can still succeed without this), but a failure
+            # here used to vanish with no trace - the user would just see a generic
+            # Photos permission error later with no way to connect it back to this step.
+            print(f"Photos-Helper: xattr -cr fehlgeschlagen: {type(exc).__name__}", file=sys.stderr)
 
         commands = (
             [
@@ -864,8 +882,8 @@ class PhotoIndex:
                     text=True,
                     timeout=30,
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"Photos-Helper: codesign fehlgeschlagen: {type(exc).__name__}", file=sys.stderr)
 
     def _register_helper_bundle(self):
         commands = (
@@ -883,8 +901,8 @@ class PhotoIndex:
                     text=True,
                     timeout=10,
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"Photos-Helper: lsregister fehlgeschlagen: {type(exc).__name__}", file=sys.stderr)
 
     def _reset_permission(self) -> tuple[bool, str]:
         self._ensure_helper()
