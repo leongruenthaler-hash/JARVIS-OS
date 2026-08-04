@@ -93,17 +93,18 @@ def create_reminder(
 def list_upcoming_calendar_items(limit: int = 5, until: datetime | None = None) -> dict[str, list[dict[str, str]]]:
     limit = max(1, int(limit))
     until_setup = ""
-    whose_until = ""
+    until_check = ""
     if until is not None:
         until_literal = _escape_applescript_text(_german_date_literal(until))
         until_setup = f'\n    set untilDate to date "{until_literal}"'
-        whose_until = " and start date < untilDate"
+        until_check = " and startDate is less than untilDate"
 
-    # A plain "every event of calendarRef" makes Calendar.app materialize every event
-    # ever created in that calendar (years of history) before the loop below gets a
-    # chance to early-return via maxItems - on a calendar with a long history this can
-    # take a very long time or hit the caller's timeout. "whose start date > nowDate"
-    # lets Calendar.app do that filtering itself, so only upcoming events are pulled.
+    # NOTE: an earlier version of this tried "every event of calendarRef whose start
+    # date > nowDate" to avoid materializing a calendar's full event history up front.
+    # Reverted - Calendar.app's AppleScript "whose" filtering on events is unreliable
+    # (confirmed: it silently returned zero events, breaking "welche Termine habe ich
+    # heute" entirely) rather than a real speed win. Back to the plain procedural filter,
+    # which is slower on calendars with long history but actually returns events.
     script = f"""
     set fieldSeparator to ASCII character 31
     set recordSeparator to ASCII character 30
@@ -114,13 +115,14 @@ def list_upcoming_calendar_items(limit: int = 5, until: datetime | None = None) 
 
     tell application "Calendar"
         repeat with calendarRef in calendars
-            if itemCount is greater than or equal to maxItems then return outputText
-            set upcomingEvents to (every event of calendarRef whose start date > nowDate{whose_until})
-            repeat with eventRef in upcomingEvents
+            repeat with eventRef in (every event of calendarRef)
                 if itemCount is greater than or equal to maxItems then return outputText
                 try
-                    set outputText to outputText & name of calendarRef as string & fieldSeparator & summary of eventRef as string & fieldSeparator & start date of eventRef as string & fieldSeparator & end date of eventRef as string & recordSeparator
-                    set itemCount to itemCount + 1
+                    set startDate to start date of eventRef
+                    if startDate is greater than nowDate{until_check} then
+                        set outputText to outputText & name of calendarRef as string & fieldSeparator & summary of eventRef as string & fieldSeparator & startDate as string & fieldSeparator & end date of eventRef as string & recordSeparator
+                        set itemCount to itemCount + 1
+                    end if
                 end try
             end repeat
         end repeat
