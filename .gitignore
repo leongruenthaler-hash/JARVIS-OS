@@ -6,6 +6,7 @@ __pycache__/
 
 # Environment / secrets
 .env
+local_server.token
 
 # macOS
 .DS_Store

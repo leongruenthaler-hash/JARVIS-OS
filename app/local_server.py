@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hmac
 import json
+import secrets
 import sys
 import threading
 import time
@@ -17,6 +19,7 @@ import numpy as np
 from audio_stream import StreamingAudioListener, warm_audio_pipeline
 from background_tasks import MailBackgroundWorker
 from calendar_client import list_open_reminders, list_upcoming_calendar_items
+from data_dir import data_root
 from fast_intent_router import FastIntentRouter
 from core.conversation_manager import ConversationManager
 from core.daily_briefing import build_daily_briefing
@@ -40,6 +43,27 @@ from secure_storage import (
 )
 from settings import load_config, save_config
 from stt_engines import create_stt_engine
+
+# Shared secret between this process and the Swift app, required on every request except
+# /api/health. Without it, any webpage open in the user's browser could otherwise send
+# blind requests to 127.0.0.1:8765 (grant itself Mail/Calendar/Photos access, swap the
+# OpenAI key, delete the privacy log, move indexed files, ...) since a local HTTP server
+# has no other way to distinguish "the Jarvis app" from "any other local process/page".
+# Regenerated every process start and persisted (0600) so the Swift app can read it back.
+AUTH_TOKEN: str | None = None
+AUTH_TOKEN_FILENAME = "local_server.token"
+
+
+def _generate_auth_token() -> str:
+    global AUTH_TOKEN
+    AUTH_TOKEN = secrets.token_hex(32)
+    token_path = data_root() / AUTH_TOKEN_FILENAME
+    try:
+        token_path.write_text(AUTH_TOKEN, encoding="utf-8")
+        token_path.chmod(0o600)
+    except OSError as exc:
+        print(f"Warning: could not persist local server auth token: {exc}", file=sys.stderr)
+    return AUTH_TOKEN
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG = load_config()
@@ -627,7 +651,10 @@ class JarvisLocalServer:
                 try:
                     for _path in self._iter_file_index_paths(root):
                         count += 1
-                except Exception:
+                except Exception as exc:
+                    # Previously silent: a real permission/IO error here looked
+                    # identical to "this folder is genuinely empty" (count stayed 0).
+                    print(f"Datei-Index: Zählung für {root} fehlgeschlagen: {_safe_error(exc)}", file=sys.stderr)
                     count = 0
                 total_items += count
                 root_summaries.append({"name": name, "path": str(root), "count": count})
@@ -795,6 +822,17 @@ class JarvisLocalServer:
             self.mail_worker = MailBackgroundWorker(self.config)
             self.mail_worker.start()
         return self.mail_worker
+
+    def pending_calendar_actions(self) -> dict[str, Any]:
+        return {"actions": self._ensure_mail_worker().pending_calendar_actions()}
+
+    def resolve_calendar_action(self, payload: dict[str, Any]) -> dict[str, Any]:
+        action_key = str(payload.get("action_key") or "")
+        if not action_key:
+            return {"ok": False, "error": "missing_action_key"}
+        return self._ensure_mail_worker().resolve_pending_calendar_action(
+            action_key, approve=bool(payload.get("approve"))
+        )
 
     def _mail_background_status(self) -> dict[str, Any]:
         worker = self._ensure_mail_worker()
@@ -1692,8 +1730,10 @@ class JarvisLocalServer:
         if hasattr(core, "record_exchange"):
             try:
                 core.record_exchange(self.memory, question, str(answer))
-            except Exception:
-                pass
+            except Exception as exc:
+                # Previously silent: conversation history would just quietly stop
+                # growing with no error surfaced anywhere.
+                print(f"Gesprächsverlauf konnte nicht gespeichert werden: {_safe_error(exc)}", file=sys.stderr)
 
     def _handle_fast_commands(self, text: str) -> str | None:
         normalized = text.lower()
@@ -1794,8 +1834,15 @@ SERVER = JarvisLocalServer()
 class Handler(BaseHTTPRequestHandler):
     server_version = "JarvisLocalServer/1.0"
 
+    def _authorized(self) -> bool:
+        token = self.headers.get("X-Jarvis-Token", "")
+        return bool(AUTH_TOKEN) and hmac.compare_digest(token, AUTH_TOKEN)
+
     def do_GET(self):
         path = urlparse(self.path).path
+        if path != "/api/health" and not self._authorized():
+            self._json(401, {"error": "unauthorized"})
+            return
         try:
             if path == "/api/health":
                 self._json(200, SERVER.health())
@@ -1819,6 +1866,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, SERVER.music_overview())
             elif path == "/api/conversation-history":
                 self._json(200, SERVER.conversation_history())
+            elif path == "/api/mail/pending-calendar-actions":
+                self._json(200, SERVER.pending_calendar_actions())
             else:
                 self._json(404, {"error": "not_found"})
         except Exception as exc:
@@ -1826,6 +1875,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if not self._authorized():
+            self._json(401, {"error": "unauthorized"})
+            return
         payload = self._read_json()
         try:
             if path == "/api/chat":
@@ -1870,6 +1922,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, SERVER.start_mail_folder_scan())
             elif path == "/api/mail/background-start":
                 self._json(200, SERVER.start_mail_background_scan())
+            elif path == "/api/mail/calendar-actions/resolve":
+                self._json(200, SERVER.resolve_calendar_action(payload))
             elif path == "/api/photos/scan":
                 self._json(200, SERVER.start_photo_index_scan())
             elif path == "/api/photos/permission":
@@ -2002,6 +2056,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def run(host: str = "127.0.0.1", port: int = 8765):
+    _generate_auth_token()
     httpd = ThreadingHTTPServer((host, port), Handler)
     print(f"Jarvis Local Server läuft auf http://{host}:{port}")
     httpd.serve_forever()

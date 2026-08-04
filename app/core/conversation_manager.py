@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -64,7 +65,16 @@ class ConversationManager:
             }
             for turn in payload[-self.max_turns :]
         ]
-        self.path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        # Atomic write (tmp + rename) so a crash mid-write can't leave a truncated,
+        # unparseable conversation.json behind; 0600 since this is unencrypted chat
+        # history and the only thing gating it is filesystem permissions.
+        temp_path = self.path.with_suffix(self.path.suffix + ".tmp")
+        temp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        try:
+            os.chmod(temp_path, 0o600)
+        except OSError:
+            pass
+        temp_path.replace(self.path)
 
     def append(self, role: str, content: str, **metadata: Any) -> ConversationTurn:
         turn = ConversationTurn(role=role, content=content, metadata=dict(metadata))

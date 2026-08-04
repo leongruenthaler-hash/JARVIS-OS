@@ -6,3 +6,4 @@ openai
 edge-tts
 miniaudio
 torch
+keyring

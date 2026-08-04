@@ -1,7 +1,40 @@
 import Foundation
 
+/// Every request carries a per-process shared secret (`X-Jarvis-Token`) that the Python
+/// backend generates on startup and writes to a 0600 file in the same Application Support
+/// directory the app already uses for venv/memory/config. Without this, any webpage open
+/// in the user's browser could blindly POST to 127.0.0.1:8765 (permissions, the OpenAI key,
+/// mail/calendar actions, privacy-log deletion, ...) since the server has no other way to
+/// tell "the Mac app" apart from "any local process/page". The token is unknown to a remote
+/// attacker and isn't guessable, so unauthenticated requests are simply rejected (401).
 struct JarvisAPIClient {
     var baseURL = URL(string: "http://127.0.0.1:8765")!
+
+    private static var cachedToken: String?
+
+    private static var tokenFilePath: String {
+        let base = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
+        let identifier = Bundle.main.bundleIdentifier ?? "com.leon.jarvis"
+        return base.appendingPathComponent(identifier).appendingPathComponent("local_server.token").path
+    }
+
+    /// Reads the token written by `local_server.py`'s `run()`. Cached in memory so normal
+    /// requests don't hit disk each time; `forceRefresh` re-reads after a 401, which happens
+    /// whenever the Python process has (re)started since the token was cached.
+    private func loadToken(forceRefresh: Bool = false) -> String? {
+        if !forceRefresh, let cached = Self.cachedToken {
+            return cached
+        }
+        guard let data = FileManager.default.contents(atPath: Self.tokenFilePath),
+              let token = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !token.isEmpty else {
+            return nil
+        }
+        Self.cachedToken = token
+        return token
+    }
 
     func health() async throws -> ServerHealth {
         try await get("/api/health")
@@ -84,6 +117,21 @@ struct JarvisAPIClient {
 
     func startMailBackgroundScan() async throws -> ScanProgress {
         try await post("/api/mail/background-start", body: EmptyBody())
+    }
+
+    func pendingCalendarActions() async throws -> [PendingCalendarAction] {
+        let response: PendingCalendarActionsResponse = try await get("/api/mail/pending-calendar-actions")
+        return response.actions
+    }
+
+    @discardableResult
+    func resolveCalendarAction(actionKey: String, approve: Bool) async throws -> Bool {
+        struct Request: Encodable { let actionKey: String; let approve: Bool
+            enum CodingKeys: String, CodingKey { case actionKey = "action_key"; case approve }
+        }
+        struct Response: Decodable { let ok: Bool }
+        let response: Response = try await post("/api/mail/calendar-actions/resolve", body: Request(actionKey: actionKey, approve: approve))
+        return response.ok
     }
 
     func startPhotoIndexScan() async throws -> ScanProgress {
@@ -256,17 +304,26 @@ struct JarvisAPIClient {
         return response.message
     }
 
-    private func get<T: Decodable>(_ path: String) async throws -> T {
-        let url = makeURL(path)
-        let (data, response) = try await URLSession.shared.data(from: url)
+    private func get<T: Decodable>(_ path: String, retryingAuth: Bool = true) async throws -> T {
+        var request = URLRequest(url: makeURL(path))
+        if let token = loadToken() {
+            request.setValue(token, forHTTPHeaderField: "X-Jarvis-Token")
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        if retryingAuth, (response as? HTTPURLResponse)?.statusCode == 401, loadToken(forceRefresh: true) != nil {
+            return try await get(path, retryingAuth: false)
+        }
         try validate(response, data: data)
         return try JSONDecoder().decode(T.self, from: data)
     }
 
-    private func post<T: Decodable, B: Encodable>(_ path: String, body: B, timeoutInterval: TimeInterval? = nil) async throws -> T {
+    private func post<T: Decodable, B: Encodable>(_ path: String, body: B, timeoutInterval: TimeInterval? = nil, retryingAuth: Bool = true) async throws -> T {
         var request = try makePostRequest(path, body: body)
         if let timeoutInterval { request.timeoutInterval = timeoutInterval }
         let (data, response) = try await URLSession.shared.data(for: request)
+        if retryingAuth, (response as? HTTPURLResponse)?.statusCode == 401, loadToken(forceRefresh: true) != nil {
+            return try await post(path, body: body, timeoutInterval: timeoutInterval, retryingAuth: false)
+        }
         try validate(response, data: data)
         return try JSONDecoder().decode(T.self, from: data)
     }
@@ -276,6 +333,9 @@ struct JarvisAPIClient {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let token = loadToken() {
+            request.setValue(token, forHTTPHeaderField: "X-Jarvis-Token")
+        }
         request.httpBody = try JSONEncoder().encode(body)
         return request
     }

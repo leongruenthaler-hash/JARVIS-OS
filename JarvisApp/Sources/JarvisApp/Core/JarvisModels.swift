@@ -117,6 +117,31 @@ struct PermissionInfo: Codable, Equatable, Identifiable {
     }
 }
 
+/// A Calendar event / Reminder the backend detected in a mail (invoice due date, meeting
+/// invite, deadline, ...) but has NOT created yet - inbound mail is untrusted content, so
+/// these always need an explicit confirm/dismiss via `resolveCalendarAction` before
+/// anything is written to Calendar.app. See mail_calendar_actions.py.
+struct PendingCalendarAction: Codable, Identifiable, Equatable {
+    var id: String { actionKey }
+    let actionKey: String
+    let kind: String
+    let title: String
+    let when: String
+    let source: String
+
+    enum CodingKeys: String, CodingKey {
+        case actionKey = "action_key"
+        case kind
+        case title
+        case when
+        case source
+    }
+}
+
+struct PendingCalendarActionsResponse: Codable {
+    let actions: [PendingCalendarAction]
+}
+
 struct FileSearchPayload: Codable, Equatable {
     let query: String
     let message: String
