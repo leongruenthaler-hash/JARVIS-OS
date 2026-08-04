@@ -120,5 +120,16 @@
     "ollama_num_ctx": 1024,
     "ollama_num_predict": 48,
     "phi4_mini_num_predict": 112,
-    "ollama_temperature": 0.3
+    "ollama_temperature": 0.3,
+    "active_context_pack": "",
+    "context_packs": {
+        "persoenlich": {
+            "categories": ["Profil", "Vorlieben"],
+            "tags": []
+        },
+        "jarvis-projekt": {
+            "categories": ["Organisation", "Dateien"],
+            "tags": ["jarvis-projekt"]
+        }
+    }
 }

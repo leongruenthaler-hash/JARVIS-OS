@@ -12,7 +12,7 @@ import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse
 
 import numpy as np
 
@@ -189,6 +189,60 @@ class JarvisLocalServer:
                 for turn in turns
             ],
         }
+
+    def list_memory_facts(self, query: dict[str, Any]) -> dict[str, Any]:
+        """Memory management view (Phase B). Deliberately not gated behind the
+        "memory" permission the way auto-storage is - that permission controls
+        whether Jarvis may keep *writing* new facts and conversation history, not
+        whether the user may see/edit/delete what's already stored. Hiding a
+        user's own data behind a toggle for storing *more* of it would be the
+        wrong default."""
+        search = str(query.get("search") or "").strip()
+        category = str(query.get("category") or "").strip()
+        include_expired = bool(query.get("include_expired", True))
+        include_rejected = bool(query.get("include_rejected", True))
+        limit = max(1, min(int(query.get("limit") or 200), 500))
+
+        if search:
+            facts = self.memory.search_facts(search)
+        else:
+            facts = self.memory.all_facts(include_expired=include_expired, include_rejected=include_rejected)
+
+        if category:
+            facts = [f for f in facts if str(f.get("category") or "") == category]
+
+        facts.sort(key=lambda f: str(f.get("updated_at") or f.get("created_at") or ""), reverse=True)
+        return {"facts": facts[:limit], "total": len(facts)}
+
+    def update_memory_fact(self, payload: dict[str, Any]) -> dict[str, Any]:
+        fact_id = str(payload.get("id") or "")
+        if not fact_id:
+            return {"ok": False, "error": "missing_id"}
+        fields = {
+            key: value
+            for key, value in payload.items()
+            if key in {"content", "category", "scope", "sensitivity", "retention_policy", "expires_at", "tags", "status"}
+        }
+        ok = self.memory.update_fact(fact_id, **fields)
+        return {"ok": ok, "fact": self.memory.get_fact_by_id(fact_id) if ok else None}
+
+    def confirm_memory_fact(self, payload: dict[str, Any]) -> dict[str, Any]:
+        fact_id = str(payload.get("id") or "")
+        if not fact_id:
+            return {"ok": False, "error": "missing_id"}
+        return {"ok": self.memory.confirm_fact(fact_id)}
+
+    def reject_memory_fact(self, payload: dict[str, Any]) -> dict[str, Any]:
+        fact_id = str(payload.get("id") or "")
+        if not fact_id:
+            return {"ok": False, "error": "missing_id"}
+        return {"ok": self.memory.reject_fact(fact_id)}
+
+    def delete_memory_fact(self, payload: dict[str, Any]) -> dict[str, Any]:
+        fact_id = str(payload.get("id") or "")
+        if not fact_id:
+            return {"ok": False, "error": "missing_id"}
+        return {"ok": self.memory.delete_fact_by_id(fact_id)}
 
     def health(self) -> dict[str, Any]:
         model_status = self.models.status()
@@ -1868,6 +1922,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, SERVER.conversation_history())
             elif path == "/api/mail/pending-calendar-actions":
                 self._json(200, SERVER.pending_calendar_actions())
+            elif path == "/api/memory/facts":
+                query_params = dict(parse_qsl(urlparse(self.path).query))
+                self._json(200, SERVER.list_memory_facts(query_params))
             else:
                 self._json(404, {"error": "not_found"})
         except Exception as exc:
@@ -1924,6 +1981,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, SERVER.start_mail_background_scan())
             elif path == "/api/mail/calendar-actions/resolve":
                 self._json(200, SERVER.resolve_calendar_action(payload))
+            elif path == "/api/memory/facts/update":
+                self._json(200, SERVER.update_memory_fact(payload))
+            elif path == "/api/memory/facts/confirm":
+                self._json(200, SERVER.confirm_memory_fact(payload))
+            elif path == "/api/memory/facts/reject":
+                self._json(200, SERVER.reject_memory_fact(payload))
+            elif path == "/api/memory/facts/delete":
+                self._json(200, SERVER.delete_memory_fact(payload))
             elif path == "/api/photos/scan":
                 self._json(200, SERVER.start_photo_index_scan())
             elif path == "/api/photos/permission":

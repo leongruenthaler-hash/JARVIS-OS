@@ -19,6 +19,9 @@ final class AppState: ObservableObject {
     @Published var modelStatus = ModelStatus()
     @Published var privacySummary = "Datenschutzstatus wird geladen ..."
     @Published var permissions: [String: PermissionInfo] = [:]
+    @Published var memoryFacts: [MemoryFact] = []
+    @Published var memoryFactsTotal = 0
+    @Published var memoryIsLoading = false
     @Published var mailResult = "Noch keine Mail-Aktion ausgeführt."
     @Published var mailIsLoading = false
     @Published var mailScanProgress = ScanProgress()
@@ -1160,6 +1163,61 @@ final class AppState: ObservableObject {
             await refreshStatus(startIfOffline: false)
         } catch {
             lastError = "Logs konnten nicht gelöscht werden."
+        }
+    }
+
+    func refreshMemoryFacts(search: String = "", category: String = "") async {
+        await ensureServerConnected()
+        memoryIsLoading = true
+        defer { memoryIsLoading = false }
+        do {
+            let response = try await serverController.memoryFacts(search: search, category: category)
+            memoryFacts = response.facts
+            memoryFactsTotal = response.total
+            lastError = nil
+        } catch {
+            lastError = "Erinnerungen konnten nicht geladen werden."
+        }
+    }
+
+    func updateMemoryFact(_ fact: MemoryFact, fields: [String: String]) async {
+        await ensureServerConnected()
+        do {
+            try await serverController.updateMemoryFact(id: fact.id, fields: fields)
+            await refreshMemoryFacts()
+        } catch {
+            lastError = "Erinnerung konnte nicht geändert werden."
+        }
+    }
+
+    func confirmMemoryFact(_ fact: MemoryFact) async {
+        await ensureServerConnected()
+        do {
+            try await serverController.confirmMemoryFact(id: fact.id)
+            await refreshMemoryFacts()
+        } catch {
+            lastError = "Erinnerung konnte nicht bestätigt werden."
+        }
+    }
+
+    func rejectMemoryFact(_ fact: MemoryFact) async {
+        await ensureServerConnected()
+        do {
+            try await serverController.rejectMemoryFact(id: fact.id)
+            await refreshMemoryFacts()
+        } catch {
+            lastError = "Erinnerung konnte nicht abgelehnt werden."
+        }
+    }
+
+    func deleteMemoryFact(_ fact: MemoryFact) async {
+        await ensureServerConnected()
+        do {
+            try await serverController.deleteMemoryFact(id: fact.id)
+            memoryFacts.removeAll { $0.id == fact.id }
+            memoryFactsTotal = max(0, memoryFactsTotal - 1)
+        } catch {
+            lastError = "Erinnerung konnte nicht gelöscht werden."
         }
     }
 

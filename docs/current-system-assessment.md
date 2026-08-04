@@ -144,3 +144,19 @@ Für Phase B (Context/Memory) sind die relevanten Startpunkte:
 Dieser Plan wird nicht automatisch ausgeführt – Phase B beginnt erst nach
 Rückmeldung, da sie echte neue Funktionalität einführt (kein reiner
 Analyse-/Stabilisierungsschritt mehr).
+
+## 9. Phase-B-Status (2026-08-04)
+
+Phase B (Context/Memory) ist umgesetzt: strukturiertes Fakten-Schema mit
+Sensibilität/Ablauf/Status in `app/memory.py`, neue `ContextEngine`
+(`app/core/context_engine.py`) ersetzt die alte, rein rekenz-basierte
+`build_memory_summary()`, authentifizierte Memory-CRUD-Endpunkte in
+`local_server.py`, eine neue Gedächtnis-Ansicht in der SwiftUI-App
+(`MemoryView.swift`, erreichbar über Seitenleiste und Dashboard), Context
+Packs über `config.json`, 22 automatisierte Unit-Tests (`tests/`, `pytest`)
+für Memory-Schema und Context Engine. Details: `docs/context-and-memory.md`.
+
+Bewusst nicht umgesetzt: Umstellung auf eine echte Datenbank, Token-basiertes
+statt zeichenbasiertes Kontextbudget, automatische Löschung abgelaufener
+Fakten (nur Ausblendung aus dem Kontext), Beziehungsgraph über
+`related_entities`. Siehe `docs/context-and-memory.md`, letzter Abschnitt.

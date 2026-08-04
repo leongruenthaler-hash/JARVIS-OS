@@ -65,6 +65,7 @@ from mail_client import (
 )
 from mail_calendar_actions import _extract_datetime
 from core.action_engine import ACTION_ENGINE, ActionProposal
+from core.context_engine import CONTEXT_ENGINE, active_context_pack
 from core.conversation_manager import ConversationManager
 from core.daily_briefing import build_daily_briefing
 from core.memory_system import JarvisMemorySystem
@@ -164,6 +165,7 @@ AUTO_MEMORY_ENABLED = bool(CONFIG.get("auto_memory_enabled", True))
 AUTO_MEMORY_MAX_FACTS = int(CONFIG.get("auto_memory_max_facts", 120))
 AUTO_MEMORY_LLM_EXTRACTION_ENABLED = bool(CONFIG.get("auto_memory_llm_extraction_enabled", False))
 MEMORY_SUMMARY_MAX_FACTS = int(CONFIG.get("memory_summary_max_facts", 10))
+CONTEXT_ENGINE.max_facts = MEMORY_SUMMARY_MAX_FACTS
 PERFORMANCE_LOG = bool(CONFIG.get("performance_log", True))
 OPENAI_MAX_OUTPUT_TOKENS = int(CONFIG.get("openai_max_output_tokens", 180))
 MAIL_SUMMARY_MAX_OUTPUT_TOKENS = int(CONFIG.get("mail_summary_max_output_tokens", 320))
@@ -467,7 +469,6 @@ def build_input(
     compact: bool = False,
 ) -> list[dict[str, str]]:
     personality = memory.get("personality") or {}
-    long_memory = memory.get("long_memory") or {}
     settings = memory.get("settings") or {}
     if bool(CONFIG.get("privacy_store_conversation", False)):
         try:
@@ -480,7 +481,12 @@ def build_input(
     assistant_name = fresh_profile.get("assistant_name", "Jarvis")
     creator_name = fresh_profile.get("creator_name", "Leon")
     user_salutation = fresh_profile.get("user_salutation", "sir")
-    memory_summary = build_memory_summary(long_memory)
+    # Context Engine picks facts relevant to user_text first, then fills up to the
+    # budget with the most recent ones - replaces the old build_memory_summary(), which
+    # only ever returned the N most-recently-updated facts regardless of the question.
+    memory_summary = CONTEXT_ENGINE.build_memory_summary(
+        memory, user_text, context_pack=active_context_pack(CONFIG)
+    )
     temporary_style = get_temporary_style_instruction(settings)
 
     if compact:
@@ -560,27 +566,6 @@ def route_fast_intent(question: str) -> str | None:
         return f"Alles läuft, {configured_user_address()}."
 
     return None
-
-
-def build_memory_summary(long_memory: dict, max_facts: int = MEMORY_SUMMARY_MAX_FACTS) -> str:
-    entries: list[tuple[str, str]] = []
-
-    for values in long_memory.values():
-        if isinstance(values, dict):
-            for key, value in values.items():
-                entries.append(("", f"{key}: {value}"))
-        elif isinstance(values, list):
-            for item in values:
-                if isinstance(item, dict) and item.get("content"):
-                    sort_key = str(item.get("updated_at") or item.get("created_at") or "")
-                    entries.append((sort_key, str(item["content"])))
-                elif item:
-                    entries.append(("", str(item)))
-
-    entries.sort(key=lambda pair: pair[0], reverse=True)
-    parts = [content for _, content in entries[:max_facts]]
-    summary = "; ".join(parts) if parts else "Keine wichtigen Langzeitnotizen."
-    return summary[:600]
 
 
 def today_key() -> str:

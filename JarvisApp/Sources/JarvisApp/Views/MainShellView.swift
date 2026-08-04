@@ -5,7 +5,7 @@ struct MainShellView: View {
     @Environment(\.jarvisTheme) private var theme
 
     private let assistantSections: [JarvisSection] = [.home, .actions, .chat, .history]
-    private let workspaceSections: [JarvisSection] = [.mail, .calendar, .reminders, .files, .photos]
+    private let workspaceSections: [JarvisSection] = [.mail, .calendar, .reminders, .files, .photos, .memory]
     private let systemSections: [JarvisSection] = [.privacy, .models, .settings]
 
     var body: some View {

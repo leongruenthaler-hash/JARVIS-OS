@@ -13,6 +13,7 @@ enum JarvisSection: String, CaseIterable, Identifiable {
     case reminders = "Erinnerungen"
     case files = "Dateien"
     case photos = "Fotos"
+    case memory = "Gedächtnis"
     case privacy = "Datenschutz"
     case models = "Modelle"
     case licenses = "Lizenzen"
@@ -31,6 +32,7 @@ enum JarvisSection: String, CaseIterable, Identifiable {
         case .reminders: "checklist"
         case .files: "folder"
         case .photos: "photo.on.rectangle"
+        case .memory: "brain.head.profile"
         case .privacy: "hand.raised"
         case .models: "cpu"
         case .licenses: "doc.text.magnifyingglass"
@@ -140,6 +142,44 @@ struct PendingCalendarAction: Codable, Identifiable, Equatable {
 
 struct PendingCalendarActionsResponse: Codable {
     let actions: [PendingCalendarAction]
+}
+
+/// A stored long-term fact (Phase B / Context Engine, see app/memory.py). Fields beyond
+/// content/category existed nowhere before Phase B - every fact now carries provenance
+/// (source_type), a sensitivity level, and an optional expiry, so the Memory view can
+/// show and let the user correct all of it instead of a flat, opaque fact list.
+struct MemoryFact: Codable, Identifiable, Equatable {
+    let id: String
+    var content: String
+    var category: String
+    var scope: String
+    var sourceType: String
+    var sensitivity: String
+    var confidence: Double
+    var retentionPolicy: String
+    var expiresAt: String?
+    var userConfirmed: Bool
+    var status: String
+    var tags: [String]
+    let createdAt: String
+    let updatedAt: String
+    let lastUsedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, content, category, scope, sensitivity, confidence, status, tags
+        case sourceType = "source_type"
+        case retentionPolicy = "retention_policy"
+        case expiresAt = "expires_at"
+        case userConfirmed = "user_confirmed"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+        case lastUsedAt = "last_used_at"
+    }
+}
+
+struct MemoryFactsResponse: Codable {
+    let facts: [MemoryFact]
+    let total: Int
 }
 
 struct FileSearchPayload: Codable, Equatable {

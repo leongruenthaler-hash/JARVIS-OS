@@ -57,7 +57,10 @@ TODO_COMPLIANCE: E-Mail-Senden ist aktuell nicht implementiert. Falls es spaeter
 
 ## Speicherung
 
-- `memory/long_memory.json`: explizit erlaubte Langzeiterinnerungen.
+- `memory/long_memory.json`: explizit erlaubte Langzeiterinnerungen. Seit Phase B
+  (siehe `docs/context-and-memory.md`) traegt jeder Fakt zusaetzlich `sensitivity`,
+  `retention_policy`, `expires_at`, `status` und `user_confirmed` - einsehbar und
+  aenderbar in der Gedaechtnis-Ansicht der App, nicht nur in der Rohdatei.
 - `memory/conversation.json`: Gespraechsverlauf nur, wenn `privacy_store_conversation` aktiv ist und Permission `memory` erlaubt wurde.
 - `memory/background_mail_cache.json`: Hintergrund-Mailcache, nur bei erlaubtem Mailzugriff.
 - `memory/photos_index.json`: lokaler Fotoindex, nur bei erlaubtem Fotozugriff.

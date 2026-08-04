@@ -304,6 +304,49 @@ struct JarvisAPIClient {
         return response.message
     }
 
+    func memoryFacts(search: String = "", category: String = "") async throws -> MemoryFactsResponse {
+        var components = URLComponents()
+        var items: [URLQueryItem] = []
+        if !search.isEmpty { items.append(URLQueryItem(name: "search", value: search)) }
+        if !category.isEmpty { items.append(URLQueryItem(name: "category", value: category)) }
+        components.queryItems = items.isEmpty ? nil : items
+        let query = components.percentEncodedQuery.map { "?\($0)" } ?? ""
+        return try await get("/api/memory/facts" + query)
+    }
+
+    @discardableResult
+    func updateMemoryFact(id: String, fields: [String: String]) async throws -> Bool {
+        struct Response: Decodable { let ok: Bool }
+        var body: [String: String] = fields
+        body["id"] = id
+        let response: Response = try await post("/api/memory/facts/update", body: body)
+        return response.ok
+    }
+
+    @discardableResult
+    func confirmMemoryFact(id: String) async throws -> Bool {
+        struct Request: Encodable { let id: String }
+        struct Response: Decodable { let ok: Bool }
+        let response: Response = try await post("/api/memory/facts/confirm", body: Request(id: id))
+        return response.ok
+    }
+
+    @discardableResult
+    func rejectMemoryFact(id: String) async throws -> Bool {
+        struct Request: Encodable { let id: String }
+        struct Response: Decodable { let ok: Bool }
+        let response: Response = try await post("/api/memory/facts/reject", body: Request(id: id))
+        return response.ok
+    }
+
+    @discardableResult
+    func deleteMemoryFact(id: String) async throws -> Bool {
+        struct Request: Encodable { let id: String }
+        struct Response: Decodable { let ok: Bool }
+        let response: Response = try await post("/api/memory/facts/delete", body: Request(id: id))
+        return response.ok
+    }
+
     private func get<T: Decodable>(_ path: String, retryingAuth: Bool = true) async throws -> T {
         var request = URLRequest(url: makeURL(path))
         if let token = loadToken() {

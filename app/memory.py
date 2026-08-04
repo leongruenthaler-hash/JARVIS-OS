@@ -3,11 +3,100 @@ from __future__ import annotations
 import json
 import os
 import threading
+import uuid
 from pathlib import Path
 from typing import Any
 from datetime import datetime
 
 from data_dir import data_root
+
+# Structured fact metadata (Phase B / Context Engine). See docs/context-and-memory.md.
+SENSITIVITY_LEVELS = ("normal", "personal", "confidential", "highly-sensitive")
+FACT_STATUSES = ("confirmed", "pending_confirmation", "rejected")
+RETENTION_POLICIES = ("until_deleted", "session", "expires")
+
+
+def _new_fact_id() -> str:
+    return uuid.uuid4().hex[:12]
+
+
+def _new_fact_entry(
+    content: str,
+    category: str,
+    source: str,
+    *,
+    scope: str = "private",
+    sensitivity: str = "normal",
+    confidence: float = 1.0,
+    retention_policy: str = "until_deleted",
+    expires_at: str | None = None,
+    tags: list[str] | None = None,
+    status: str = "confirmed",
+    user_confirmed: bool = True,
+    source_reference: str | None = None,
+) -> dict[str, Any]:
+    now = datetime.now().isoformat(timespec="seconds")
+    return {
+        "id": _new_fact_id(),
+        "content": content,
+        "category": category,
+        "scope": scope,
+        "source_type": source,
+        "source_reference": source_reference,
+        "created_at": now,
+        "updated_at": now,
+        "last_used_at": None,
+        "confidence": confidence,
+        "sensitivity": sensitivity if sensitivity in SENSITIVITY_LEVELS else "normal",
+        "retention_policy": retention_policy if retention_policy in RETENTION_POLICIES else "until_deleted",
+        "expires_at": expires_at,
+        "user_confirmed": user_confirmed,
+        "status": status if status in FACT_STATUSES else "confirmed",
+        "tags": list(tags or []),
+        "related_entities": [],
+    }
+
+
+def _ensure_fact_fields(entry: dict[str, Any], category: str) -> dict[str, Any]:
+    """Lazily upgrades a fact entry written before Phase B (or by an older Memory
+    Engine version) to the current schema, in place. Existing fields are never
+    overwritten - only missing ones get a safe default derived from what's already
+    there, so nothing already stored is reinterpreted or lost."""
+    if not isinstance(entry, dict):
+        return entry
+    entry.setdefault("id", _new_fact_id())
+    entry.setdefault("category", category)
+    entry.setdefault("scope", "private")
+    entry.setdefault("source_type", entry.get("source", "unknown"))
+    entry.setdefault("source_reference", None)
+    fallback_time = entry.get("updated_at") or entry.get("created_at") or datetime.now().isoformat(timespec="seconds")
+    entry.setdefault("created_at", fallback_time)
+    entry.setdefault("updated_at", fallback_time)
+    entry.setdefault("last_used_at", None)
+    entry.setdefault("confidence", 1.0)
+    if entry.get("sensitivity") not in SENSITIVITY_LEVELS:
+        entry["sensitivity"] = "normal"
+    if entry.get("retention_policy") not in RETENTION_POLICIES:
+        entry["retention_policy"] = "until_deleted"
+    entry.setdefault("expires_at", None)
+    # Facts written before Phase B all went through the strict auto-extraction /
+    # manual-command gates in jarvis.py, so treating them as already-confirmed on
+    # migration is correct, not a laxer default.
+    entry.setdefault("user_confirmed", True)
+    entry.setdefault("status", "confirmed")
+    entry.setdefault("tags", [])
+    entry.setdefault("related_entities", [])
+    return entry
+
+
+def is_fact_expired(entry: dict[str, Any]) -> bool:
+    expires_at = entry.get("expires_at")
+    if not expires_at:
+        return False
+    try:
+        return datetime.fromisoformat(str(expires_at)) < datetime.now()
+    except ValueError:
+        return False
 
 
 def _restrict_to_owner(path: Path) -> None:
@@ -141,7 +230,20 @@ class Memory:
 
         self.save("long_memory")
 
-    def remember_fact(self, content: str, category: str = "facts", source: str = "manual"):
+    def remember_fact(
+        self,
+        content: str,
+        category: str = "facts",
+        source: str = "manual",
+        *,
+        scope: str = "private",
+        sensitivity: str = "normal",
+        confidence: float = 1.0,
+        retention_policy: str = "until_deleted",
+        expires_at: str | None = None,
+        tags: list[str] | None = None,
+        status: str = "confirmed",
+    ) -> None:
         content = normalize_memory_text(content)
         if not content:
             return
@@ -149,17 +251,36 @@ class Memory:
         long_memory = self.data["long_memory"]
         long_memory.setdefault(category, [])
         long_memory[category].append(
-            {
-                "content": content,
-                "created_at": datetime.now().isoformat(timespec="seconds"),
-                "updated_at": datetime.now().isoformat(timespec="seconds"),
-                "category": category,
-                "source": source,
-            }
+            _new_fact_entry(
+                content,
+                category,
+                source,
+                scope=scope,
+                sensitivity=sensitivity,
+                confidence=confidence,
+                retention_policy=retention_policy,
+                expires_at=expires_at,
+                tags=tags,
+                status=status,
+                user_confirmed=status == "confirmed",
+            )
         )
         self.save("long_memory")
 
-    def upsert_fact(self, content: str, category: str = "facts", source: str = "auto") -> str:
+    def upsert_fact(
+        self,
+        content: str,
+        category: str = "facts",
+        source: str = "auto",
+        *,
+        scope: str = "private",
+        sensitivity: str = "normal",
+        confidence: float = 1.0,
+        retention_policy: str = "until_deleted",
+        expires_at: str | None = None,
+        tags: list[str] | None = None,
+        status: str = "confirmed",
+    ) -> str:
         content = normalize_memory_text(content)
         if not content:
             return "ignored"
@@ -168,15 +289,8 @@ class Memory:
         bucket = long_memory.setdefault(category, [])
 
         if isinstance(bucket, dict):
-            now = datetime.now().isoformat(timespec="seconds")
             bucket = [
-                {
-                    "content": f"{key}: {value}",
-                    "created_at": now,
-                    "updated_at": now,
-                    "category": category,
-                    "source": "manual",
-                }
+                _new_fact_entry(f"{key}: {value}", category, "manual")
                 for key, value in bucket.items()
             ]
             long_memory[category] = bucket
@@ -197,20 +311,30 @@ class Memory:
 
             existing = normalize_for_match(str(item.get("content", "")))
             if existing == normalized_content:
+                _ensure_fact_fields(item, category)
                 item["updated_at"] = now
                 item["category"] = category
-                item["source"] = source
+                item["source_type"] = source
+                item["confidence"] = confidence
+                if sensitivity in SENSITIVITY_LEVELS:
+                    item["sensitivity"] = sensitivity
                 self.save("long_memory")
                 return "updated"
 
         long_memory[category].append(
-            {
-                "content": content,
-                "created_at": now,
-                "updated_at": now,
-                "category": category,
-                "source": source,
-            }
+            _new_fact_entry(
+                content,
+                category,
+                source,
+                scope=scope,
+                sensitivity=sensitivity,
+                confidence=confidence,
+                retention_policy=retention_policy,
+                expires_at=expires_at,
+                tags=tags,
+                status=status,
+                user_confirmed=status == "confirmed",
+            )
         )
         self.save("long_memory")
         return "created"
@@ -287,8 +411,13 @@ class Memory:
 
         self.save("long_memory")
 
-    def all_facts(self) -> list[dict[str, str]]:
-        entries: list[dict[str, str]] = []
+    def all_facts(self, *, include_expired: bool = False, include_rejected: bool = False) -> list[dict[str, Any]]:
+        """Returns fact entries with the full Phase-B schema. By default excludes
+        expired and rejected facts (matches the Context Engine's contract: a fact
+        that shouldn't be used anymore shouldn't quietly leak back into a prompt).
+        Pass include_expired/include_rejected=True for the Memory management view,
+        where the user needs to see and clean those up, not just facts fit for use."""
+        entries: list[dict[str, Any]] = []
 
         for category, values in self.data["long_memory"].items():
             if category == "facts":
@@ -308,13 +437,92 @@ class Memory:
             if isinstance(values, list):
                 for item in values:
                     if isinstance(item, dict):
-                        entry = dict(item)
-                        entry.setdefault("category", category)
-                        entries.append(entry)
+                        # Mutates item in place (still referencing self.data) so the
+                        # upgrade is picked up by the next save(), not just this read.
+                        _ensure_fact_fields(item, category)
+                        if not include_rejected and item.get("status") == "rejected":
+                            continue
+                        if not include_expired and is_fact_expired(item):
+                            continue
+                        entries.append(dict(item))
                     elif item:
                         entries.append({"category": category, "content": str(item)})
 
         return entries
+
+    def get_fact_by_id(self, fact_id: str) -> dict[str, Any] | None:
+        for category, values in self.data["long_memory"].items():
+            if not isinstance(values, list):
+                continue
+            for item in values:
+                if isinstance(item, dict) and item.get("id") == fact_id:
+                    _ensure_fact_fields(item, category)
+                    return item
+        return None
+
+    def touch_fact(self, fact_id: str) -> None:
+        """Marks a fact as just-used (by the Context Engine) - lets the Memory view
+        show "zuletzt verwendet am" and lets a future relevance/cleanup pass tell a
+        fact nothing has referenced in a year from one used yesterday."""
+        item = self.get_fact_by_id(fact_id)
+        if item is None:
+            return
+        with self._lock:
+            item["last_used_at"] = datetime.now().isoformat(timespec="seconds")
+            self.save("long_memory")
+
+    def update_fact(self, fact_id: str, **fields: Any) -> bool:
+        """Edits a fact's editable metadata (content, category, sensitivity, scope,
+        retention_policy, expires_at, tags, status). Unknown keys are ignored rather
+        than raising, so a client can send a partial update payload."""
+        editable = {
+            "content", "category", "scope", "sensitivity", "retention_policy",
+            "expires_at", "tags", "status", "confidence",
+        }
+        item = self.get_fact_by_id(fact_id)
+        if item is None:
+            return False
+        with self._lock:
+            for key, value in fields.items():
+                if key not in editable:
+                    continue
+                if key == "sensitivity" and value not in SENSITIVITY_LEVELS:
+                    continue
+                if key == "retention_policy" and value not in RETENTION_POLICIES:
+                    continue
+                if key == "status" and value not in FACT_STATUSES:
+                    continue
+                item[key] = value
+            item["updated_at"] = datetime.now().isoformat(timespec="seconds")
+            self.save("long_memory")
+        return True
+
+    def confirm_fact(self, fact_id: str) -> bool:
+        return self.update_fact(fact_id, status="confirmed") and self._set_user_confirmed(fact_id, True)
+
+    def reject_fact(self, fact_id: str) -> bool:
+        return self.update_fact(fact_id, status="rejected") and self._set_user_confirmed(fact_id, False)
+
+    def _set_user_confirmed(self, fact_id: str, value: bool) -> bool:
+        item = self.get_fact_by_id(fact_id)
+        if item is None:
+            return False
+        with self._lock:
+            item["user_confirmed"] = value
+            self.save("long_memory")
+        return True
+
+    def delete_fact_by_id(self, fact_id: str) -> bool:
+        with self._lock:
+            for values in self.data["long_memory"].values():
+                if not isinstance(values, list):
+                    continue
+                for index, item in enumerate(values):
+                    if isinstance(item, dict) and item.get("id") == fact_id:
+                        del values[index]
+                        self.save("long_memory")
+                        return True
+        return False
 
     def search_facts(self, topic: str) -> list[dict[str, str]]:
         topic_words = {

@@ -1085,6 +1085,30 @@ final class LocalServerController: ObservableObject {
         try await apiClient.clearLogs()
     }
 
+    func memoryFacts(search: String = "", category: String = "") async throws -> MemoryFactsResponse {
+        try await apiClient.memoryFacts(search: search, category: category)
+    }
+
+    @discardableResult
+    func updateMemoryFact(id: String, fields: [String: String]) async throws -> Bool {
+        try await apiClient.updateMemoryFact(id: id, fields: fields)
+    }
+
+    @discardableResult
+    func confirmMemoryFact(id: String) async throws -> Bool {
+        try await apiClient.confirmMemoryFact(id: id)
+    }
+
+    @discardableResult
+    func rejectMemoryFact(id: String) async throws -> Bool {
+        try await apiClient.rejectMemoryFact(id: id)
+    }
+
+    @discardableResult
+    func deleteMemoryFact(id: String) async throws -> Bool {
+        try await apiClient.deleteMemoryFact(id: id)
+    }
+
     func setOpenAIKey(_ apiKey: String) async throws {
         try await apiClient.setOpenAIKey(apiKey)
     }
