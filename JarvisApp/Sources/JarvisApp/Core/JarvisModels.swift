@@ -14,6 +14,7 @@ enum JarvisSection: String, CaseIterable, Identifiable {
     case files = "Dateien"
     case photos = "Fotos"
     case memory = "Gedächtnis"
+    case tasks = "Aufgaben"
     case privacy = "Datenschutz"
     case models = "Modelle"
     case licenses = "Lizenzen"
@@ -33,6 +34,7 @@ enum JarvisSection: String, CaseIterable, Identifiable {
         case .files: "folder"
         case .photos: "photo.on.rectangle"
         case .memory: "brain.head.profile"
+        case .tasks: "checkmark.circle"
         case .privacy: "hand.raised"
         case .models: "cpu"
         case .licenses: "doc.text.magnifyingglass"
@@ -180,6 +182,36 @@ struct MemoryFact: Codable, Identifiable, Equatable {
 struct MemoryFactsResponse: Codable {
     let facts: [MemoryFact]
     let total: Int
+}
+
+/// Phase D: internal tasks, separate from Apple Reminders (CalendarRemindersView).
+/// Auto-detected tasks (from conversation/mail) always start life with
+/// status "vorgeschlagen" - see app/core/task_manager.py - never silently binding.
+struct JarvisTask: Codable, Identifiable, Equatable {
+    let id: String
+    var title: String
+    var project: String?
+    var priority: String
+    var deadline: String?
+    var status: String
+    let source: String
+    var tags: [String]
+    var dependsOn: [String]
+    let createdAt: String
+    let updatedAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, project, priority, deadline, status, source, tags
+        case dependsOn = "depends_on"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
+struct JarvisTasksResponse: Codable {
+    let tasks: [JarvisTask]
+    let total: Int
+    let blocked: [String]
 }
 
 /// A deterministic, rule-based nudge from the Proactivity Engine (Phase C, see

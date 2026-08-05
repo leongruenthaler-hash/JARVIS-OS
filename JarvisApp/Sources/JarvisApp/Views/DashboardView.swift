@@ -564,6 +564,7 @@ struct DashboardView: View {
             case .files: FilesView()
             case .photos: PhotosView()
             case .memory: MemoryView()
+            case .tasks: TasksView()
             case .calendar: CalendarWorkspaceView()
             case .reminders: RemindersWorkspaceView()
             case .privacy: PrivacyView()

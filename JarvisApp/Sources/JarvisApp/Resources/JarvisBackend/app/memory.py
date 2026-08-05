@@ -122,6 +122,7 @@ class Memory:
             "conversation": self.base_path / "conversation.json",
             "projects": self.base_path / "projects.json",
             "settings": self.base_path / "settings.json",
+            "tasks": self.base_path / "tasks.json",
         }
 
         self.defaults = {
@@ -146,6 +147,7 @@ class Memory:
                 "wake_word": "jarvis",
                 "voice": "Siri",
             },
+            "tasks": [],
         }
 
         self.data: dict[str, Any] = {}

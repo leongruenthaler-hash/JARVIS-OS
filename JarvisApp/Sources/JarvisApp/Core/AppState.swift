@@ -22,6 +22,9 @@ final class AppState: ObservableObject {
     @Published var memoryFacts: [MemoryFact] = []
     @Published var memoryFactsTotal = 0
     @Published var proactiveEvents: [ProactiveEvent] = []
+    @Published var tasks: [JarvisTask] = []
+    @Published var blockedTaskIDs: Set<String> = []
+    @Published var tasksLoading = false
     @Published var memoryIsLoading = false
     @Published var mailResult = "Noch keine Mail-Aktion ausgeführt."
     @Published var mailIsLoading = false
@@ -191,6 +194,66 @@ final class AppState: ObservableObject {
             proactiveEvents.removeAll { $0.id == event.id }
         } catch {
             lastError = "Hinweis konnte nicht dauerhaft ausgeblendet werden."
+        }
+    }
+
+    func refreshTasks(status: String = "", project: String = "") async {
+        await ensureServerConnected()
+        tasksLoading = true
+        defer { tasksLoading = false }
+        do {
+            let response = try await serverController.tasks(status: status, project: project)
+            tasks = response.tasks
+            blockedTaskIDs = Set(response.blocked)
+            lastError = nil
+        } catch {
+            lastError = "Aufgaben konnten nicht geladen werden."
+        }
+    }
+
+    func createTask(title: String, project: String? = nil, priority: String = "mittel", deadline: String? = nil) async {
+        await ensureServerConnected()
+        do {
+            _ = try await serverController.createTask(title: title, project: project, priority: priority, deadline: deadline)
+            await refreshTasks()
+        } catch {
+            lastError = "Aufgabe konnte nicht erstellt werden."
+        }
+    }
+
+    func updateTask(_ task: JarvisTask, fields: [String: String]) async {
+        do {
+            try await serverController.updateTask(id: task.id, fields: fields)
+            await refreshTasks()
+        } catch {
+            lastError = "Aufgabe konnte nicht geändert werden."
+        }
+    }
+
+    func confirmTask(_ task: JarvisTask) async {
+        do {
+            try await serverController.confirmTask(id: task.id)
+            await refreshTasks()
+        } catch {
+            lastError = "Aufgabe konnte nicht bestätigt werden."
+        }
+    }
+
+    func rejectTask(_ task: JarvisTask) async {
+        do {
+            try await serverController.rejectTask(id: task.id)
+            await refreshTasks()
+        } catch {
+            lastError = "Aufgabe konnte nicht abgelehnt werden."
+        }
+    }
+
+    func deleteTask(_ task: JarvisTask) async {
+        do {
+            try await serverController.deleteTask(id: task.id)
+            tasks.removeAll { $0.id == task.id }
+        } catch {
+            lastError = "Aufgabe konnte nicht gelöscht werden."
         }
     }
 

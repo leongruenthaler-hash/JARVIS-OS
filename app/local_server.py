@@ -24,10 +24,11 @@ from fast_intent_router import FastIntentRouter
 from core.conversation_manager import ConversationManager
 from core.daily_briefing import build_daily_briefing
 from core.proactivity_engine import PROACTIVITY_ENGINE
+from core.task_manager import TaskManager
 from files_client import configured_roots, move_indexed_matches_to_folder, normalize_name, search_file_index_entries, search_files
 from llm_client import LLMClient
 from jarvis_personality import JARVIS_SYSTEM_PROMPT, message_shape, normalize_jarvis_messages, text_summary
-from mail_client import list_inbox_messages, list_mailboxes, unread_inbox_count
+from mail_client import create_reply_draft, list_inbox_messages, list_mailboxes, unread_inbox_count
 from memory import Memory
 from model_manager import ModelManager, ollama_base_url
 from model_router import ModelRouter
@@ -157,6 +158,7 @@ class JarvisLocalServer:
     def __init__(self):
         self.config = CONFIG
         self.memory = Memory()
+        self.tasks = TaskManager(self.memory)
         self.llm = LLMClient(self.config)
         self.models = ModelManager(self.config)
         self.model_router = ModelRouter(self.config, self.models)
@@ -255,6 +257,82 @@ class JarvisLocalServer:
         if not fact_id:
             return {"ok": False, "error": "missing_id"}
         return {"ok": self.memory.delete_fact_by_id(fact_id)}
+
+    def list_tasks(self, query: dict[str, Any]) -> dict[str, Any]:
+        status = str(query.get("status") or "").strip() or None
+        project = str(query.get("project") or "").strip() or None
+        include_rejected = str(query.get("include_rejected") or "").lower() in ("1", "true")
+        tasks = self.tasks.list_tasks(status=status, project=project, include_rejected=include_rejected)
+        return {"tasks": tasks, "total": len(tasks), "blocked": [task["id"] for task in self.tasks.blocked_tasks()]}
+
+    def create_task(self, payload: dict[str, Any]) -> dict[str, Any]:
+        title = str(payload.get("title") or "").strip()
+        if not title:
+            return {"ok": False, "error": "missing_title"}
+        try:
+            task = self.tasks.create_task(
+                title,
+                project=payload.get("project"),
+                priority=str(payload.get("priority") or "mittel"),
+                deadline=payload.get("deadline"),
+                tags=list(payload.get("tags") or []),
+                depends_on=list(payload.get("depends_on") or []),
+                source="manual",
+            )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "task": task}
+
+    def update_task(self, payload: dict[str, Any]) -> dict[str, Any]:
+        task_id = str(payload.get("id") or "")
+        if not task_id:
+            return {"ok": False, "error": "missing_id"}
+        fields = {
+            key: value
+            for key, value in payload.items()
+            if key in {"title", "project", "priority", "deadline", "tags", "depends_on", "status"}
+        }
+        ok = self.tasks.update_task(task_id, **fields)
+        return {"ok": ok, "task": self.tasks.get_task(task_id) if ok else None}
+
+    def confirm_task(self, payload: dict[str, Any]) -> dict[str, Any]:
+        task_id = str(payload.get("id") or "")
+        if not task_id:
+            return {"ok": False, "error": "missing_id"}
+        return {"ok": self.tasks.confirm_task(task_id)}
+
+    def reject_task(self, payload: dict[str, Any]) -> dict[str, Any]:
+        task_id = str(payload.get("id") or "")
+        if not task_id:
+            return {"ok": False, "error": "missing_id"}
+        return {"ok": self.tasks.reject_task(task_id)}
+
+    def delete_task(self, payload: dict[str, Any]) -> dict[str, Any]:
+        task_id = str(payload.get("id") or "")
+        if not task_id:
+            return {"ok": False, "error": "missing_id"}
+        return {"ok": self.tasks.delete_task(task_id)}
+
+    def create_mail_reply_draft(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Öffnet einen Antwort-Entwurf in Mail.app - sendet nichts, der Nutzer prüft
+        und verschickt selbst. Gated hinter der mail-Berechtigung wie jeder andere
+        Mail-Zugriff (siehe DATA_FLOW.md)."""
+        if not self.permissions.is_allowed("mail"):
+            return {"ok": False, "error": "mail_permission_required"}
+        message_id = str(payload.get("message_id") or "")
+        body = str(payload.get("body") or "")
+        if not message_id or not body:
+            return {"ok": False, "error": "missing_message_id_or_body"}
+        try:
+            opened = create_reply_draft(
+                message_id,
+                body,
+                account_name=payload.get("account_name"),
+                mailbox_name=payload.get("mailbox_name"),
+            )
+        except Exception as exc:
+            return {"ok": False, "error": _safe_error(exc)}
+        return {"ok": opened}
 
     def health(self) -> dict[str, Any]:
         model_status = self.models.status()
@@ -2011,6 +2089,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, SERVER.proactivity_events())
             elif path == "/api/proactivity/history":
                 self._json(200, SERVER.proactivity_history())
+            elif path == "/api/tasks":
+                query_params = dict(parse_qsl(urlparse(self.path).query))
+                self._json(200, SERVER.list_tasks(query_params))
             else:
                 self._json(404, {"error": "not_found"})
         except Exception as exc:
@@ -2079,6 +2160,18 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, SERVER.snooze_proactivity_event(payload))
             elif path == "/api/proactivity/dismiss":
                 self._json(200, SERVER.dismiss_proactivity_event(payload))
+            elif path == "/api/tasks/create":
+                self._json(200, SERVER.create_task(payload))
+            elif path == "/api/tasks/update":
+                self._json(200, SERVER.update_task(payload))
+            elif path == "/api/tasks/confirm":
+                self._json(200, SERVER.confirm_task(payload))
+            elif path == "/api/tasks/reject":
+                self._json(200, SERVER.reject_task(payload))
+            elif path == "/api/tasks/delete":
+                self._json(200, SERVER.delete_task(payload))
+            elif path == "/api/mail/reply-draft":
+                self._json(200, SERVER.create_mail_reply_draft(payload))
             elif path == "/api/photos/scan":
                 self._json(200, SERVER.start_photo_index_scan())
             elif path == "/api/photos/permission":

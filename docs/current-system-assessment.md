@@ -182,3 +182,30 @@ die nicht ungetestet in derselben Änderung wie die neue Engine laufen sollte
 `45dc902`). Evening Review, macOS-Systembenachrichtigungen, dedizierte
 Ruhezeiten-Einstellung in der App-Oberfläche. Siehe `docs/proactivity.md`,
 letzter Abschnitt.
+
+## 11. Phase-D-Status (2026-08-05)
+
+Phase D (Kalender/E-Mail/Aufgaben) ist umgesetzt: neues, eigenständiges
+Aufgaben-System (`app/core/task_manager.py`) mit Priorität, Abhängigkeiten,
+Status und dem Grundsatz "automatisch erkannte Aufgaben werden nie
+stillschweigend verbindlich" (Vorschlag/Bestätigung wie bei Phase B/C).
+Authentifizierte API, neue `TasksView.swift` in Seitenleiste und Dashboard.
+Mail-Antwortentwürfe (`create_reply_draft()` in `app/mail_client.py`) - öffnet
+einen Entwurf in Mail.app, sendet nichts. Kontaktauflösung bei Mehrdeutigkeit
+war bereits vollständig vorhanden (`app/contacts_client.py`), keine Änderung
+nötig. 12 neue Tests (insgesamt 59). Details: `docs/tasks.md`.
+
+Bewusst nicht umgesetzt: kalenderzeit-basierte Konflikterkennung (dieselbe
+Einschränkung wie in Phase C), echtes E-Mail-Senden (bewusste
+Projekt-Entscheidung, siehe `PRIVACY_ARCHITECTURE.md`), automatische
+Aufgaben-Erkennung aus Gesprächen/Mails (Infrastruktur `propose_task()`
+steht bereit, aber noch nicht angebunden). Siehe `docs/tasks.md`, letzter
+Abschnitt.
+
+**Nebenbefund während dieser Phase:** Das Projekt lag zwischenzeitlich wieder
+unter iCloud-Sync (`~/Desktop/Projekte/JARVIS-OS` mit aktivem "Desktop &
+Dokumente"-Sync), was zu stundenlangen Zugriffsblockaden führte (System-Load
+>200, `Operation not permitted` auf den gesamten Desktop-Ordner). Nutzer hat
+iCloud-Sync für Desktop daraufhin deaktiviert. Siehe Memory-Eintrag
+`project-icloud-desktop-sync-risk` für Details - bei zukünftigen "zufälligen"
+Hängern von Datei-Tools zuerst `fileproviderd`/`bird`-CPU-Last prüfen.

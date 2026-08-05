@@ -707,6 +707,83 @@ def move_messages_to_trash(
         return 0
 
 
+def create_reply_draft(
+    message_id: str,
+    draft_text: str,
+    account_name: str | None = None,
+    mailbox_name: str | None = None,
+) -> bool:
+    """Öffnet einen Antwort-Entwurf in Mail.app mit `draft_text` vorangestellt - sendet
+    NICHTS. Master-Plan Abschnitt 10.3: "E-Mails dürfen niemals ohne explizite
+    Genehmigung versendet werden." Echtes Senden ist in diesem Projekt bewusst nicht
+    implementiert (siehe PRIVACY_ARCHITECTURE.md TODO_COMPLIANCE) - der Nutzer prüft
+    und schickt den Entwurf selbst in Mail.app ab, kein AppleScript `send`-Befehl hier.
+    """
+    cleaned_id = _escape_applescript_text(message_id)
+    cleaned_body = _escape_applescript_text(draft_text)
+    if not cleaned_id or not cleaned_body:
+        return False
+
+    configured_account = _escape_applescript_text(account_name or "")
+    configured_mailbox = _escape_applescript_text(mailbox_name or "")
+    script = f"""
+    set targetId to "{cleaned_id}"
+    set draftBody to "{cleaned_body}"
+    set configuredAccount to "{configured_account}"
+    set configuredMailbox to "{configured_mailbox}"
+
+    tell application "Mail"
+        set targetMailbox to missing value
+
+        if configuredAccount is not "" and configuredMailbox is not "" then
+            repeat with accountRef in every account
+                set accountText to name of accountRef as string
+                if accountText is configuredAccount then
+                    repeat with mailboxRef in every mailbox of accountRef
+                        set mailboxText to name of mailboxRef as string
+                        if mailboxText is configuredMailbox then
+                            set targetMailbox to mailboxRef
+                            exit repeat
+                        end if
+                    end repeat
+                end if
+            end repeat
+        end if
+
+        if targetMailbox is missing value then
+            try
+                set targetMailbox to inbox
+            end try
+        end if
+
+        if targetMailbox is missing value then return "0"
+
+        set foundMessage to missing value
+        repeat with messageRef in messages of targetMailbox
+            set messageId to ""
+            try
+                set messageId to id of messageRef as string
+            end try
+            if messageId is targetId then
+                set foundMessage to messageRef
+                exit repeat
+            end if
+        end repeat
+
+        if foundMessage is missing value then return "0"
+
+        set draftMessage to reply foundMessage with opening window
+        set content of draftMessage to (draftBody & return & return & content of draftMessage)
+        activate
+    end tell
+
+    return "1"
+    """
+
+    raw_output = _run_applescript(script, timeout=15)
+    return raw_output.strip() == "1"
+
+
 def _escape_applescript_text(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"').strip()
 

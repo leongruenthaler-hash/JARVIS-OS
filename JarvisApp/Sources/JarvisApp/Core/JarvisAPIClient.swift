@@ -372,6 +372,62 @@ struct JarvisAPIClient {
         return response.ok
     }
 
+    func tasks(status: String = "", project: String = "") async throws -> JarvisTasksResponse {
+        var components = URLComponents()
+        var items: [URLQueryItem] = []
+        if !status.isEmpty { items.append(URLQueryItem(name: "status", value: status)) }
+        if !project.isEmpty { items.append(URLQueryItem(name: "project", value: project)) }
+        components.queryItems = items.isEmpty ? nil : items
+        let query = components.percentEncodedQuery.map { "?\($0)" } ?? ""
+        return try await get("/api/tasks" + query)
+    }
+
+    struct CreateTaskRequest: Encodable {
+        let title: String
+        let project: String?
+        let priority: String
+        let deadline: String?
+    }
+
+    func createTask(_ request: CreateTaskRequest) async throws -> JarvisTask? {
+        struct Response: Decodable { let ok: Bool; let task: JarvisTask? }
+        let response: Response = try await post("/api/tasks/create", body: request)
+        return response.task
+    }
+
+    @discardableResult
+    func updateTask(id: String, fields: [String: String]) async throws -> Bool {
+        struct Response: Decodable { let ok: Bool }
+        var body: [String: String] = fields
+        body["id"] = id
+        let response: Response = try await post("/api/tasks/update", body: body)
+        return response.ok
+    }
+
+    @discardableResult
+    func confirmTask(id: String) async throws -> Bool {
+        struct Request: Encodable { let id: String }
+        struct Response: Decodable { let ok: Bool }
+        let response: Response = try await post("/api/tasks/confirm", body: Request(id: id))
+        return response.ok
+    }
+
+    @discardableResult
+    func rejectTask(id: String) async throws -> Bool {
+        struct Request: Encodable { let id: String }
+        struct Response: Decodable { let ok: Bool }
+        let response: Response = try await post("/api/tasks/reject", body: Request(id: id))
+        return response.ok
+    }
+
+    @discardableResult
+    func deleteTask(id: String) async throws -> Bool {
+        struct Request: Encodable { let id: String }
+        struct Response: Decodable { let ok: Bool }
+        let response: Response = try await post("/api/tasks/delete", body: Request(id: id))
+        return response.ok
+    }
+
     private func get<T: Decodable>(_ path: String, retryingAuth: Bool = true) async throws -> T {
         var request = URLRequest(url: makeURL(path))
         if let token = loadToken() {
