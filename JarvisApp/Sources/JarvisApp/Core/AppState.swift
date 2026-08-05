@@ -25,6 +25,8 @@ final class AppState: ObservableObject {
     @Published var tasks: [JarvisTask] = []
     @Published var blockedTaskIDs: Set<String> = []
     @Published var tasksLoading = false
+    @Published var voiceMode = "standard"
+    @Published var availableVoiceModes: [String] = ["kurz", "standard", "fokus", "diskret", "privat"]
     @Published var memoryIsLoading = false
     @Published var mailResult = "Noch keine Mail-Aktion ausgeführt."
     @Published var mailIsLoading = false
@@ -114,6 +116,7 @@ final class AppState: ObservableObject {
             await saveUserProfileToCore()
             await saveFastVoiceModeToCore()
         }
+        await refreshVoiceMode()
         autoListenEnabled = true
         keepListeningAfterGreeting = true
         await presentStartupGreetingIfNeeded()
@@ -254,6 +257,26 @@ final class AppState: ObservableObject {
             tasks.removeAll { $0.id == task.id }
         } catch {
             lastError = "Aufgabe konnte nicht gelöscht werden."
+        }
+    }
+
+    func refreshVoiceMode() async {
+        await ensureServerConnected()
+        do {
+            let status = try await serverController.voiceModeStatus()
+            voiceMode = status.mode
+            availableVoiceModes = status.availableModes
+        } catch {
+            // Best-effort - falling back to the cached/default mode is fine, this
+            // isn't worth surfacing as a user-facing error.
+        }
+    }
+
+    func setVoiceMode(_ mode: String) async {
+        do {
+            voiceMode = try await serverController.setVoiceMode(mode)
+        } catch {
+            lastError = "Gesprächsmodus konnte nicht geändert werden."
         }
     }
 
@@ -1577,10 +1600,18 @@ final class AppState: ObservableObject {
         speechPlayer.onEvent = { [weak self] event in self?.handleStreamingSpeechEvent(event) }
         var speechStarted = false
 
+        // Diskreter Modus (Phase E, Master-Plan 6.4): text-only, no TTS. Checked from
+        // the already-cached voiceMode (synced via refreshVoiceMode()/setVoiceMode())
+        // rather than waiting for the server's own voice_output_suppressed flag on the
+        // stream's final chunk - that only arrives after the full answer, too late to
+        // decide whether to start speaking the first sentence.
+        let voiceOutputAllowed = voiceMode != "diskret"
+
         let streamed = try await serverController.chatStream(question, history: history) { [weak self] chunk in
             guard let self else { return }
             self.messages[answerIndex].text.append(chunk)
             onTextChunk?(chunk)
+            guard voiceOutputAllowed else { return }
             for sentence in sentenceSplitter.feed(chunk) {
                 if !speechStarted {
                     speechStarted = true
@@ -1593,7 +1624,7 @@ final class AppState: ObservableObject {
         if messages[answerIndex].text.isEmpty {
             messages[answerIndex].text = streamed
         }
-        if let last = sentenceSplitter.flush() {
+        if voiceOutputAllowed, let last = sentenceSplitter.flush() {
             if !speechStarted {
                 speechStarted = true
                 beginStreamingSpeech()
@@ -1841,6 +1872,20 @@ final class AppState: ObservableObject {
             "tts=\(tts)ms, " +
             "playback=\(playback)ms"
         )
+
+        // Phase E: persist alongside the console print, not instead of it - see
+        // app/core/voice_performance.py. Only non-negative numeric durations, fire-
+        // and-forget so a slow/offline server never delays the voice turn itself.
+        let rawMetrics: [String: Int] = [
+            "micReady": micReady, "recordingStart": recordingStart, "transcription": transcription,
+            "llmFirstToken": firstToken, "llm": llm, "tts": tts, "playback": playback,
+        ]
+        let metrics = rawMetrics.filter { $0.value >= 0 }
+        if !metrics.isEmpty {
+            Task { [serverController] in
+                try? await serverController.recordVoicePerformance(metrics)
+            }
+        }
     }
 
     private func modelLabel(from provider: String, model: String) -> String {

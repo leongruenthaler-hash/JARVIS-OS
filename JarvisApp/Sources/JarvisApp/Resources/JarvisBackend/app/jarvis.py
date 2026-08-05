@@ -69,6 +69,10 @@ from core.context_engine import CONTEXT_ENGINE, active_context_pack
 from core.conversation_manager import ConversationManager
 from core.daily_briefing import build_daily_briefing
 from core.memory_system import JarvisMemorySystem
+from core.voice_modes import (
+    voice_mode_instruction,
+    voice_mode_forces_compact,
+)
 from memory import Memory
 from model_manager import ModelManager
 from music_client import (
@@ -488,14 +492,20 @@ def build_input(
         memory, user_text, context_pack=active_context_pack(CONFIG)
     )
     temporary_style = get_temporary_style_instruction(settings)
+    # Master-Plan Abschnitt 6.4 (Gesprächsmodi). "kurz"/"diskret" force the compact
+    # prompt regardless of what the model router decided based on message length.
+    voice_mode = str(settings.get("voice_mode") or "standard")
+    mode_instruction = voice_mode_instruction(voice_mode)
+    effective_compact = compact or voice_mode_forces_compact(voice_mode)
 
-    if compact:
+    if effective_compact:
         system_text = build_compact_jarvis_system_prompt(
             assistant_name=assistant_name,
             creator_name=creator_name,
             user_salutation=user_salutation,
             personality=personality,
             memory_summary=memory_summary,
+            mode_instruction=mode_instruction,
         )
     else:
         system_text = build_jarvis_system_prompt(
@@ -505,6 +515,7 @@ def build_input(
             personality=personality,
             memory_summary=memory_summary,
             temporary_style=temporary_style,
+            mode_instruction=mode_instruction,
         )
 
     combined_history = list(previous_conversation)

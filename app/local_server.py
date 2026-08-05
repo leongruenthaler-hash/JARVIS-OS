@@ -25,6 +25,13 @@ from core.conversation_manager import ConversationManager
 from core.daily_briefing import build_daily_briefing
 from core.proactivity_engine import PROACTIVITY_ENGINE
 from core.task_manager import TaskManager
+from core.voice_performance import VOICE_PERFORMANCE_LOG
+from core.voice_modes import (
+    VOICE_MODES,
+    normalize_voice_mode,
+    voice_mode_disables_web_search,
+    voice_mode_suppresses_voice_output,
+)
 from files_client import configured_roots, move_indexed_matches_to_folder, normalize_name, search_file_index_entries, search_files
 from llm_client import LLMClient
 from jarvis_personality import JARVIS_SYSTEM_PROMPT, message_shape, normalize_jarvis_messages, text_summary
@@ -313,6 +320,25 @@ class JarvisLocalServer:
             return {"ok": False, "error": "missing_id"}
         return {"ok": self.tasks.delete_task(task_id)}
 
+    def record_voice_performance(self, payload: dict[str, Any]) -> dict[str, Any]:
+        entry = VOICE_PERFORMANCE_LOG.record(payload)
+        return {"ok": entry is not None}
+
+    def voice_performance_stats(self, query: dict[str, Any]) -> dict[str, Any]:
+        limit = max(1, min(int(query.get("limit") or 50), 200))
+        return VOICE_PERFORMANCE_LOG.stats(limit=limit)
+
+    def voice_mode_status(self) -> dict[str, Any]:
+        mode = normalize_voice_mode(str((self.memory.get("settings") or {}).get("voice_mode") or ""))
+        return {"mode": mode, "available_modes": list(VOICE_MODES)}
+
+    def set_voice_mode(self, payload: dict[str, Any]) -> dict[str, Any]:
+        mode = normalize_voice_mode(str(payload.get("mode") or ""))
+        settings = self.memory.get("settings") or {}
+        settings["voice_mode"] = mode
+        self.memory.set("settings", settings)
+        return {"ok": True, "mode": mode}
+
     def create_mail_reply_draft(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Öffnet einen Antwort-Entwurf in Mail.app - sendet nichts, der Nutzer prüft
         und verschickt selbst. Gated hinter der mail-Berechtigung wie jeder andere
@@ -354,7 +380,13 @@ class JarvisLocalServer:
 
         self._pipeline_log("userMessage", text=text, history=history)
         answer = self._answer_with_core(text, transient_history=self._clean_history(history))
-        return {"answer": answer, "source": self._last_answer_source, "model": self._last_answer_model}
+        voice_mode = normalize_voice_mode(str((self.memory.get("settings") or {}).get("voice_mode") or ""))
+        return {
+            "answer": answer,
+            "source": self._last_answer_source,
+            "model": self._last_answer_model,
+            "voice_output_suppressed": voice_mode_suppresses_voice_output(voice_mode),
+        }
 
     def scan_status_payload(self) -> dict[str, Any]:
         return {
@@ -1624,6 +1656,7 @@ class JarvisLocalServer:
         self._last_answer_source = "local"
         self._last_answer_model = self.models.active_model
         route = self.llm.plan(transient_history or [], user_text=question)
+        voice_mode = normalize_voice_mode(str((memory.get("settings") or {}).get("voice_mode") or ""))
 
         try:
             if hasattr(core, "is_end_command") and core.is_end_command(question):
@@ -1795,7 +1828,12 @@ class JarvisLocalServer:
                         return str(answer)
 
             web_context = None
-            if bool(self.config.get("web_search_enabled", True)) and hasattr(core, "should_use_web_search") and core.should_use_web_search(question):
+            if (
+                bool(self.config.get("web_search_enabled", True))
+                and not voice_mode_disables_web_search(voice_mode)
+                and hasattr(core, "should_use_web_search")
+                and core.should_use_web_search(question)
+            ):
                 permission = core.ensure_privacy_domain_permission(memory, "internet", "Jarvis würde eine Websuche im Internet ausführen.")
                 if permission is not None:
                     return str(permission)
@@ -2092,6 +2130,11 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/tasks":
                 query_params = dict(parse_qsl(urlparse(self.path).query))
                 self._json(200, SERVER.list_tasks(query_params))
+            elif path == "/api/settings/voice-mode":
+                self._json(200, SERVER.voice_mode_status())
+            elif path == "/api/voice/performance-stats":
+                query_params = dict(parse_qsl(urlparse(self.path).query))
+                self._json(200, SERVER.voice_performance_stats(query_params))
             else:
                 self._json(404, {"error": "not_found"})
         except Exception as exc:
@@ -2172,6 +2215,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, SERVER.delete_task(payload))
             elif path == "/api/mail/reply-draft":
                 self._json(200, SERVER.create_mail_reply_draft(payload))
+            elif path == "/api/settings/voice-mode":
+                self._json(200, SERVER.set_voice_mode(payload))
+            elif path == "/api/voice/performance-report":
+                self._json(200, SERVER.record_voice_performance(payload))
             elif path == "/api/photos/scan":
                 self._json(200, SERVER.start_photo_index_scan())
             elif path == "/api/photos/permission":
@@ -2267,7 +2314,11 @@ class Handler(BaseHTTPRequestHandler):
                     chunk = word if index == 0 else " " + word
                     self._write_stream_chunk(chunk)
         finally:
-            done = json.dumps({"chunk": "", "done": True}, ensure_ascii=False).encode("utf-8") + b"\n"
+            voice_mode = normalize_voice_mode(str((SERVER.memory.get("settings") or {}).get("voice_mode") or ""))
+            done = json.dumps(
+                {"chunk": "", "done": True, "voice_output_suppressed": voice_mode_suppresses_voice_output(voice_mode)},
+                ensure_ascii=False,
+            ).encode("utf-8") + b"\n"
             self.wfile.write(done)
             self.wfile.flush()
 

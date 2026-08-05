@@ -140,6 +140,26 @@ struct SettingsView: View {
 
                 Divider().opacity(0.4)
 
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Gesprächsmodus")
+                        .font(.headline)
+                    Text(voiceModeDescription(appState.voiceMode))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Picker("Gesprächsmodus", selection: $appState.voiceMode) {
+                        ForEach(appState.availableVoiceModes, id: \.self) { mode in
+                            Text(voiceModeLabel(mode)).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
+                .onChange(of: appState.voiceMode) { _, newValue in
+                    Task { await appState.setVoiceMode(newValue) }
+                }
+
+                Divider().opacity(0.4)
+
                 Toggle(isOn: $appState.alwaysListenEnabled) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Immer-Zuhör-Modus (\"Hey Jarvis\")")
@@ -459,6 +479,31 @@ struct SettingsView: View {
         let trimmed = usageGoalDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let value = Double(trimmed), value > 0 else { return }
         appState.updateDailyUsageGoal(value)
+    }
+
+    private func voiceModeLabel(_ mode: String) -> String {
+        switch mode {
+        case "kurz": return "Kurz"
+        case "fokus": return "Fokus"
+        case "diskret": return "Diskret"
+        case "privat": return "Privat"
+        default: return "Standard"
+        }
+    }
+
+    private func voiceModeDescription(_ mode: String) -> String {
+        switch mode {
+        case "kurz":
+            return "Extrem knappe Antworten, meist ein Satz."
+        case "fokus":
+            return "Ausführliche, technische Antworten - für Programmierung und Planung."
+        case "diskret":
+            return "Nur Text, keine Sprachausgabe."
+        case "privat":
+            return "Keine Websuche, keine externen Datenquellen für diese Unterhaltung."
+        default:
+            return "Normale, ausgewogene Antworten."
+        }
     }
 
     private func sectionHeader(_ title: String, subtitle: String) -> some View {

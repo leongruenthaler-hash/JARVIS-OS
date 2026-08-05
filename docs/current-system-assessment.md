@@ -209,3 +209,28 @@ Dokumente"-Sync), was zu stundenlangen Zugriffsblockaden führte (System-Load
 iCloud-Sync für Desktop daraufhin deaktiviert. Siehe Memory-Eintrag
 `project-icloud-desktop-sync-risk` für Details - bei zukünftigen "zufälligen"
 Hängern von Datei-Tools zuerst `fileproviderd`/`bird`-CPU-Last prüfen.
+
+## 12. Phase-E-Status (2026-08-05)
+
+Phase E (Realtime Voice) ist umgesetzt, nach gründlicher Untersuchung der
+bestehenden Sprachpipeline (siehe `docs/voice-system.md`) - vieles war
+bereits solide vorhanden (Streaming-TTS, Streaming-Antworttext,
+Live-Transkription via Apple Speech, manuelles Unterbrechen) und wurde
+bewusst nicht angefasst.
+
+Neu: fünf Gesprächsmodi (`app/core/voice_modes.py` - kurz/standard/fokus/
+diskret/privat), eingespeist in den System-Prompt und Swift-seitig
+durchgesetzt (diskreter Modus unterdrückt Sprachausgabe direkt beim
+Streaming, nicht erst nachträglich). Persistente Latenzmessung
+(`app/core/voice_performance.py`) statt reiner Konsolen-Ausgabe, mit
+Durchschnitt/p95/Maximum je Phase über die letzten Sprach-Turns. 21 neue
+Tests (insgesamt 80). Details: `docs/voice-system.md`.
+
+Bewusst nicht umgesetzt: automatisches akustisches Unterbrechen (Barge-in) -
+bräuchte echte Akustik-Echo-Unterdrückung, die ich ohne physisches Testen auf
+einem Gerät nicht blind riskieren wollte (Gefahr: Jarvis unterbricht sich
+ständig selbst). Echtes Streaming-STT für die batch-basierten Engines (nur
+der bereits vorhandene Apple-Speech-`--live`-Pfad liefert echte
+Teiltranskripte). "Privater Modus" erzwingt noch nicht den LLM-Provider
+selbst. Mobile Sprachsteuerung (kein iPhone-Client vorhanden). Siehe
+`docs/voice-system.md`, letzter Abschnitt.

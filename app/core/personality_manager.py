@@ -98,6 +98,7 @@ class JarvisPersonalityManager:
         user_salutation: str = "sir",
         memory_summary: str = "Keine wichtigen Langzeitnotizen.",
         temporary_style: str = "",
+        mode_instruction: str = "",
     ) -> str:
         style = self.style
         address_instruction = salutation_instruction(creator_name, user_salutation)
@@ -125,6 +126,8 @@ class JarvisPersonalityManager:
             f"Stil: Persönlichkeit={style.name}, Ton={style.tone}, Humor={style.humor}, Länge={style.answer_length}, Direktheit={style.directness}.",
             f"Relevant: {memory_summary}.",
         ]
+        if mode_instruction:
+            parts.append(mode_instruction)
         if temporary_style:
             parts.append(f"Temporäre Vorgabe: {temporary_style}")
         return "\n".join(parts).strip()
@@ -138,6 +141,7 @@ def build_jarvis_system_prompt(
     personality: Any = None,
     memory_summary: str = "Keine wichtigen Langzeitnotizen.",
     temporary_style: str = "",
+    mode_instruction: str = "",
 ) -> str:
     manager = JarvisPersonalityManager(personality if isinstance(personality, dict) else {})
     return manager.build_system_prompt(
@@ -146,6 +150,7 @@ def build_jarvis_system_prompt(
         user_salutation=user_salutation,
         memory_summary=memory_summary,
         temporary_style=temporary_style,
+        mode_instruction=mode_instruction,
     )
 
 
@@ -188,6 +193,7 @@ def build_compact_jarvis_system_prompt(
     user_salutation: str = "sir",
     personality: Any = None,
     memory_summary: str = "Keine wichtigen Langzeitnotizen.",
+    mode_instruction: str = "",
 ) -> str:
     manager = JarvisPersonalityManager(personality if isinstance(personality, dict) else {})
     style = manager.style
@@ -203,6 +209,8 @@ def build_compact_jarvis_system_prompt(
         f"Stil: Persönlichkeit={style.name}, Ton={style.tone}, Humor={style.humor}, Länge={style.answer_length}, Direktheit={style.directness}.",
         f"Relevant: {memory_summary}.",
     ]
+    if mode_instruction:
+        parts.append(mode_instruction)
     return "\n".join(parts).strip()
 
 

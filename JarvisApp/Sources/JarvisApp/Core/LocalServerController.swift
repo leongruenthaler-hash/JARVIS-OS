@@ -1151,6 +1151,19 @@ final class LocalServerController: ObservableObject {
         try await apiClient.deleteTask(id: id)
     }
 
+    func voiceModeStatus() async throws -> VoiceModeStatus {
+        try await apiClient.voiceModeStatus()
+    }
+
+    @discardableResult
+    func setVoiceMode(_ mode: String) async throws -> String {
+        try await apiClient.setVoiceMode(mode)
+    }
+
+    func recordVoicePerformance(_ metrics: [String: Int]) async throws {
+        try await apiClient.recordVoicePerformance(metrics)
+    }
+
     func setOpenAIKey(_ apiKey: String) async throws {
         try await apiClient.setOpenAIKey(apiKey)
     }

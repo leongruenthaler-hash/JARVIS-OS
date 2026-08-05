@@ -214,6 +214,18 @@ struct JarvisTasksResponse: Codable {
     let blocked: [String]
 }
 
+/// Phase E: Kurzmodus / Standardmodus / Fokusmodus / Diskreter Modus / Privater Modus
+/// (Master-Plan Abschnitt 6.4). See app/core/voice_modes.py.
+struct VoiceModeStatus: Codable, Equatable {
+    let mode: String
+    let availableModes: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case mode
+        case availableModes = "available_modes"
+    }
+}
+
 /// A deterministic, rule-based nudge from the Proactivity Engine (Phase C, see
 /// app/core/proactivity_engine.py). `reason` is always populated - every nudge must be
 /// traceable back to a concrete rule and the data that triggered it, never "the AI felt

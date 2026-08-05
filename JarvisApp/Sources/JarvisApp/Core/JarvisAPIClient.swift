@@ -428,6 +428,25 @@ struct JarvisAPIClient {
         return response.ok
     }
 
+    func voiceModeStatus() async throws -> VoiceModeStatus {
+        try await get("/api/settings/voice-mode")
+    }
+
+    @discardableResult
+    func setVoiceMode(_ mode: String) async throws -> String {
+        struct Request: Encodable { let mode: String }
+        struct Response: Decodable { let ok: Bool; let mode: String }
+        let response: Response = try await post("/api/settings/voice-mode", body: Request(mode: mode))
+        return response.mode
+    }
+
+    /// Fire-and-forget: only numeric millisecond durations, never transcript/audio
+    /// content - see app/core/voice_performance.py.
+    func recordVoicePerformance(_ metrics: [String: Int]) async throws {
+        struct Response: Decodable { let ok: Bool }
+        let _: Response = try await post("/api/voice/performance-report", body: metrics)
+    }
+
     private func get<T: Decodable>(_ path: String, retryingAuth: Bool = true) async throws -> T {
         var request = URLRequest(url: makeURL(path))
         if let token = loadToken() {
