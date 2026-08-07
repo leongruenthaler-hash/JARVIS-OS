@@ -17,6 +17,7 @@ struct SettingsView: View {
                 profileSection
                 generalSection
                 designSection
+                voiceSection
                 openAISection
                 coreSection
                 licensesSection
@@ -329,6 +330,23 @@ struct SettingsView: View {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .strokeBorder(theme.isDark ? theme.primaryAccent.opacity(0.36) : Color.white.opacity(0.16), lineWidth: 1)
             )
+        }
+        .liquidGlassPanel(tint: .cyan)
+    }
+
+    private var voiceSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            sectionHeader("Stimme", subtitle: "Kostenlose Edge-TTS-Stimmen, live verglichen und ausgewählt - kein API-Schlüssel nötig.")
+
+            Picker("Stimme", selection: $appState.selectedVoice) {
+                ForEach(JarvisVoiceOption.allCases) { option in
+                    Text(option.title).tag(option.rawValue)
+                }
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: appState.selectedVoice) { _, _ in
+                Task { await appState.saveSelectedVoiceToCore() }
+            }
         }
         .liquidGlassPanel(tint: .cyan)
     }

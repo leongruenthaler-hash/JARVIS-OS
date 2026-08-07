@@ -3,6 +3,24 @@ import SwiftUI
 
 let jarvisAppVersion = "Beta 0.1"
 
+/// Free Edge-TTS German male voices Sir picked from a live sample comparison
+/// (Conrad = bisheriger Standard, Killian = neu ausgewählt, klang laut Sir am ehesten
+/// nach JARVIS). Backend still accepts any Edge-TTS voice string via `edge_voice` in
+/// config.json - this enum only scopes the Settings picker to the two Sir compared.
+enum JarvisVoiceOption: String, CaseIterable, Identifiable {
+    case conrad = "de-DE-ConradNeural"
+    case killian = "de-DE-KillianNeural"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .conrad: return "Conrad"
+        case .killian: return "Killian"
+        }
+    }
+}
+
 enum JarvisSection: String, CaseIterable, Identifiable {
     case home = "Home"
     case actions = "Aktionszentrale"

@@ -244,6 +244,12 @@ struct JarvisAPIClient {
         let _: Response = try await post("/api/settings/store-conversation", body: Request(enabled: enabled))
     }
 
+    func setVoice(_ voice: String) async throws {
+        struct Request: Encodable { let voice: String }
+        struct Response: Decodable { let ok: Bool; let voice: String }
+        let _: Response = try await post("/api/settings/voice", body: Request(voice: voice))
+    }
+
     func privacyStatus() async throws -> String {
         struct Response: Decodable { let status: String }
         let response: Response = try await get("/api/privacy/status")

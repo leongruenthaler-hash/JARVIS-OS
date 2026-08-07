@@ -2211,6 +2211,13 @@ class Handler(BaseHTTPRequestHandler):
                 SERVER.config["privacy_store_conversation"] = enabled
                 save_config(SERVER.config)
                 self._json(200, {"ok": True, "enabled": enabled})
+            elif path == "/api/settings/voice":
+                voice = str(payload.get("voice") or "").strip()
+                if voice:
+                    SERVER.config["edge_voice"] = voice
+                    SERVER.config["voice"] = voice
+                    save_config(SERVER.config)
+                self._json(200, {"ok": bool(voice), "voice": SERVER.config.get("edge_voice", "de-DE-ConradNeural")})
             elif path == "/api/scan-status":
                 self._json(200, SERVER.scan_status_payload())
             elif path == "/api/mail/scan-folders":

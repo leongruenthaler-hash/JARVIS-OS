@@ -1061,6 +1061,11 @@ final class LocalServerController: ObservableObject {
         isRunning = true
     }
 
+    func setVoice(_ voice: String) async throws {
+        try await apiClient.setVoice(voice)
+        isRunning = true
+    }
+
     func privacyStatus() async throws -> String {
         try await apiClient.privacyStatus()
     }

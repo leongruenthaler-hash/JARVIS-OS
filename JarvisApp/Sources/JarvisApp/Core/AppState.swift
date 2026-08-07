@@ -72,6 +72,7 @@ final class AppState: ObservableObject {
     /// `nil` means "not configured" - deliberately no built-in default, see ProductivityTracker.
     @Published private(set) var dailyUsageGoalMinutes: Double? = ProductivityTracker.dailyGoalMinutes()
     @Published var fastVoiceMode = UserDefaults.standard.object(forKey: "JarvisFastVoiceMode") as? Bool ?? true
+    @Published var selectedVoice = UserDefaults.standard.string(forKey: "JarvisEdgeVoice") ?? JarvisVoiceOption.killian.rawValue
     @Published var alwaysListenEnabled = UserDefaults.standard.object(forKey: "JarvisAlwaysListenEnabled") as? Bool ?? false
     @Published var lastError: String?
     /// Progress message during first-run setup (Command Line Tools / venv / pip install).
@@ -364,6 +365,15 @@ final class AppState: ObservableObject {
             try await serverController.setFastVoiceMode(fastVoiceMode)
         } catch {
             lastError = "Schneller Sprachmodus wurde lokal gespeichert. Der Core übernimmt ihn beim nächsten erfolgreichen Start."
+        }
+    }
+
+    func saveSelectedVoiceToCore() async {
+        UserDefaults.standard.set(selectedVoice, forKey: "JarvisEdgeVoice")
+        do {
+            try await serverController.setVoice(selectedVoice)
+        } catch {
+            lastError = "Stimme wurde lokal gespeichert. Der Core übernimmt sie beim nächsten erfolgreichen Start."
         }
     }
 

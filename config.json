@@ -34,9 +34,9 @@
         "jobs",
         "thomas"
     ],
-    "voice": "de-DE-ConradNeural",
+    "voice": "de-DE-KillianNeural",
     "tts_provider": "edge",
-    "edge_voice": "de-DE-ConradNeural",
+    "edge_voice": "de-DE-KillianNeural",
     "edge_rate": "+0%",
     "edge_volume": "+0%",
     "edge_pitch": "+0Hz",
@@ -124,12 +124,20 @@
     "active_context_pack": "",
     "context_packs": {
         "persoenlich": {
-            "categories": ["Profil", "Vorlieben"],
+            "categories": [
+                "Profil",
+                "Vorlieben"
+            ],
             "tags": []
         },
         "jarvis-projekt": {
-            "categories": ["Organisation", "Dateien"],
-            "tags": ["jarvis-projekt"]
+            "categories": [
+                "Organisation",
+                "Dateien"
+            ],
+            "tags": [
+                "jarvis-projekt"
+            ]
         }
     },
     "proactivity_enabled": true,
