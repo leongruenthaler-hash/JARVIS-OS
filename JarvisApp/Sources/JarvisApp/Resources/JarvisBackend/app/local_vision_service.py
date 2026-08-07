@@ -100,6 +100,36 @@ class LocalVisionService:
     def describe_images(self, image_urls: list[str | Path]) -> list[dict[str, Any]]:
         return [self.describe_image(path) for path in image_urls]
 
+    def describe_screen(self, image_url: str | Path) -> dict[str, Any]:
+        """Wie describe_image(), aber mit einem auf Bildschirminhalte statt Fotos
+        zugeschnittenen Prompt (App/Fenster/sichtbarer Text statt Motiv/Farben)."""
+        image_path = Path(image_url)
+        status = self.status()
+        if not status.available:
+            raise LocalVisionError(status.message)
+        if not image_path.exists() or image_path.stat().st_size <= 0:
+            raise LocalVisionError(f"Screenshot fehlt lokal: {image_path}")
+
+        prompt = (
+            "Analysiere diesen Bildschirm-Screenshot lokal fuer Jarvis. Keine Personennamen raten, "
+            "keine Gesichter identifizieren. Antworte auf Deutsch als kompaktes JSON mit diesen "
+            "Schluesseln: description, app, objects, text, search_terms. "
+            "description: ein kurzer natuerlicher Satz, was auf dem Bildschirm zu sehen ist. "
+            "app: die vermutlich aktive App oder Website, falls erkennbar, sonst leerer String. "
+            "objects/search_terms: kurze Arrays sichtbarer UI-Elemente/Themen. "
+            "text: sichtbaren Text (Titel, Ueberschriften) knapp zusammengefasst, nicht wortwoertlich abtippen."
+        )
+        response_text = self._ollama_generate(status.model, prompt, image_path)
+        parsed = self._parse_response(response_text)
+        parsed["app"] = clean_text(self._parse_screen_app(response_text))
+        parsed["model"] = status.model
+        return parsed
+
+    @staticmethod
+    def _parse_screen_app(text: str) -> str:
+        match = re.search(r'"app"\s*:\s*"([^"]*)"', text)
+        return match.group(1) if match else ""
+
     def extract_search_tags(self, image_url: str | Path) -> list[str]:
         result = self.describe_image(image_url)
         tags: set[str] = set()
@@ -157,8 +187,18 @@ class LocalVisionService:
             "images": [image_b64],
             "stream": False,
             "options": {
-                "num_ctx": int(self.config.get("local_vision_num_ctx", 2048)),
-                "num_predict": int(self.config.get("local_vision_num_predict", 180)),
+                # War 2048 - live getestet: ein Bildschirm-Screenshot in voller Aufloesung
+                # tokenisiert bei qwen2.5vl auf ueber 4000 Tokens (llava kommt mit 2048 aus,
+                # qwen2.5vl's Bild-Tokenizer ist feiner) - Ollama antwortet sonst mit HTTP 400
+                # "exceeds the available context size" statt einer Beschreibung.
+                "num_ctx": int(self.config.get("local_vision_num_ctx", 8192)),
+                # War 180 - live getestet: das reicht nicht, um das volle JSON-Schema
+                # (description/objects/scene/colors/text/search_terms bzw. .../app) zu Ende
+                # zu generieren, das Modell wird mitten im JSON abgeschnitten, json.loads()
+                # schlägt fehl und _parse_response() faellt auf den unstrukturierten
+                # Rohtext-Fallback zurueck (sichtbar an raw "```json {...", nicht zu Ende
+                # geschriebenem JSON in describe_screen()-Antworten).
+                "num_predict": int(self.config.get("local_vision_num_predict", 400)),
                 "temperature": float(self.config.get("local_vision_temperature", 0.1)),
             },
         }

@@ -53,6 +53,9 @@
 		1D311D8055F64F1BA6F5C74C /* Images in Resources */ = {isa = PBXBuildFile; fileRef = 887606F4384B4D53BFEA33C3 /* Images */; };
 		C16D1BD16AFC989DE48E7456 /* LicensesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D045C8D752CE886EE4E99A82 /* LicensesView.swift */; };
 		67DAFB2C1E34610FA774B0F5 /* MemoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F86BBCEB6081834A36B5557 /* MemoryView.swift */; };
+		B27C0AACDE904572955A2BE1 /* MemoryCoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27E3C0CF365B47FDA6BF0DE8 /* MemoryCoreView.swift */; };
+		2D43490B9A7F4580A6FD7F40 /* MemoryCoreLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F96930612F747DFA5C63B67 /* MemoryCoreLayout.swift */; };
+		CC0164A2A24942679A08104A /* MemorySynapsePulse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 370756B3665D46F78BA83C51 /* MemorySynapsePulse.swift */; };
 		07B13397348C35736E6A71D5 /* TasksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1902F7BCD2DFE59543751E53 /* TasksView.swift */; };
 /* End PBXBuildFile section */
 
@@ -104,6 +107,9 @@
 		887606F4384B4D53BFEA33C3 /* Images */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/JarvisApp/Resources/Images; sourceTree = SOURCE_ROOT; };
 		D045C8D752CE886EE4E99A82 /* LicensesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LicensesView.swift; sourceTree = "<group>"; };
 		5F86BBCEB6081834A36B5557 /* MemoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryView.swift; sourceTree = "<group>"; };
+		27E3C0CF365B47FDA6BF0DE8 /* MemoryCoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryCoreView.swift; sourceTree = "<group>"; };
+		3F96930612F747DFA5C63B67 /* MemoryCoreLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryCoreLayout.swift; sourceTree = "<group>"; };
+		370756B3665D46F78BA83C51 /* MemorySynapsePulse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemorySynapsePulse.swift; sourceTree = "<group>"; };
 		1902F7BCD2DFE59543751E53 /* TasksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TasksView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -165,6 +171,7 @@
 					55545D9D4E1E70D1A8E00B36 /* OnboardingView.swift */,
 					1A2B3C4D5E6F708192A3B4C8 /* PhotosView.swift */,
 					5F86BBCEB6081834A36B5557 /* MemoryView.swift */,
+					27E3C0CF365B47FDA6BF0DE8 /* MemoryCoreView.swift */,
 					1902F7BCD2DFE59543751E53 /* TasksView.swift */,
 					85002DF6FCD359EC134EC4F9 /* PrivacyView.swift */,
 				FED92BDBA779BC8A1F4138B2 /* RootView.swift */,
@@ -201,6 +208,8 @@
 				2A1B3C4D5E6F708192A3B4C0 /* AudioCaptureService.swift */,
 				B46CBAFAF3DB457C442D8FD3 /* JarvisAPIClient.swift */,
 				2805D3602E78FDB8A2D88F3B /* JarvisModels.swift */,
+					3F96930612F747DFA5C63B67 /* MemoryCoreLayout.swift */,
+					370756B3665D46F78BA83C51 /* MemorySynapsePulse.swift */,
 				2B7E1011A9C44CCB8F311001 /* JarvisTheme.swift */,
 					30E64A9827D02FDF81834A79 /* LocalServerController.swift */,
 					1A2B3C4D5E6F708192A3B4C4 /* ScanProgress.swift */,
@@ -349,6 +358,9 @@
 				1A2B3C4D5E6F708192A3B4C7 /* ScanProgressCard.swift in Sources */,
 				1A2B3C4D5E6F708192A3B4C9 /* PhotosView.swift in Sources */,
 				67DAFB2C1E34610FA774B0F5 /* MemoryView.swift in Sources */,
+				B27C0AACDE904572955A2BE1 /* MemoryCoreView.swift in Sources */,
+				2D43490B9A7F4580A6FD7F40 /* MemoryCoreLayout.swift in Sources */,
+				CC0164A2A24942679A08104A /* MemorySynapsePulse.swift in Sources */,
 				07B13397348C35736E6A71D5 /* TasksView.swift in Sources */,
 				1A2B3C4D5E6F708192A3B4CB /* FilesView.swift in Sources */,
 				1A2B3C4D5E6F708192A3B4D1 /* LiquidGlass.swift in Sources */,

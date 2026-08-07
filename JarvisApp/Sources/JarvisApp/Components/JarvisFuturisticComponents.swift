@@ -197,6 +197,26 @@ struct JarvisStatusPill: View {
     }
 }
 
+/// Shared color mapping for memory facts (Gedaechtnis-Kern-Ansicht) - used by both
+/// MemoryCoreView's nodes and MemoryView's list pills, so the two representations of
+/// the same fact never disagree on what a color means. See
+/// plans/2026-08-07-jarvis-memory-neural-network-view.md.
+func memorySensitivityColor(_ sensitivity: String) -> Color {
+    switch sensitivity {
+    case "personal": return .orange
+    case "confidential", "highly-sensitive": return .red
+    default: return .cyan
+    }
+}
+
+func memoryStatusOpacity(_ status: String) -> Double {
+    switch status {
+    case "pending_confirmation": return 0.55
+    case "rejected": return 0.25
+    default: return 0.9
+    }
+}
+
 struct JarvisDividerLine: View {
     var tint: Color = .cyan
 

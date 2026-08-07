@@ -301,6 +301,8 @@ class PhotoIndex:
             try:
                 self._export_preview(match.photo_id, destination, size)
                 exported += 1
+                from core.activity_log import record_activity
+                record_activity("photo", safe_name)
             except Exception as exc:
                 print(f"Foto-Schreibtisch-Export Fehler fuer ein Foto: {type(exc).__name__}")
 

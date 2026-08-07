@@ -6,7 +6,7 @@ struct PrivacyView: View {
     @State private var showClearLogsConfirmation = false
 
     private let groups: [PermissionGroup] = [
-        PermissionGroup(title: "Eingabe & Geräte", symbol: "mic", permissions: ["microphone", "camera", "location"]),
+        PermissionGroup(title: "Eingabe & Geräte", symbol: "mic", permissions: ["microphone", "camera", "screen", "location"]),
         PermissionGroup(title: "Apple Apps", symbol: "apple.logo", permissions: ["mail", "calendar", "reminders", "contacts", "notes", "photos", "music"]),
         PermissionGroup(title: "Dateien & Internet", symbol: "folder", permissions: ["files", "internet", "external_api"]),
         PermissionGroup(title: "KI & Speicher", symbol: "brain.head.profile", permissions: ["cloud_llm", "memory"])
@@ -254,6 +254,7 @@ struct PrivacyView: View {
         switch permission {
         case "microphone": return "Mikrofon"
         case "camera": return "Kamera"
+        case "screen": return "Bildschirm"
         case "location": return "Standort"
         case "mail": return "Mail"
         case "calendar": return "Kalender"
@@ -275,6 +276,7 @@ struct PrivacyView: View {
         switch permission {
         case "microphone": return "mic.fill"
         case "camera": return "camera.fill"
+        case "screen": return "rectangle.on.rectangle"
         case "location": return "location.fill"
         case "mail": return "envelope.fill"
         case "calendar": return "calendar"

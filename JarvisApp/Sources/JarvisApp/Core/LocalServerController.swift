@@ -1109,6 +1109,10 @@ final class LocalServerController: ObservableObject {
         try await apiClient.deleteMemoryFact(id: id)
     }
 
+    func recentActivity(since: TimeInterval) async throws -> [ActivityEvent] {
+        try await apiClient.recentActivity(since: since)
+    }
+
     func proactivityEvents() async throws -> [ProactiveEvent] {
         try await apiClient.proactivityEvents()
     }

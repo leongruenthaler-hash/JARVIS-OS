@@ -4,17 +4,66 @@ import SwiftUI
 /// remembered about them - the counterpart to the auto-extraction/Context Engine on
 /// the Python side (app/memory.py, app/core/context_engine.py). Before this existed,
 /// long_memory.json was only inspectable by opening the raw file.
+private enum MemoryDisplayMode {
+    case core, list
+}
+
 struct MemoryView: View {
     @EnvironmentObject private var appState: AppState
     @State private var searchText = ""
     @State private var selectedCategory = ""
     @State private var factPendingDeletion: MemoryFact?
+    @State private var displayMode: MemoryDisplayMode = .core
+    @State private var selectedFact: MemoryFact?
 
     private var categories: [String] {
         Array(Set(appState.memoryFacts.map(\.category))).sorted()
     }
 
     var body: some View {
+        mainContent
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(LiquidGlassBackground())
+            .navigationTitle("Gedächtnis")
+            .toolbar { toolbarContent }
+            .task { await appState.refreshMemoryFacts() }
+            .onChange(of: displayMode) { _, newValue in handleDisplayModeChange(newValue) }
+            .onAppear(perform: handleAppear)
+            .onDisappear(perform: appState.stopActivityPolling)
+            .sheet(item: $selectedFact, content: factDetailSheet)
+            .confirmationDialog(
+                "Erinnerung löschen?",
+                isPresented: isDeletionDialogPresented,
+                titleVisibility: .visible,
+                actions: deletionDialogActions,
+                message: deletionDialogMessage
+            )
+    }
+
+    @ViewBuilder
+    private var mainContent: some View {
+        if displayMode == .core {
+            coreContent
+        } else {
+            listContent
+        }
+    }
+
+    private var coreContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            header
+            filterBar.padding(.horizontal, 28)
+            MemoryCoreView(
+                facts: appState.memoryFacts,
+                activityEvents: appState.recentActivity,
+                onSelect: { selectedFact = $0 }
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .padding(.top, 28)
+    }
+
+    private var listContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 header
@@ -25,32 +74,68 @@ struct MemoryView: View {
             .frame(maxWidth: 1040, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(LiquidGlassBackground())
-        .navigationTitle("Gedächtnis")
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    Task { await appState.refreshMemoryFacts(search: searchText, category: selectedCategory) }
-                } label: {
-                    Label("Aktualisieren", systemImage: "arrow.clockwise")
-                }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Picker("Ansicht", selection: $displayMode) {
+                Image(systemName: "circle.hexagongrid.circle").tag(MemoryDisplayMode.core)
+                Image(systemName: "list.bullet").tag(MemoryDisplayMode.list)
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 90)
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                Task { await appState.refreshMemoryFacts(search: searchText, category: selectedCategory) }
+            } label: {
+                Label("Aktualisieren", systemImage: "arrow.clockwise")
             }
         }
-        .task { await appState.refreshMemoryFacts() }
-        .confirmationDialog("Erinnerung löschen?", isPresented: Binding(
+    }
+
+    private func handleDisplayModeChange(_ newValue: MemoryDisplayMode) {
+        if newValue == .core {
+            appState.startActivityPolling()
+        } else {
+            appState.stopActivityPolling()
+        }
+    }
+
+    private func handleAppear() {
+        if displayMode == .core { appState.startActivityPolling() }
+    }
+
+    private func factDetailSheet(_ fact: MemoryFact) -> some View {
+        MemoryFactDetailSheet(
+            fact: fact,
+            onConfirm: { Task { await appState.confirmMemoryFact(fact); selectedFact = nil } },
+            onReject: { Task { await appState.rejectMemoryFact(fact); selectedFact = nil } },
+            onDelete: { selectedFact = nil; factPendingDeletion = fact }
+        )
+    }
+
+    private var isDeletionDialogPresented: Binding<Bool> {
+        Binding(
             get: { factPendingDeletion != nil },
             set: { if !$0 { factPendingDeletion = nil } }
-        ), titleVisibility: .visible) {
-            Button("Löschen", role: .destructive) {
-                if let fact = factPendingDeletion {
-                    Task { await appState.deleteMemoryFact(fact) }
-                }
-                factPendingDeletion = nil
+        )
+    }
+
+    @ViewBuilder
+    private func deletionDialogActions() -> some View {
+        Button("Löschen", role: .destructive) {
+            if let fact = factPendingDeletion {
+                Task { await appState.deleteMemoryFact(fact) }
             }
-            Button("Abbrechen", role: .cancel) { factPendingDeletion = nil }
-        } message: {
-            Text("Diese Erinnerung wird endgültig entfernt und danach nicht mehr im Gespräch verwendet.")
+            factPendingDeletion = nil
         }
+        Button("Abbrechen", role: .cancel) { factPendingDeletion = nil }
+    }
+
+    private func deletionDialogMessage() -> some View {
+        Text("Diese Erinnerung wird endgültig entfernt und danach nicht mehr im Gespräch verwendet.")
     }
 
     private var header: some View {
@@ -122,6 +207,7 @@ struct MemoryView: View {
                         .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 6) {
                         pill(fact.category, tint: .blue)
+                        pill(sourceLabel(fact.sourceType), tint: .secondary)
                         pill(sensitivityLabel(fact.sensitivity), tint: sensitivityTint(fact.sensitivity))
                         pill(statusLabel(fact.status), tint: statusTint(fact.status))
                         if let lastUsed = fact.lastUsedAt, !lastUsed.isEmpty {
@@ -171,37 +257,106 @@ struct MemoryView: View {
             .background(tint.opacity(0.12), in: Capsule())
     }
 
-    private func sensitivityLabel(_ sensitivity: String) -> String {
-        switch sensitivity {
-        case "personal": return "Persönlich"
-        case "confidential": return "Vertraulich"
-        case "highly-sensitive": return "Hochsensibel"
-        default: return "Normal"
+    private func sourceLabel(_ sourceType: String) -> String { memoryFactSourceLabel(sourceType) }
+    private func sensitivityLabel(_ sensitivity: String) -> String { memoryFactSensitivityLabel(sensitivity) }
+    private func sensitivityTint(_ sensitivity: String) -> Color { memorySensitivityColor(sensitivity) }
+    private func statusLabel(_ status: String) -> String { memoryFactStatusLabel(status) }
+    private func statusTint(_ status: String) -> Color { memoryFactStatusTint(status) }
+}
+
+/// Shared with MemoryView's list pills and MemoryCoreView's tap-to-open detail sheet -
+/// the full fact text plus the same confirm/reject/delete actions the list row offers,
+/// just in a sheet instead of inline (a Canvas node has no room for inline buttons).
+struct MemoryFactDetailSheet: View {
+    let fact: MemoryFact
+    let onConfirm: () -> Void
+    let onReject: () -> Void
+    let onDelete: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(fact.content)
+                .font(.title3)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 6) {
+                detailPill(fact.category, tint: .blue)
+                detailPill(memoryFactSourceLabel(fact.sourceType), tint: .secondary)
+                detailPill(memoryFactSensitivityLabel(fact.sensitivity), tint: memorySensitivityColor(fact.sensitivity))
+                detailPill(memoryFactStatusLabel(fact.status), tint: memoryFactStatusTint(fact.status))
+            }
+
+            if let lastUsed = fact.lastUsedAt, !lastUsed.isEmpty {
+                Text("Zuletzt verwendet: \(lastUsed)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Divider()
+
+            HStack(spacing: 8) {
+                if fact.status != "confirmed" {
+                    Button("Bestätigen", action: onConfirm)
+                        .buttonStyle(.bordered)
+                }
+                if fact.status != "rejected" {
+                    Button("Ablehnen", action: onReject)
+                        .buttonStyle(.bordered)
+                }
+                Button("Löschen", role: .destructive, action: onDelete)
+                    .buttonStyle(.bordered)
+                Spacer()
+                Button("Fertig") { dismiss() }
+                    .buttonStyle(.borderedProminent)
+            }
         }
+        .padding(24)
+        .frame(minWidth: 420, idealWidth: 480)
     }
 
-    private func sensitivityTint(_ sensitivity: String) -> Color {
-        switch sensitivity {
-        case "personal": return .orange
-        case "confidential": return .red
-        case "highly-sensitive": return .red
-        default: return .secondary
-        }
+    private func detailPill(_ text: String, tint: Color) -> some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(tint.opacity(0.12), in: Capsule())
     }
+}
 
-    private func statusLabel(_ status: String) -> String {
-        switch status {
-        case "pending_confirmation": return "Wartet auf Bestätigung"
-        case "rejected": return "Abgelehnt"
-        default: return "Bestätigt"
-        }
+func memoryFactSourceLabel(_ sourceType: String) -> String {
+    switch sourceType {
+    case "manual": return "Manuell"
+    case "auto": return "Automatisch erkannt"
+    case "auto-llm": return "KI-Vermutung"
+    case "auto-vision": return "Bildschirm-Analyse"
+    default: return sourceType.isEmpty ? "Unbekannt" : sourceType
     }
+}
 
-    private func statusTint(_ status: String) -> Color {
-        switch status {
-        case "pending_confirmation": return .yellow
-        case "rejected": return .secondary
-        default: return .green
-        }
+func memoryFactSensitivityLabel(_ sensitivity: String) -> String {
+    switch sensitivity {
+    case "personal": return "Persönlich"
+    case "confidential": return "Vertraulich"
+    case "highly-sensitive": return "Hochsensibel"
+    default: return "Normal"
+    }
+}
+
+func memoryFactStatusLabel(_ status: String) -> String {
+    switch status {
+    case "pending_confirmation": return "Wartet auf Bestätigung"
+    case "rejected": return "Abgelehnt"
+    default: return "Bestätigt"
+    }
+}
+
+func memoryFactStatusTint(_ status: String) -> Color {
+    switch status {
+    case "pending_confirmation": return .yellow
+    case "rejected": return .secondary
+    default: return .green
     }
 }

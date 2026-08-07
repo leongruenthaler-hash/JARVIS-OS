@@ -69,7 +69,7 @@ from core.context_engine import CONTEXT_ENGINE, active_context_pack
 from core.conversation_manager import ConversationManager
 from core.daily_briefing import build_daily_briefing
 from core.memory_system import JarvisMemorySystem
-from core.voice_modes import (
+from core import (
     voice_mode_instruction,
     voice_mode_forces_compact,
 )
@@ -264,8 +264,8 @@ def handle_privacy_command(memory: Memory, text: str) -> str | None:
     dashboard = PrivacyDashboard(CONFIG)
     manager = PermissionManager()
 
-    grant_match = re.search(r"(?:erlaube|aktiviere)\s+(mail|kalender|erinnerungen|kontakte|dateien|mikrofon|kamera|standort|internet|fotos|photos|ki|cloud|speicher|memory)", normalized)
-    revoke_match = re.search(r"(?:deaktiviere|verbiete|entziehe)\s+(mail|kalender|erinnerungen|kontakte|dateien|mikrofon|kamera|standort|internet|fotos|photos|ki|cloud|speicher|memory)", normalized)
+    grant_match = re.search(r"(?:erlaube|aktiviere)\s+(mail|kalender|erinnerungen|kontakte|dateien|mikrofon|kamera|standort|internet|fotos|photos|bildschirm|ki|cloud|speicher|memory)", normalized)
+    revoke_match = re.search(r"(?:deaktiviere|verbiete|entziehe)\s+(mail|kalender|erinnerungen|kontakte|dateien|mikrofon|kamera|standort|internet|fotos|photos|bildschirm|ki|cloud|speicher|memory)", normalized)
     mapping = {
         "mikrofon": "microphone",
         "kamera": "camera",
@@ -276,6 +276,7 @@ def handle_privacy_command(memory: Memory, text: str) -> str | None:
         "dateien": "files",
         "fotos": "photos",
         "photos": "photos",
+        "bildschirm": "screen",
         "ki": "cloud_llm",
         "cloud": "cloud_llm",
         "speicher": "memory",
@@ -648,6 +649,17 @@ DOMAIN_TERMS = {
         "foto index",
         "index statistik",
         "indexstatistik",
+    ),
+    "screen": (
+        "bildschirm",
+        "bildschirmfoto",
+        "bildschirmaufnahme",
+        "screenshot",
+        "screen shot",
+        "was siehst du gerade",
+        "schau dir meinen bildschirm",
+        "schau auf meinen bildschirm",
+        "guck dir meinen bildschirm",
     ),
     "files": (
         "datei",
@@ -4360,6 +4372,73 @@ def handle_photo_command(
         return "Ich konnte Fotos nicht durchsuchen."
 
 
+def handle_screen_command(text: str, memory: Memory | None = None) -> str | None:
+    """Vision Engine (Phase F): ein einzelner Screenshot auf Zuruf, lokal per
+    Ollama-Vision-Modell analysiert, danach sofort gelöscht - kein Dauer-Capture,
+    kein Speichern des Bildes selbst. Nimmt nur das aktive Fenster auf (nicht den
+    ganzen Bildschirm), damit andere offene Fenster nie mit erfasst werden - fällt
+    nur zurück auf den ganzen Bildschirm, wenn das aktive Fenster technisch nicht
+    ermittelt werden kann (siehe screen_client.capture_active_window_screenshot).
+
+    Die Bildbeschreibung wird automatisch als Fakt vorgemerkt (status=
+    "pending_confirmation", niedrigere confidence) - wie die LLM-Auto-Extraktion
+    in extract_auto_memory_facts()/_run_llm_memory_extraction(): kein Zuruf wie
+    "merk dir das" nötig, aber auch nicht sofort als bestätigt gesetzt, weil eine
+    einzelne Bildbeschreibung ebenso fehlerhaft sein kann. Der Nutzer sieht und
+    bestätigt/verwirft das Ergebnis in der Gedächtnis-Ansicht."""
+    if not has_domain(text, "screen"):
+        return None
+
+    from local_vision_service import LocalVisionError, LocalVisionService
+    from screen_client import ScreenAccessError, capture_active_window_screenshot, discard_screenshot
+
+    service = LocalVisionService(CONFIG)
+    status = service.status()
+    if not status.available:
+        return status.message
+
+    try:
+        screenshot_path, active_app = capture_active_window_screenshot()
+    except ScreenAccessError as exc:
+        return str(exc)
+
+    try:
+        result = service.describe_screen(screenshot_path)
+    except LocalVisionError as exc:
+        return f"Ich konnte den Screenshot nicht analysieren: {exc}"
+    except Exception as exc:
+        print("Bildschirm-Vision Fehler:", type(exc).__name__)
+        return "Ich konnte den Screenshot gerade nicht analysieren."
+    finally:
+        discard_screenshot(screenshot_path)
+
+    description = result.get("description") or ""
+    # Der von System Events ermittelte App-Name ist zuverlässiger als die Vermutung
+    # des Vision-Modells aus dem Bildinhalt - wird bevorzugt, wenn vorhanden.
+    app = active_app or (result.get("app") or "")
+    if not description:
+        return "Ich habe das aktive Fenster aufgenommen, konnte aber nichts Eindeutiges erkennen."
+
+    summary = f"In {app}: {description}" if app else f"Auf deinem Bildschirm: {description}"
+
+    if memory is not None:
+        fact_subject = f"{configured_user_name()} hatte {app + ' ' if app else ''}offen: {description}"
+        content = normalize_memory_fact(fact_subject)
+        if content:
+            category, sensitivity = classify_memory_category(content)
+            memory_system = JarvisMemorySystem(memory.base_path)
+            memory_system.maybe_remember(
+                content,
+                category=category,
+                source="auto-vision",
+                confidence=0.6,
+                sensitivity=sensitivity,
+                status="pending_confirmation",
+            )
+
+    return summary
+
+
 def is_execution_promise(text: str) -> bool:
     normalized = normalize_text(text)
     promise_terms = (
@@ -5027,6 +5106,20 @@ def main():
                 record_exchange(memory, question, photo_answer)
                 print(f"\nJARVIS: {console_text(photo_answer, 'answer')}")
                 speak(photo_answer, voice=voice)
+                continue
+
+            screen_permission = ensure_privacy_domain_permission(memory, "screen", "Jarvis würde einen einzelnen Screenshot deines aktiven Fensters aufnehmen und lokal analysieren.") if has_domain(question, "screen") else None
+            if screen_permission is not None:
+                print(f"\nJARVIS: {console_text(screen_permission, 'answer')}")
+                speak(screen_permission, voice=voice)
+                continue
+
+            screen_answer = handle_screen_command(question, memory=memory) if has_permission("screen") else None
+            if screen_answer is not None:
+                pending_mail_followup = False
+                record_exchange(memory, question, screen_answer)
+                print(f"\nJARVIS: {console_text(screen_answer, 'answer')}")
+                speak(screen_answer, voice=voice)
                 continue
 
             mail_export_permission = ensure_privacy_domain_permission(memory, "mail", "Jarvis würde Mail-Übersichten lesen und passende Anhänge oder Notizen auf den Schreibtisch kopieren.") if has_domain(question, "mail") else None

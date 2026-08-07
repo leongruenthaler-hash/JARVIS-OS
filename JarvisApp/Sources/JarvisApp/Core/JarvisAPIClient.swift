@@ -347,6 +347,14 @@ struct JarvisAPIClient {
         return response.ok
     }
 
+    func recentActivity(since: TimeInterval) async throws -> [ActivityEvent] {
+        var components = URLComponents()
+        components.queryItems = [URLQueryItem(name: "since", value: String(since))]
+        let query = components.percentEncodedQuery.map { "?\($0)" } ?? ""
+        let response: ActivityEventsResponse = try await get("/api/activity/recent" + query)
+        return response.events
+    }
+
     func proactivityEvents() async throws -> [ProactiveEvent] {
         let response: ProactiveEventsResponse = try await get("/api/proactivity/events")
         return response.events

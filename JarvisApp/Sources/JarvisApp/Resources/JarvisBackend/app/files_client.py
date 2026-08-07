@@ -268,6 +268,8 @@ def move_indexed_matches_to_folder(
                 continue
             shutil.move(str(source), str(destination))
             moved.append(source.name)
+            from core.activity_log import record_activity
+            record_activity("file", source.name)
         except OSError:
             skipped.append(str(entry.get("name") or source.name))
 
@@ -310,6 +312,8 @@ def move_item(source_name: str, target_folder_name: str, root_hint: str | None =
         return f"Im Ordner {target_folder.name} gibt es bereits etwas mit dem Namen {source.name}. Ich habe nichts verschoben."
 
     shutil.move(str(source), str(destination))
+    from core.activity_log import record_activity
+    record_activity("file", source.name)
     return f"Erledigt. Ich habe {source.name} in den Ordner {target_folder.name} verschoben."
 
 
@@ -350,6 +354,8 @@ def move_items_matching(query: str, target_folder_name: str, root_hint: str | No
             continue
         shutil.move(str(source), str(destination))
         moved.append(source.name)
+        from core.activity_log import record_activity
+        record_activity("file", source.name)
 
     if not moved:
         return f"Ich habe nichts verschoben, weil im Ordner {target_folder.name} schon passende Dateien vorhanden sind."
@@ -379,6 +385,8 @@ def copy_item(source_name: str, target_folder_name: str, root_hint: str | None =
         shutil.copytree(str(source), str(destination))
     else:
         shutil.copy2(str(source), str(destination))
+    from core.activity_log import record_activity
+    record_activity("file", source.name)
     return f"Erledigt. Ich habe {source.name} in den Ordner {target_folder.name} kopiert."
 
 

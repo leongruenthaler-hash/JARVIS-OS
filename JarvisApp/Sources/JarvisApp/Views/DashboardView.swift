@@ -503,6 +503,15 @@ struct DashboardView: View {
         .dashboardGlass(cornerRadius: 18)
     }
 
+    /// Schickt den Bildschirm-Befehl (Phase F, siehe docs/vision-system.md) wie eine normale
+    /// Chat-Nachricht ab und wechselt zur Chat-Ansicht, damit die Antwort (oder eine
+    /// ausstehende Berechtigungsabfrage) sofort sichtbar ist - kein separater Aufnahmepfad,
+    /// nur ein Shortcut für dieselbe Frage, die man auch tippen könnte.
+    private func triggerScreenshotQuickAction() {
+        activeSection = .section(.chat)
+        Task { await appState.send("Schau dir meinen Bildschirm an.") }
+    }
+
     private var quickAccessBar: some View {
         HStack(spacing: 12) {
             HStack(spacing: 6) {
@@ -531,6 +540,14 @@ struct DashboardView: View {
                 .padding(.vertical, 8)
                 .background(Capsule().fill(Color.white.opacity(0.08)))
                 .overlay(Capsule().strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
+                .contentShape(Capsule())
+                // Nur dieser Chip ist verdrahtet - die anderen drei ("Notizen erstellen" etc.)
+                // bleiben bewusst unverändert dekorativ, das war nicht Teil der Anfrage.
+                .onTapGesture {
+                    if label == "Screenshot machen" {
+                        triggerScreenshotQuickAction()
+                    }
+                }
             }
 
             Spacer(minLength: 0)

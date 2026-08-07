@@ -23,6 +23,7 @@ PERMISSION_DEFINITIONS: dict[str, str] = {
     "notes": "Jarvis nutzt Notizen nur, um angefragte Notizen zu erstellen, zu lesen oder zu ändern.",
     "files": "Jarvis nutzt Dateien nur, um angefragte Ordner und Dateien lokal zu suchen, zu kopieren oder zu verschieben.",
     "photos": "Jarvis nutzt Fotos nur, um deine Fotomediathek nach deiner Freigabe zu durchsuchen oder Alben zu erstellen.",
+    "screen": "Jarvis macht nur nach deiner Freigabe einen einzelnen Screenshot deines aktiven Fensters (nicht der ganzen Bildschirm-Ansicht), analysiert ihn lokal und löscht ihn danach sofort wieder.",
     "music": "Jarvis steuert Musik nur, wenn du Musikfunktionen ausdrücklich nutzt.",
     "internet": "Jarvis nutzt Internetzugriff nur für Websuche oder externe Dienste, wenn du zustimmst.",
     "external_api": "Jarvis sendet Daten an externe APIs nur nach aktiver Zustimmung.",

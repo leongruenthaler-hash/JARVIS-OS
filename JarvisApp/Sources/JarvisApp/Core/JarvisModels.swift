@@ -184,6 +184,27 @@ struct MemoryFactsResponse: Codable {
     let total: Int
 }
 
+/// A single "Jarvis just touched this" event (Phase F-Folgeschritt, see
+/// app/core/activity_log.py) - fired when a specific photo/file gets exported or
+/// copied, or a memory fact actually gets used in a prompt. Feeds the live-access
+/// flare animation in MemoryCoreView, not a persisted record - purely transient.
+struct ActivityEvent: Codable, Identifiable, Equatable {
+    var type: String
+    var label: String
+    var reference: String?
+    var at: TimeInterval
+
+    var id: String { "\(type)-\(at)-\(label)" }
+
+    enum CodingKeys: String, CodingKey {
+        case type, label, reference, at
+    }
+}
+
+struct ActivityEventsResponse: Codable {
+    let events: [ActivityEvent]
+}
+
 /// Phase D: internal tasks, separate from Apple Reminders (CalendarRemindersView).
 /// Auto-detected tasks (from conversation/mail) always start life with
 /// status "vorgeschlagen" - see app/core/task_manager.py - never silently binding.

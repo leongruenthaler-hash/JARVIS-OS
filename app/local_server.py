@@ -26,7 +26,7 @@ from core.daily_briefing import build_daily_briefing
 from core.proactivity_engine import PROACTIVITY_ENGINE
 from core.task_manager import TaskManager
 from core.voice_performance import VOICE_PERFORMANCE_LOG
-from core.voice_modes import (
+from core import (
     VOICE_MODES,
     normalize_voice_mode,
     voice_mode_disables_web_search,
@@ -234,6 +234,20 @@ class JarvisLocalServer:
 
         facts.sort(key=lambda f: str(f.get("updated_at") or f.get("created_at") or ""), reverse=True)
         return {"facts": facts[:limit], "total": len(facts)}
+
+    def recent_activity(self, query: dict[str, Any]) -> dict[str, Any]:
+        """Live-Zugriffs-Feed fuer die Gedaechtnis-Kern-Ansicht (Phase F-Folgeschritt):
+        gibt zurueck, worauf Jarvis seit `since` tatsaechlich zugegriffen hat (Foto,
+        Datei, Gedaechtnis-Fakt) - siehe app/core/activity_log.py. Nicht hinter der
+        "memory"-Berechtigung, aus demselben Grund wie list_memory_facts oben:
+        sichtbar machen ist kein zusaetzliches Speichern."""
+        from core.activity_log import recent_activity as fetch_recent_activity
+
+        try:
+            since = float(query.get("since") or 0)
+        except (TypeError, ValueError):
+            since = 0.0
+        return {"events": fetch_recent_activity(since)}
 
     def update_memory_fact(self, payload: dict[str, Any]) -> dict[str, Any]:
         fact_id = str(payload.get("id") or "")
@@ -1763,6 +1777,17 @@ class JarvisLocalServer:
                         answer = self._finalize_answer(core, question, answer)
                         return str(answer)
 
+                screen_permission = core.ensure_privacy_domain_permission(memory, "screen", "Jarvis würde einen einzelnen Screenshot deines aktiven Fensters aufnehmen und lokal analysieren.") if core.has_domain(question, "screen") else None
+                if screen_permission is not None:
+                    return str(screen_permission)
+                screen_handler = getattr(core, "handle_screen_command", None)
+                if screen_handler is not None and core.has_permission("screen"):
+                    answer = screen_handler(question, memory=memory)
+                    if answer is not None:
+                        self.pending_mail_followup = False
+                        answer = self._finalize_answer(core, question, answer)
+                        return str(answer)
+
                 mail_export_permission = core.ensure_privacy_domain_permission(memory, "mail", "Jarvis würde Mail-Übersichten lesen und passende Anhänge oder Notizen auf den Schreibtisch kopieren.") if core.has_domain(question, "mail") else None
                 if mail_export_permission is not None:
                     return str(mail_export_permission)
@@ -2123,6 +2148,9 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/memory/facts":
                 query_params = dict(parse_qsl(urlparse(self.path).query))
                 self._json(200, SERVER.list_memory_facts(query_params))
+            elif path == "/api/activity/recent":
+                query_params = dict(parse_qsl(urlparse(self.path).query))
+                self._json(200, SERVER.recent_activity(query_params))
             elif path == "/api/proactivity/events":
                 self._json(200, SERVER.proactivity_events())
             elif path == "/api/proactivity/history":

@@ -99,6 +99,29 @@ Swift-Seite: `JarvisApp/Sources/JarvisApp/Views/MemoryView.swift`, erreichbar
 über die Seitenleiste ("Gedächtnis") und als Dashboard-Kachel wie jede andere
 bestehende Ansicht (kein Platzhalter).
 
+### Gedächtnis-Kern-Ansicht (Phase F-Folgeschritt)
+
+Standardansicht ist seither nicht mehr die Liste, sondern `MemoryCoreView.swift`:
+ein pulsierender Zentral-Kern mit konzentrischen Ringen pro Kategorie (größte
+Kategorie am nächsten am Kern, siehe `MemoryCoreLayout.swift`), auf denen Fakten
+als farblich codierte Knoten sitzen. Ein Umschalter in der Toolbar wechselt
+jederzeit zurück zur Liste - beide Ansichten teilen sich dieselbe
+`MemoryFactDetailSheet` für Bestätigen/Ablehnen/Löschen.
+
+Zusätzlich zeigt ein gedämpftes, gleichbleibend kleines Punktfeld außerhalb der
+Ringe den Fotos-/Dateien-Index an: sobald Jarvis tatsächlich auf ein konkretes
+Foto oder eine Datei zugreift (nicht bei bloßem Auflisten/Suchen), meldet
+`app/core/activity_log.py` das über `record_activity()` - Hooks sitzen in
+`memory.py:touch_fact()`, `photos_client.py` (Foto-Export) und `files_client.py`
+(Datei-Verschieben/-Kopieren). Die Swift-Seite pollt `GET
+/api/activity/recent?since=...` alle 1,5s, aber ausschließlich solange die
+Kern-Ansicht sichtbar ist (`AppState.startActivityPolling()`/
+`stopActivityPolling()`), und lässt dafür einen echten, benannten Punkt im Feld
+kurz aufleuchten statt jede einzelne Datei dauerhaft als eigenen Knoten zu
+führen - bei potenziell zehntausenden Fotos/Dateien wäre Letzteres ein
+Performance-Risiko gewesen. Details und Design-Alternativen:
+`plans/2026-08-07-jarvis-memory-neural-network-view.md` im CEO-GPT-Repo.
+
 ## Context Packs
 
 `config.json` kennt `active_context_pack` (Name oder leer = deaktiviert) und

@@ -28,6 +28,7 @@ final class AppState: ObservableObject {
     @Published var voiceMode = "standard"
     @Published var availableVoiceModes: [String] = ["kurz", "standard", "fokus", "diskret", "privat"]
     @Published var memoryIsLoading = false
+    @Published var recentActivity: [ActivityEvent] = []
     @Published var mailResult = "Noch keine Mail-Aktion ausgeführt."
     @Published var mailIsLoading = false
     @Published var mailScanProgress = ScanProgress()
@@ -99,6 +100,8 @@ final class AppState: ObservableObject {
     private var nextVoiceListenTask: Task<Void, Never>?
     private var backgroundReconnectTask: Task<Void, Never>?
     private var proactivityPollingTask: Task<Void, Never>?
+    private var activityPollingTask: Task<Void, Never>?
+    private var lastActivityPollAt: TimeInterval = 0
     private var shownProactiveEventIDs: Set<String> = []
     private var voiceStopGeneration = 0
     private var debugLoggingEnabled: Bool {
@@ -1303,6 +1306,44 @@ final class AppState: ObservableObject {
             await refreshStatus(startIfOffline: false)
         } catch {
             lastError = "Logs konnten nicht gelöscht werden."
+        }
+    }
+
+    /// Live-Zugriffs-Feed fuer die Gedaechtnis-Kern-Ansicht (Phase F-Folgeschritt): laeuft
+    /// nur, waehrend MemoryCoreView tatsaechlich sichtbar ist (siehe MemoryView's
+    /// .onAppear/.onDisappear) - kein Dauer-Polling im Hintergrund, wenn niemand hinschaut.
+    func startActivityPolling() {
+        guard activityPollingTask == nil else { return }
+        lastActivityPollAt = Date().timeIntervalSince1970
+        activityPollingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                await self.pollRecentActivity()
+                try? await Task.sleep(for: .milliseconds(1500))
+            }
+        }
+    }
+
+    func stopActivityPolling() {
+        activityPollingTask?.cancel()
+        activityPollingTask = nil
+    }
+
+    private func pollRecentActivity() async {
+        guard status != .offline else { return }
+        do {
+            let events = try await serverController.recentActivity(since: lastActivityPollAt)
+            if let latest = events.map(\.at).max() {
+                lastActivityPollAt = latest
+            }
+            if !events.isEmpty {
+                recentActivity.append(contentsOf: events)
+            }
+            let cutoff = Date().timeIntervalSince1970 - 3
+            recentActivity.removeAll { $0.at < cutoff }
+        } catch {
+            // Stumm fehlschlagen - ein verpasster Zugriffs-Poll ist rein kosmetisch
+            // (die Kern-Ansicht bleibt sonst voll funktionsfaehig), kein lastError-Wert.
         }
     }
 

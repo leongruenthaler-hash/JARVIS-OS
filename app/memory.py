@@ -472,6 +472,8 @@ class Memory:
         with self._lock:
             item["last_used_at"] = datetime.now().isoformat(timespec="seconds")
             self.save("long_memory")
+        from core.activity_log import record_activity
+        record_activity("memory", str(item.get("content", ""))[:60], reference=fact_id)
 
     def update_fact(self, fact_id: str, **fields: Any) -> bool:
         """Edits a fact's editable metadata (content, category, sensitivity, scope,
