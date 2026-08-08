@@ -48,13 +48,13 @@ komplett, wenn `voiceMode == "diskret"`. Der Server liefert zusätzlich ein
 `voice_output_suppressed`-Feld in der Chat-Antwort (informativ/zur
 Absicherung, aber nicht der primäre Durchsetzungsweg).
 
-**"Privater Modus" ist bewusst unvollständig**: Er deaktiviert Websuche für
-den aktuellen Zug (`app/local_server.py`, `_answer_with_core`), erzwingt aber
-**nicht** den LLM-Provider selbst (Ollama statt OpenAI, falls Cloud-KI
-aktiviert ist). Eine korrekte Provider-Erzwingung pro Zug hätte tiefere,
-ungetestete Eingriffe in `app/model_router.py`/`ModelRoute` gebraucht, die
-ich ohne Möglichkeit, Modellrouting live zu testen, nicht riskieren wollte.
-Folgeschritt, kein aktueller Bug.
+**"Privater Modus"** deaktiviert Websuche für den aktuellen Zug
+(`app/local_server.py`, `_answer_with_core`) und erzwingt seit einem
+Security-Audit am 2026-08-07 (Commit `6ee7550`) zusätzlich echt den lokalen
+LLM-Provider für diesen Zug (`force_local` durchgereicht durch
+`LLMClient.plan()`/`.ask()`/`.ask_stream()`, gesteuert über
+`core/voice_modes.py::forces_local_only()`) - vorher war das nur eine
+Prompt-Anweisung ("tu so als wärst du lokal"), keine technische Sperre.
 
 ### Latenzmessung (Master-Plan 6.5)
 
@@ -95,4 +95,3 @@ Sekunde" (Abschnitt 6.5) real erreicht wird, statt es zu vermuten.
   die übrigen Engines wäre ein größerer, eigenständiger Umbau.
 - Mobile Sprachsteuerung (Master-Plan 6.3) - kein iPhone-Client existiert,
   außerhalb des Projektumfangs bisher.
-- "Privater Modus" erzwingt noch nicht den LLM-Provider (siehe oben).

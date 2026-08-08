@@ -4,6 +4,8 @@ import subprocess
 from dataclasses import dataclass
 from urllib.parse import quote
 
+from core.intent_matching import levenshtein_distance as _levenshtein_distance
+
 
 FIELD_SEPARATOR = "\x1f"
 RECORD_SEPARATOR = "\x1e"
@@ -318,29 +320,6 @@ def _compact_name(text: str) -> str:
 
 def _without_vowels(text: str) -> str:
     return "".join(char for char in _compact_name(text) if char not in "aeiouäöü")
-
-
-def _levenshtein_distance(left: str, right: str) -> int:
-    if left == right:
-        return 0
-
-    if not left:
-        return len(right)
-
-    if not right:
-        return len(left)
-
-    previous = list(range(len(right) + 1))
-    for left_index, left_char in enumerate(left, start=1):
-        current = [left_index]
-        for right_index, right_char in enumerate(right, start=1):
-            insert_cost = current[right_index - 1] + 1
-            delete_cost = previous[right_index] + 1
-            replace_cost = previous[right_index - 1] + (left_char != right_char)
-            current.append(min(insert_cost, delete_cost, replace_cost))
-        previous = current
-
-    return previous[-1]
 
 
 def _clean_phone(phone: str) -> str:

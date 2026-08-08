@@ -68,7 +68,12 @@ class ModelRouter:
                 provider="ollama",
                 model=selected,
                 max_output_tokens=int(self.config.get("phi4_mini_num_predict", 80)),
-                num_ctx=int(self.config.get("ollama_num_ctx", 1024)),
+                # phi4-mini ist das Default-Modell im Default-Modus - ohne dieses
+                # Mindest-Kontextfenster wuerde das hoehere Antwortbudget oben nicht
+                # mehr in den Kontext passen und Antworten wuerden weiterhin mitten
+                # im Satz abgeschnitten (siehe
+                # plans/2026-08-08-jarvis-intelligenz-verbessern.md, Aufgabe 5).
+                num_ctx=max(2048, int(self.config.get("ollama_num_ctx", 1024))),
                 temperature=0.2,
                 recent_context_limit=3,
                 compact_prompt=True,
@@ -92,8 +97,8 @@ class ModelRouter:
         return ModelRoute(
             provider="ollama",
             model=selected,
-            max_output_tokens=max(72, int(self.config.get("ollama_num_predict", 56)) + 24),
-            num_ctx=max(1280, int(self.config.get("ollama_num_ctx", 1024)) + 256),
+            max_output_tokens=max(160, int(self.config.get("ollama_num_predict", 56)) + 40),
+            num_ctx=max(2048, int(self.config.get("ollama_num_ctx", 1024)) + 256),
             temperature=0.25,
             recent_context_limit=4,
             compact_prompt=simple,

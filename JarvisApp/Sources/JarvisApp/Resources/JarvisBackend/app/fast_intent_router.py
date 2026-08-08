@@ -6,6 +6,8 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 from typing import Any
 
+from core.intent_matching import has_domain_fuzzy, normalize_umlauts
+
 
 @dataclass
 class FastIntentDecision:
@@ -79,28 +81,33 @@ class FastIntentRouter:
 
         return None
 
+    _OPEN_VERBS = ("oeffne", "starte", "oeffnen", "starten", "oeffnest", "starte bitte", "oeffne bitte")
+
     def _normalize(self, text: str) -> str:
         value = str(text or "").strip().lower()
         value = value.replace("-", " ")
         value = re.sub(r"\s+", " ", value)
-        return value
+        # ae/oe/ue/ss-Normalisierung, damit z.B. "Kalenda"/"Öffne" auch bei leicht
+        # falscher Spracherkennung/Tippfehlern noch erkannt werden (siehe
+        # core/intent_matching.py, has_domain_fuzzy).
+        return normalize_umlauts(value)
 
     def _looks_like_time_query(self, text: str) -> bool:
-        return any(term in text for term in ("wie spät", "wie spaet", "uhrzeit", "uhr"))
+        return has_domain_fuzzy(text, ("wie spaet", "uhrzeit", "uhr"))
 
     def _looks_like_date_query(self, text: str) -> bool:
-        return any(term in text for term in ("welcher tag", "welches datum", "datum", "heute für", "heutiger tag"))
+        return has_domain_fuzzy(text, ("welcher tag", "welches datum", "datum", "heute fuer", "heutiger tag"))
 
     def _looks_like_model_status(self, text: str) -> bool:
-        return any(term in text for term in ("welches modell", "modell nutzt", "welches modell nutzt du", "welcher modus"))
+        return has_domain_fuzzy(text, ("welches modell", "modell nutzt", "welches modell nutzt du", "welcher modus"))
 
     def _extract_open_app(self, text: str) -> str | None:
-        if not any(term in text for term in ("öffne", "oeffne", "starte", "öffnen", "oeffnen", "öffnest", "starte bitte", "öffne bitte")):
+        if not has_domain_fuzzy(text, self._OPEN_VERBS):
             return None
         for key, app_name in self.OPEN_APP_MAP.items():
-            if key in text:
+            if has_domain_fuzzy(text, (normalize_umlauts(key),)):
                 return app_name
         return None
 
     def _looks_like_small_system_query(self, text: str) -> bool:
-        return any(term in text for term in ("status", "überblick", "ueberblick", "was geht", "was steht", "was ist los", "zusammenfassung"))
+        return has_domain_fuzzy(text, ("status", "ueberblick", "was geht", "was steht", "was ist los", "zusammenfassung"))

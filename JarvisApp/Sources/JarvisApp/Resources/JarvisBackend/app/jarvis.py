@@ -74,6 +74,7 @@ from core import (
     voice_mode_forces_compact,
     voice_mode_forces_local_only,
 )
+from core.intent_matching import has_domain_fuzzy, normalize_umlauts
 from memory import Memory
 from model_manager import ModelManager
 from music_client import (
@@ -625,6 +626,8 @@ DOMAIN_TERMS = {
         "erinnerung",
         "erinnerungen",
         "erinnere mich",
+        "termine heute",
+        "agenda",
     ),
     "mail": (
         "mail",
@@ -638,6 +641,9 @@ DOMAIN_TERMS = {
         "inbox",
         "archiv",
         "icloud inbox",
+        # "nachricht"/"nachrichten" bewusst NICHT hier, das ueberlappt zu stark mit
+        # normalen Alltagssaetzen ("hast du eine Nachricht fuer mich") - bleibt fuer
+        # Stufe 2 (LLM-Klassifikation) offen statt Stufe 1 falsch-positiv zu machen.
     ),
     "photos": (
         "foto",
@@ -650,6 +656,8 @@ DOMAIN_TERMS = {
         "foto index",
         "index statistik",
         "indexstatistik",
+        "bilder von",
+        "aufnahmen",
     ),
     "screen": (
         "bildschirm",
@@ -677,6 +685,7 @@ DOMAIN_TERMS = {
         "home",
         "projektordner",
         "jarvis code",
+        "unterlagen",
     ),
     "music": (
         "musik",
@@ -687,6 +696,8 @@ DOMAIN_TERMS = {
         "titel",
         "playlist",
         "wiedergabe",
+        "abspielen",
+        "song spielen",
     ),
     "contacts": (
         "kontakt",
@@ -704,8 +715,14 @@ DOMAIN_TERMS = {
 
 
 def has_domain(text: str, domain: str) -> bool:
-    normalized = normalize_text(text)
-    return any(term in normalized for term in DOMAIN_TERMS.get(domain, ()))
+    # Umlaut-Normalisierung + Fuzzy-Wortvergleich bewusst nur hier, nicht global in
+    # normalize_text() (das hat 60+ Aufrufstellen mit eigenen Umlaut-Vergleichen,
+    # die dadurch kaputtgehen wuerden) - siehe
+    # plans/2026-08-08-jarvis-intelligenz-verbessern.md, Aufgabe 2.
+    normalized = normalize_umlauts(normalize_text(text))
+    terms = DOMAIN_TERMS.get(domain, ())
+    normalized_terms = tuple(normalize_umlauts(term) for term in terms)
+    return has_domain_fuzzy(normalized, normalized_terms)
 
 
 CALENDAR_QUERY_PHRASES = (
@@ -2159,6 +2176,7 @@ def has_pending_action(memory: Memory) -> bool:
         "pending_calendar_create",
         "pending_mail_document_export",
         "pending_file_action",
+        "pending_domain_clarification",
     )
     return any(isinstance(settings.get(key), dict) for key in pending_keys)
 
@@ -2343,6 +2361,175 @@ def handle_pending_note_flow(memory: Memory, text: str) -> str | None:
         return save_note_or_append(title or "Neue Notiz", body, append=bool(pending.get("append", False)))
 
     return None
+
+
+_DOMAIN_CLARIFICATION_LABELS = ("mail", "calendar", "notes", "files", "photos", "screen", "contacts", "music")
+
+
+def classify_domain_via_llm(llm: LLMClient, question: str) -> list[str]:
+    """Stufe 2 der Absichtserkennung (siehe plans/2026-08-08-jarvis-intelligenz-
+    verbessern.md): eine knappe Klassifikationsanfrage ans ohnehin geladene kleine
+    lokale Modell, NUR als Sicherheitsnetz, wenn has_domain()/has_domain_fuzzy()
+    (Stufe 1) fuer KEINE Domaene angeschlagen hat. Gibt 0-2 plausible Domaenen
+    zurueck, nie mehr - im Zweifel lieber nichts vorschlagen als falsch raten."""
+    labels_text = ", ".join(_DOMAIN_CLARIFICATION_LABELS)
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Du bist ein reiner Klassifikator, kein Gespraechspartner. Ordne die "
+                f"Nutzeranfrage GENAU EINER dieser Kategorien zu: {labels_text}, keine. "
+                "Antworte NUR mit dem Kategorie-Wort, klein geschrieben, ohne Satzzeichen "
+                "und ohne Erklaerung. Bist du unsicher zwischen zwei Kategorien, antworte "
+                "mit beiden, getrennt durch ein Komma. Passt erkennbar keine Kategorie, "
+                "antworte mit 'keine'."
+            ),
+        },
+        {"role": "user", "content": question},
+    ]
+    try:
+        raw = llm.ask(messages, max_output_tokens=20, user_text=question)
+    except Exception:
+        return []
+
+    found: list[str] = []
+    for token in re.split(r"[,;/]", raw.lower()):
+        cleaned = token.strip().strip(".:!? ")
+        if cleaned in _DOMAIN_CLARIFICATION_LABELS and cleaned not in found:
+            found.append(cleaned)
+        if len(found) >= 2:
+            break
+    return found
+
+
+_DOMAIN_CLARIFICATION_PHRASES = {
+    "mail": "deine Mails",
+    "calendar": "deinen Kalender oder eine Erinnerung",
+    "notes": "eine Notiz",
+    "files": "deine Dateien oder deinen Schreibtisch",
+    "photos": "deine Fotos",
+    "screen": "deinen Bildschirm",
+    "contacts": "deine Kontakte",
+    "music": "die Musik",
+}
+
+
+def maybe_ask_domain_clarification(llm: LLMClient, memory: Memory, question: str) -> str | None:
+    """Wird nur aufgerufen, wenn Stufe 1 nichts erkannt hat. Statt die Anfrage
+    stillschweigend in den werkzeuglosen Chat fallen zu lassen, fragt Jarvis aktiv
+    nach, wenn Stufe 2 eine plausible Faehigkeit vermutet - nie eine Vermutung
+    stillschweigend ausfuehren (siehe Leons ausdrueckliche Vorgabe: bei
+    Unsicherheit immer nachfragen, nie raten)."""
+    domains = classify_domain_via_llm(llm, question)
+    if not domains:
+        return None
+
+    try:
+        logger = PrivacyLogger(memory.base_path / "logs")
+        logger.log("intent_stage2", "domain_guessed", success=True, domain_count=len(domains))
+    except Exception:
+        pass
+
+    settings = memory.get("settings") or {}
+    settings["pending_domain_clarification"] = {"domains": domains, "question": question}
+    memory.set("settings", settings)
+
+    if len(domains) == 1:
+        guess = _DOMAIN_CLARIFICATION_PHRASES.get(domains[0], domains[0])
+        return f"Meintest du gerade {guess}, oder ging es um etwas anderes? Sag kurz, was gemeint war."
+    guesses = " oder ".join(_DOMAIN_CLARIFICATION_PHRASES.get(domain, domain) for domain in domains)
+    return f"Ging es dabei um {guesses}? Sag kurz, was gemeint war, dann mach ich weiter."
+
+
+def _dispatch_confirmed_domain(
+    domain: str,
+    question: str,
+    memory: Memory,
+    photo_worker: PhotoBackgroundWorker | None = None,
+) -> str | None:
+    """Ruft denselben Domaenen-Handler auf, den auch ein direkter Stichwort-Treffer
+    ausloesen wuerde - genutzt von handle_pending_domain_clarification_flow, NACHDEM
+    der Nutzer eine Stufe-2-Rueckfrage bestaetigt hat. `question` ist hier bereits um
+    das kanonische Domaenen-Stichwort ergaenzt (siehe Aufrufer), damit Handler mit
+    eigener, separater Stichwort-Erkennung (z. B. handle_mail_command) die Anfrage
+    zuverlaessig selbst erkennen, statt sich auf has_domain() allein zu verlassen."""
+    permission_prompts = {
+        "notes": "Jarvis würde eine Notiz über Apple Notes erstellen oder ändern.",
+        "calendar": "Jarvis würde Kalenderdaten verwenden.",
+        "files": "Jarvis würde deinen Schreibtisch oder Dateien lokal lesen oder ändern.",
+        "photos": "Jarvis würde deine Fotos-App oder den lokalen Fotoindex verwenden.",
+        "screen": "Jarvis würde einen einzelnen Screenshot deines aktiven Fensters aufnehmen und lokal analysieren.",
+        "mail": "Jarvis würde Apple Mail lokal lesen oder bearbeiten.",
+        "contacts": "Jarvis würde Kontakte lesen oder einen Anruf vorbereiten.",
+        "music": "Jarvis würde Apple Music oder die Musik-Wiedergabe steuern.",
+    }
+    prompt_text = permission_prompts.get(domain)
+    if prompt_text is not None:
+        permission_answer = ensure_privacy_domain_permission(memory, domain, prompt_text)
+        if permission_answer is not None:
+            return permission_answer
+
+    if domain == "notes":
+        return handle_notes_command(memory, question)
+    if domain == "calendar":
+        return handle_calendar_command(question, memory=memory)
+    if domain == "files":
+        return handle_desktop_command(question, memory=memory) or handle_file_command(question, memory=memory)
+    if domain == "photos":
+        return handle_photo_command(question, photo_worker, memory=memory)
+    if domain == "screen":
+        if not has_permission("screen"):
+            return None
+        return handle_screen_command(question, memory=memory)
+    if domain == "mail":
+        return handle_mail_command(LLMClient(CONFIG), question, force=True, memory=memory)
+    if domain == "contacts":
+        return handle_contact_command(question, memory=memory)
+    if domain == "music":
+        return handle_music_command(question)
+    return None
+
+
+def handle_pending_domain_clarification_flow(
+    memory: Memory,
+    text: str,
+    photo_worker: PhotoBackgroundWorker | None = None,
+) -> str | None:
+    settings = memory.get("settings") or {}
+    pending = settings.get("pending_domain_clarification")
+    if not isinstance(pending, dict):
+        return None
+
+    normalized = normalize_text(text)
+    candidates = [str(domain) for domain in (pending.get("domains") or []) if str(domain) in DOMAIN_TERMS]
+    original_question = str(pending.get("question") or text)
+
+    # Einmalige Rueckfrage - Zustand wird so oder so aufgeraeumt, egal wie die
+    # Antwort ausfaellt, damit keine Endlosschleife aus Rueckfragen entstehen kann.
+    settings.pop("pending_domain_clarification", None)
+    memory.set("settings", settings)
+
+    if normalized in {"nein", "nein danke", "abbrechen", "vergiss es", "stopp", "stop", "weder noch", "nichts davon"}:
+        return "Alles klar, dann lass ich das - sag gern nochmal genauer, was ich für dich tun soll."
+
+    chosen: str | None = None
+    if len(candidates) == 1 and normalized in {"ja", "ja bitte", "ok", "okay", "genau", "richtig", "stimmt"}:
+        chosen = candidates[0]
+    else:
+        for domain in candidates:
+            if has_domain(text, domain):
+                chosen = domain
+                break
+
+    if chosen is None:
+        # Antwort bestaetigt keine der Vermutungen und verneint auch nicht klar -
+        # nicht raten, stattdessen normal weiterverarbeiten lassen (die Antwort
+        # koennte z.B. auch ein komplett neuer, unabhaengiger Satz sein).
+        return None
+
+    canonical_term = DOMAIN_TERMS.get(chosen, ("",))[0]
+    reformulated = f"{canonical_term} {original_question}".strip()
+    return _dispatch_confirmed_domain(chosen, reformulated, memory, photo_worker=photo_worker)
 
 
 def handle_pending_action_flow(
@@ -5054,6 +5241,13 @@ def main():
                 speak(pending_note_answer, voice=voice)
                 continue
 
+            pending_domain_answer = handle_pending_domain_clarification_flow(memory, question, photo_worker=photo_worker)
+            if pending_domain_answer is not None:
+                record_exchange(memory, question, pending_domain_answer)
+                print(f"\nJARVIS: {console_text(pending_domain_answer, 'answer')}")
+                speak(pending_domain_answer, voice=voice)
+                continue
+
             permission_answer = ensure_privacy_domain_permission(memory, "notes", "Jarvis würde eine Notiz über Apple Notes erstellen oder ändern.") if has_domain(question, "notes") else None
             if permission_answer is not None:
                 print(f"\nJARVIS: {console_text(permission_answer, 'answer')}")
@@ -5215,6 +5409,16 @@ def main():
                 record_exchange(memory, question, music_answer)
                 print(f"\nJARVIS: {console_text(music_answer, 'answer')}")
                 speak(music_answer, voice=voice)
+                continue
+
+            # Stufe 2 der Absichtserkennung, siehe local_server.py::_answer_with_core
+            # fuer den ausfuehrlichen Kommentar - identisches Prinzip fuer diesen
+            # (separaten, CLI-only) Antwortpfad.
+            domain_clarification = maybe_ask_domain_clarification(llm, memory, question)
+            if domain_clarification is not None:
+                record_exchange(memory, question, domain_clarification)
+                print(f"\nJARVIS: {console_text(domain_clarification, 'answer')}")
+                speak(domain_clarification, voice=voice)
                 continue
 
             web_context = None

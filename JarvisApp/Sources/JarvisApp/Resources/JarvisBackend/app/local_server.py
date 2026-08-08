@@ -1722,6 +1722,7 @@ class JarvisLocalServer:
                 ("handle_model_command", (question,), {"memory": memory}),
                 ("handle_memory_command", (memory, question), {}),
                 ("handle_pending_note_flow", (memory, question), {}),
+                ("handle_pending_domain_clarification_flow", (memory, question), {"photo_worker": self.photo_worker}),
                 ("handle_pending_action_flow", (memory, question), {"photo_worker": self.photo_worker}),
             ]
             if hasattr(core, "has_pending_action") and core.has_pending_action(memory):
@@ -1878,6 +1879,19 @@ class JarvisLocalServer:
                     if answer is not None:
                         self.pending_mail_followup = False
                         answer = self._finalize_answer(core, question, answer)
+                        return str(answer)
+
+                # Stufe 2 der Absichtserkennung (siehe
+                # plans/2026-08-08-jarvis-intelligenz-verbessern.md): keiner der
+                # obigen Stichwort-Treffer (auch nicht fuzzy) hat gegriffen - statt
+                # stillschweigend in den werkzeuglosen Chat zu fallen, fragt Jarvis
+                # aktiv nach, falls eine kurze Modell-Klassifikation eine Faehigkeit
+                # fuer plausibel haelt. Findet die Klassifikation nichts, faellt der
+                # Code normal weiter in den Chat-Zweig unten.
+                if hasattr(core, "maybe_ask_domain_clarification"):
+                    clarification = core.maybe_ask_domain_clarification(self.llm, memory, question)
+                    if clarification is not None:
+                        answer = self._finalize_answer(core, question, clarification)
                         return str(answer)
 
             web_context = None

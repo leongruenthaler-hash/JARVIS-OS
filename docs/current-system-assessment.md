@@ -231,6 +231,57 @@ bräuchte echte Akustik-Echo-Unterdrückung, die ich ohne physisches Testen auf
 einem Gerät nicht blind riskieren wollte (Gefahr: Jarvis unterbricht sich
 ständig selbst). Echtes Streaming-STT für die batch-basierten Engines (nur
 der bereits vorhandene Apple-Speech-`--live`-Pfad liefert echte
-Teiltranskripte). "Privater Modus" erzwingt noch nicht den LLM-Provider
-selbst. Mobile Sprachsteuerung (kein iPhone-Client vorhanden). Siehe
+Teiltranskripte). Mobile Sprachsteuerung (kein iPhone-Client vorhanden). Siehe
 `docs/voice-system.md`, letzter Abschnitt.
+
+**Nachtrag (2026-08-08):** "Privater Modus" erzwingt inzwischen tatsächlich
+den lokalen LLM-Provider (nicht mehr nur eine Prompt-Anweisung) - behoben im
+Rahmen eines umfassenden Security-Audits, siehe Commit `6ee7550` und
+`app/core/voice_modes.py::forces_local_only()`.
+
+## 13. Robustere Absichtserkennung (2026-08-08)
+
+Ausgangspunkt: Rückmeldung, dass Jarvis eine Anweisung nicht mehr erkennt,
+sobald sie leicht anders formuliert ist oder der Nutzer sich verspricht.
+Ursache: `app/jarvis.py::has_domain()`/`DOMAIN_TERMS` akzeptierten bisher nur
+exakte Teilstring-Treffer gegen feste Stichwortlisten - ein einziger
+Tippfehler oder ein leicht falsch verstandenes Wort (Spracherkennung) reichte,
+um eine ganze Fähigkeit (Mail/Kalender/Dateien/...) unerreichbar zu machen;
+die Anfrage fiel dann still in den werkzeuglosen Chat-Zweig.
+
+Neu: gemeinsames Fuzzy-Matching-Modul `app/core/intent_matching.py`
+(Editierdistanz-Wortvergleich - dieselbe Technik, die für die
+Kontaktnamen-Suche in `contacts_client.py` bereits bewährt war, jetzt dorthin
+ausgelagert und zusätzlich von `jarvis.py`/`fast_intent_router.py` genutzt -
+plus automatische Umlaut-Normalisierung). `has_domain()` und
+`fast_intent_router.py` nutzen das jetzt für Tippfehler-/Verhaspel-Toleranz,
+mit einer bewusst kurzen Stopword-Liste (siehe Modul-Kommentar), die häufige
+Füllwörter wie "mal" davon ausschließt, versehentlich als Domänen-Treffer zu
+zählen (beim Testen konkret aufgefallen: "spiel mal Musik" hätte sonst als
+Mail-Anfrage gezählt, weil "mal" Editierdistanz 1 zu "mail" hat).
+
+Als Sicherheitsnetz für den Rest-Fall (Stufe 2): erkennt Stufe 1 keine
+Domäne, fragt Jarvis über eine kurze, günstige Klassifikationsanfrage ans
+ohnehin geladene lokale Modell aktiv nach, was gemeint war
+(`maybe_ask_domain_clarification()`/`handle_pending_domain_clarification_flow()`
+in `jarvis.py`), statt zu raten oder stillschweigend in den Chat-Zweig zu
+fallen - auf ausdrücklichen Wunsch immer nachfragen, nie automatisch
+entscheiden. Zusätzlich: Antwort-Budgets angehoben
+(`ollama_num_predict`/`phi4_mini_num_predict`/`openai_max_output_tokens` in
+`config.json`, `num_ctx` in `model_router.py`), damit Antworten nicht mehr
+mitten im Satz abgeschnitten werden. 20 neue Tests (insgesamt 100). Details:
+`plans/2026-08-08-jarvis-intelligenz-verbessern.md`.
+
+Bewusst nicht umgesetzt: volles LLM-Function-Calling statt
+Keyword-Dispatch (größerer, eigener Umbau, siehe Plan-Notizen). Stufe 2
+konnte aus Zeitgründen nicht so gebaut werden, dass sie bei Bestätigung
+direkt in jeden der acht Domänen-Handler durchreicht, ohne deren eigene
+(teils separate) Stichwort-Erkennung erneut zu durchlaufen - stattdessen wird
+die bestätigte Anfrage um das kanonische Domänen-Stichwort ergänzt und dann
+normal durch denselben Handler geschickt, den auch ein direkter
+Stichwort-Treffer auslösen würde. Der CLI-Pfad (`jarvis.py::main()`) erzwingt
+Stufe 1/Stufe 2 jetzt konsistent zum App-Pfad, ist aber laut Bestandsaufnahme
+weiterhin die zwei parallelen, nicht deckungsgleichen Antwortpfade (Abschnitt
+7.2) - dieses strukturelle Problem bleibt bestehen. `model_router.py`s
+`_is_simple()`/`_is_complex()` nutzen bewusst weiterhin keine Fuzzy-Erkennung
+(niedrigere Priorität, siehe Plan).
