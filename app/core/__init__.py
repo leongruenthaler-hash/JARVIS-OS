@@ -16,6 +16,7 @@ from .voice_modes import (
     forces_compact as voice_mode_forces_compact,
     suppresses_voice_output as voice_mode_suppresses_voice_output,
     disables_web_search as voice_mode_disables_web_search,
+    forces_local_only as voice_mode_forces_local_only,
     mode_label as voice_mode_label,
 )
 

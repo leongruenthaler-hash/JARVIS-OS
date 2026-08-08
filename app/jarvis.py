@@ -72,6 +72,7 @@ from core.memory_system import JarvisMemorySystem
 from core import (
     voice_mode_instruction,
     voice_mode_forces_compact,
+    voice_mode_forces_local_only,
 )
 from memory import Memory
 from model_manager import ModelManager
@@ -1242,13 +1243,13 @@ def _looks_self_referential(fact: str, user_name: str) -> bool:
     )
 
 
-def _run_llm_memory_extraction(user_text: str, base_path: Path, user_name: str) -> None:
+def _run_llm_memory_extraction(user_text: str, base_path: Path, user_name: str, force_local: bool = False) -> None:
     logger = PrivacyLogger(base_path / "logs")
     try:
         llm = LLMClient(CONFIG)
-        route = llm.plan([], user_text=user_text)
+        route = llm.plan([], user_text=user_text, force_local=force_local)
         messages = _build_memory_extraction_messages(user_text, user_name)
-        raw = llm.ask(messages, max_output_tokens=80, user_text=user_text, route=route)
+        raw = llm.ask(messages, max_output_tokens=80, user_text=user_text, route=route, force_local=force_local)
         fact = _parse_llm_fact_response(raw)
     except Exception as exc:
         logger.log("auto_memory_llm", "extraction_failed", success=False, error=type(exc).__name__)
@@ -1294,7 +1295,7 @@ def _run_llm_memory_extraction(user_text: str, base_path: Path, user_name: str) 
             "sensitive_pending_confirmation" if is_sensitive else "pending_confirmation",
             success=True,
         )
-        print(f"Memory (LLM): {result} unter {category} (pending_confirmation): {fact}")
+        print(f"Memory (LLM): {result} unter {category} (pending_confirmation): {console_text(fact, 'answer')}")
 
 
 def auto_update_memory(memory: Memory, user_text: str, assistant_text: str = "") -> list[str]:
@@ -1318,7 +1319,20 @@ def auto_update_memory(memory: Memory, user_text: str, assistant_text: str = "")
         return notes
 
     for category, fact, sensitivity in extract_auto_memory_facts(user_text):
-        result = memory_system.maybe_remember(fact, category=category, source="auto", sensitivity=sensitivity)
+        # Mirrors _run_llm_memory_extraction(): SENSITIVE_FACT_MARKERS / _passes_sensitive_content_filter
+        # must gate every auto-captured fact, not just LLM-extracted ones (see classify_memory_category()
+        # docstring). Without this, regex patterns like "ich habe .../ich bin ..." could store health,
+        # financial or other sensitive facts as immediately-confirmed memory.
+        if not _passes_sensitive_content_filter(fact):
+            result = memory_system.maybe_remember(
+                fact,
+                category=category,
+                source="auto",
+                sensitivity="confidential",
+                status="pending_confirmation",
+            )
+        else:
+            result = memory_system.maybe_remember(fact, category=category, source="auto", sensitivity=sensitivity)
         if result == "created":
             notes.append(f"Memory: gespeichert unter {category}: {fact}")
         elif result == "updated":
@@ -1327,9 +1341,10 @@ def auto_update_memory(memory: Memory, user_text: str, assistant_text: str = "")
     if notes:
         memory.trim_facts(AUTO_MEMORY_MAX_FACTS)
     elif AUTO_MEMORY_LLM_EXTRACTION_ENABLED and looks_like_memory_candidate(user_text):
+        voice_mode = str((memory.get("settings") or {}).get("voice_mode") or "")
         threading.Thread(
             target=_run_llm_memory_extraction,
-            args=(user_text, memory.base_path, configured_user_name()),
+            args=(user_text, memory.base_path, configured_user_name(), voice_mode_forces_local_only(voice_mode)),
             daemon=True,
         ).start()
 
@@ -1349,7 +1364,7 @@ def record_exchange(memory: Memory, user_text: str, assistant_text: str, auto_me
 
     if auto_memory:
         for note in auto_update_memory(memory, user_text, assistant_text):
-            print(note)
+            print(console_text(note, "answer"))
 
 
 def is_end_command(text: str) -> bool:
@@ -2809,6 +2824,8 @@ def handle_mail_delete_command(text: str, memory: Memory | None = None) -> str |
         if any(alias in normalized for alias in aliases)
     ]
     if not selected_targets:
+        if memory is None:
+            return None
         settings = memory.get("settings") or {}
         last_mail_summary = settings.get("last_mail_summary")
         last_summary_ids = []
@@ -4919,7 +4936,7 @@ def main():
             if should_ignore_transcript(spoken_text, audio_stats) and not (
                 pending_action_waits and is_short_confirmation(spoken_text)
             ):
-                print(f"Stille/Noise ignoriert: {spoken_text}")
+                print(f"Stille/Noise ignoriert: {console_text(spoken_text, 'transcript')}")
                 continue
 
             print(f"\n{configured_user_name()}: {console_text(spoken_text, 'prompt')}")

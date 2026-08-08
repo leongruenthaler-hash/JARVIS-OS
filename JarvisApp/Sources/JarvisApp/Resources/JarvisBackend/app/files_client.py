@@ -26,6 +26,11 @@ class FileItem:
 DEFAULT_ROOTS = ("desktop", "documents", "downloads", "home", "jarvis")
 PROJECT_ROOT = data_root()
 FILE_INDEX_PATH = PROJECT_ROOT / "memory" / "file_index.json"
+# Hard cap on filesystem entries a live (non-indexed) recursive search will walk.
+# Without this, searching a broad root like "home" recurses through the entire
+# user home directory (Library, node_modules, etc.) with no bound, which can hang
+# the app on large disks. This mirrors the photos_scan_max_items cap in photos_client.py.
+MAX_LIVE_SCAN_NODES = 20000
 
 
 def configured_roots(config: dict | None = None) -> dict[str, Path]:

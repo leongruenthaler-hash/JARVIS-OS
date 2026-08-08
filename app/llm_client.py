@@ -37,14 +37,20 @@ class LLMClient:
         max_output_tokens: int | None = None,
         user_text: str | None = None,
         route: ModelRoute | None = None,
+        force_local: bool = False,
     ) -> str:
         self._refresh_model_state()
-        route = route or self.plan(messages, user_text=user_text)
-        if self.provider == "openai":
+        route = route or self.plan(messages, user_text=user_text, force_local=force_local)
+        # "Privater Modus": dispatch on the effective provider, not the user's
+        # configured default - route.provider already reflects force_local via plan(),
+        # but the actual network call below must too, or a stale/explicitly-passed
+        # `route` with provider="ollama" could still be sent to OpenAI here.
+        effective_provider = "ollama" if force_local else self.provider
+        if effective_provider == "openai":
             return self._ask_openai(messages, max_output_tokens=max_output_tokens, route=route)
-        if self.provider == "ollama":
+        if effective_provider == "ollama":
             return self._ask_ollama(messages, route=route)
-        raise ValueError(f"Unbekannter KI-Anbieter: {self.provider}")
+        raise ValueError(f"Unbekannter KI-Anbieter: {effective_provider}")
 
     def ask_stream(
         self,
@@ -54,30 +60,32 @@ class LLMClient:
         user_text: str | None = None,
         route: ModelRoute | None = None,
         on_chunk: Any | None = None,
+        force_local: bool = False,
     ) -> str:
         self._refresh_model_state()
-        route = route or self.plan(messages, user_text=user_text)
+        route = route or self.plan(messages, user_text=user_text, force_local=force_local)
         if max_output_tokens is not None:
             route.max_output_tokens = int(max_output_tokens)
-        if self.provider == "ollama":
+        effective_provider = "ollama" if force_local else self.provider
+        if effective_provider == "ollama":
             return self._ask_ollama(messages, route=route, stream=True, on_chunk=on_chunk)
-        if self.provider == "openai":
+        if effective_provider == "openai":
             try:
                 return self._ask_openai_stream(messages, max_output_tokens=max_output_tokens, route=route, on_chunk=on_chunk)
             except Exception:
                 pass
-        answer = self.ask(messages, max_output_tokens=max_output_tokens, user_text=user_text, route=route)
+        answer = self.ask(messages, max_output_tokens=max_output_tokens, user_text=user_text, route=route, force_local=force_local)
         if callable(on_chunk) and answer:
             words = answer.split()
             for index, word in enumerate(words):
                 on_chunk(("" if index == 0 else " ") + word)
         return answer
 
-    def plan(self, messages: list[dict[str, str]], user_text: str | None = None) -> ModelRoute:
+    def plan(self, messages: list[dict[str, str]], user_text: str | None = None, force_local: bool = False) -> ModelRoute:
         self._refresh_model_state()
-        installed = self.model_manager.status().installed_models if self.provider == "ollama" else []
+        installed = self.model_manager.status().installed_models if (self.provider == "ollama" or force_local) else []
         inferred = user_text or self._last_user_text(messages)
-        return self.model_router.route(inferred, provider=self.provider, installed_models=installed)
+        return self.model_router.route(inferred, provider=self.provider, installed_models=installed, force_local=force_local)
 
     def _ask_ollama(
         self,
@@ -206,19 +214,18 @@ class LLMClient:
 
         route = route or self.plan(messages)
         model = os.getenv("OPENAI_MODEL", route.model or self.model_manager.active_model)
+        prepared = self._prepare_messages(messages, route=route)
         request = {
             "model": model,
-            "input": self._prepare_messages(messages, route=route),
+            "input": prepared,
+            "max_output_tokens": int(max_output_tokens) if max_output_tokens is not None else int(route.max_output_tokens),
         }
-        if max_output_tokens is not None:
-            request["max_output_tokens"] = int(max_output_tokens)
-        prepared = self._prepare_messages(messages, route=route)
 
         try:
             completion = self._openai_client.chat.completions.create(
                 model=model,
                 messages=prepared,
-                max_tokens=int(max_output_tokens) if max_output_tokens is not None else None,
+                max_tokens=int(max_output_tokens) if max_output_tokens is not None else int(route.max_output_tokens),
                 temperature=float(self.config.get("openai_temperature", 0.3)),
             )
             text = str(completion.choices[0].message.content or "").strip()
@@ -243,9 +250,8 @@ class LLMClient:
                     ),
                 },
             ],
+            "max_output_tokens": int(max_output_tokens) if max_output_tokens is not None else int(route.max_output_tokens),
         }
-        if max_output_tokens is not None:
-            retry_request["max_output_tokens"] = int(max_output_tokens)
 
         retry_response = self._openai_client.responses.create(**retry_request)
         text = str(retry_response.output_text).strip()

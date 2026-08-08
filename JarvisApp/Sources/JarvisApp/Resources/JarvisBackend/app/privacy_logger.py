@@ -8,8 +8,8 @@ from typing import Any
 from data_dir import data_root
 
 
-SENSITIVE_KEYS = {"prompt", "transcript", "email", "mail", "contact", "body", "content", "message", "answer", "api_key", "token", "secret", "password", "calendar", "event"}
-SENSITIVE_KEY_PARTS = ("prompt", "transcript", "email", "mail", "contact", "body", "content", "message", "answer", "api", "key", "token", "secret", "password", "calendar", "event")
+SENSITIVE_KEYS = {"prompt", "transcript", "email", "mail", "contact", "body", "content", "message", "answer", "api_key", "token", "secret", "password", "calendar", "event", "query", "search"}
+SENSITIVE_KEY_PARTS = ("prompt", "transcript", "email", "mail", "contact", "body", "content", "message", "answer", "api", "key", "token", "secret", "password", "calendar", "event", "query", "search")
 
 
 class PrivacyLogger:
@@ -27,6 +27,10 @@ class PrivacyLogger:
             lowered_key = key.lower()
             if lowered_key in SENSITIVE_KEYS or any(part in lowered_key for part in SENSITIVE_KEY_PARTS):
                 safe_metadata[key] = "[redacted]"
+            elif isinstance(value, (dict, list, tuple, set)):
+                # Structured values can carry nested sensitive content (e.g. mail
+                # items, contact records) that a generic key name wouldn't flag.
+                safe_metadata[key] = "[redacted]"
             else:
                 safe_metadata[key] = str(value)[:120]
         record = {
@@ -36,8 +40,12 @@ class PrivacyLogger:
             "success": bool(success),
             "metadata": safe_metadata,
         }
-        with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        try:
+            with self.path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except OSError:
+            # Logging must never break the caller's actual operation.
+            pass
 
     def clear(self) -> int:
         count = 0

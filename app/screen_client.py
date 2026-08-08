@@ -60,8 +60,22 @@ def capture_screenshot(timeout: float = 10.0) -> Path:
     callers are expected to delete the returned path once they're done with it
     (see describe_screen())."""
     target = _new_target_path()
-    result = _run_screencapture(["-x", "-t", "png", str(target)], timeout)
-    _check_capture_result(result, target)
+    try:
+        result = _run_screencapture(["-x", "-t", "png", str(target)], timeout)
+        _check_capture_result(result, target)
+    except Exception:
+        # Don't leave a failed/partial capture (garbage bytes, zero-length file,
+        # or whatever screencapture wrote before a timeout killed it) sitting on
+        # disk - a screenshot of the user's screen must not linger past a failure.
+        target.unlink(missing_ok=True)
+        raise
+    try:
+        # screencapture creates the file with the process umask (typically 0644,
+        # world-readable) - narrow it to the owner only, since this is a raw
+        # screenshot of the user's screen and the temp dir isn't guaranteed private.
+        target.chmod(0o600)
+    except OSError:
+        pass
     return target
 
 
@@ -101,8 +115,18 @@ def capture_window_screenshot(window_id: int, timeout: float = 10.0) -> Path:
     only that window's pixels) - deliberately narrower than a full-screen capture
     so other apps/windows the user has open never end up in the image at all."""
     target = _new_target_path()
-    result = _run_screencapture(["-x", "-o", "-t", "png", "-l", str(window_id), str(target)], timeout)
-    _check_capture_result(result, target)
+    try:
+        result = _run_screencapture(["-x", "-o", "-t", "png", "-l", str(window_id), str(target)], timeout)
+        _check_capture_result(result, target)
+    except Exception:
+        # Same reasoning as capture_screenshot(): never leave a failed/partial
+        # window capture behind on disk.
+        target.unlink(missing_ok=True)
+        raise
+    try:
+        target.chmod(0o600)
+    except OSError:
+        pass
     return target
 
 

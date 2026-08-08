@@ -66,6 +66,10 @@ class VoicePerformanceLog:
         return entry
 
     def recent(self, limit: int = 50) -> list[dict[str, Any]]:
+        # list[-0:] is list[0:] (the WHOLE list) in Python, not an empty one - so
+        # recent(limit=0) used to silently return everything instead of nothing.
+        if limit <= 0:
+            return []
         return self._load()[-limit:]
 
     def stats(self, limit: int = 50) -> dict[str, Any]:

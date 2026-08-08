@@ -138,7 +138,7 @@ class StreamingAudioListener:
             self._cancel_event.clear()
             self._ensure_stream()
             self._flush_queue()
-            while elapsed_seconds < self.max_recording_seconds:
+            while time.perf_counter() - recording_started < self.max_recording_seconds:
                 if self._cancel_event.is_set():
                     print("VoicePerformanceEvent: recordingStopped", file=sys.stderr)
                     if not self.keep_stream_open:

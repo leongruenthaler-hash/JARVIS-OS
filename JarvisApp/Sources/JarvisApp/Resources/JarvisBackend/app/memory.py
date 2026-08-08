@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import os
 import threading
@@ -51,7 +52,9 @@ def _new_fact_entry(
         "retention_policy": retention_policy if retention_policy in RETENTION_POLICIES else "until_deleted",
         "expires_at": expires_at,
         "user_confirmed": user_confirmed,
-        "status": status if status in FACT_STATUSES else "confirmed",
+        # An unrecognized status value is a data problem, not a green light - fail
+        # safe into the review queue rather than silently trusting the fact.
+        "status": status if status in FACT_STATUSES else "pending_confirmation",
         "tags": list(tags or []),
         "related_entities": [],
     }
@@ -163,7 +166,11 @@ class Memory:
     def load_all(self):
         for key, file in self.files.items():
             if not file.exists():
-                self.data[key] = self.defaults[key]
+                # deepcopy: self.defaults[key] holds mutable containers (dict/list).
+                # Without the copy, self.data[key] would be the *same* object, so
+                # every later in-place mutation (setdefault/append/etc.) would also
+                # silently mutate self.defaults, corrupting the "factory default".
+                self.data[key] = copy.deepcopy(self.defaults[key])
                 self.save(key)
                 continue
 
@@ -172,7 +179,7 @@ class Memory:
             except json.JSONDecodeError:
                 broken_file = file.with_suffix(file.suffix + ".broken")
                 file.rename(broken_file)
-                self.data[key] = self.defaults[key]
+                self.data[key] = copy.deepcopy(self.defaults[key])
                 self.save(key)
                 print(f"Defekte Memory-Datei ersetzt: {broken_file.name}")
 
@@ -194,7 +201,8 @@ class Memory:
             self.save(key)
 
     def get(self, key: str) -> Any:
-        return self.data.get(key)
+        with self._lock:
+            return self.data.get(key)
 
     def set(self, key: str, value: Any):
         if key not in self.files:
@@ -205,32 +213,33 @@ class Memory:
             self.save(key)
 
     def remember(self, category: str, key: str, value: str):
-        long_memory = self.data["long_memory"]
-        bucket = long_memory.setdefault(category, {})
+        with self._lock:
+            long_memory = self.data["long_memory"]
+            bucket = long_memory.setdefault(category, {})
 
-        if isinstance(bucket, list):
-            now = datetime.now().isoformat(timespec="seconds")
-            prefix = f"{key}: "
-            content = f"{prefix}{value}"
-            for item in bucket:
-                if isinstance(item, dict) and str(item.get("content", "")).startswith(prefix):
-                    item["content"] = content
-                    item["updated_at"] = now
-                    break
+            if isinstance(bucket, list):
+                now = datetime.now().isoformat(timespec="seconds")
+                prefix = f"{key}: "
+                content = f"{prefix}{value}"
+                for item in bucket:
+                    if isinstance(item, dict) and str(item.get("content", "")).startswith(prefix):
+                        item["content"] = content
+                        item["updated_at"] = now
+                        break
+                else:
+                    bucket.append(
+                        {
+                            "content": content,
+                            "created_at": now,
+                            "updated_at": now,
+                            "category": category,
+                            "source": "manual",
+                        }
+                    )
             else:
-                bucket.append(
-                    {
-                        "content": content,
-                        "created_at": now,
-                        "updated_at": now,
-                        "category": category,
-                        "source": "manual",
-                    }
-                )
-        else:
-            bucket[key] = value
+                bucket[key] = value
 
-        self.save("long_memory")
+            self.save("long_memory")
 
     def remember_fact(
         self,
@@ -250,24 +259,25 @@ class Memory:
         if not content:
             return
 
-        long_memory = self.data["long_memory"]
-        long_memory.setdefault(category, [])
-        long_memory[category].append(
-            _new_fact_entry(
-                content,
-                category,
-                source,
-                scope=scope,
-                sensitivity=sensitivity,
-                confidence=confidence,
-                retention_policy=retention_policy,
-                expires_at=expires_at,
-                tags=tags,
-                status=status,
-                user_confirmed=status == "confirmed",
+        with self._lock:
+            long_memory = self.data["long_memory"]
+            long_memory.setdefault(category, [])
+            long_memory[category].append(
+                _new_fact_entry(
+                    content,
+                    category,
+                    source,
+                    scope=scope,
+                    sensitivity=sensitivity,
+                    confidence=confidence,
+                    retention_policy=retention_policy,
+                    expires_at=expires_at,
+                    tags=tags,
+                    status=status,
+                    user_confirmed=status == "confirmed",
+                )
             )
-        )
-        self.save("long_memory")
+            self.save("long_memory")
 
     def upsert_fact(
         self,
@@ -287,59 +297,60 @@ class Memory:
         if not content:
             return "ignored"
 
-        long_memory = self.data["long_memory"]
-        bucket = long_memory.setdefault(category, [])
+        with self._lock:
+            long_memory = self.data["long_memory"]
+            bucket = long_memory.setdefault(category, [])
 
-        if isinstance(bucket, dict):
-            bucket = [
-                _new_fact_entry(f"{key}: {value}", category, "manual")
-                for key, value in bucket.items()
-            ]
-            long_memory[category] = bucket
-            print(
-                f"Memory: Kategorie '{category}' von Dict- auf Listen-Schema konvertiert "
-                f"({len(bucket)} Eintraege uebernommen)."
+            if isinstance(bucket, dict):
+                bucket = [
+                    _new_fact_entry(f"{key}: {value}", category, "manual")
+                    for key, value in bucket.items()
+                ]
+                long_memory[category] = bucket
+                print(
+                    f"Memory: Kategorie '{category}' von Dict- auf Listen-Schema konvertiert "
+                    f"({len(bucket)} Eintraege uebernommen)."
+                )
+            elif not isinstance(bucket, list):
+                bucket = []
+                long_memory[category] = bucket
+
+            normalized_content = normalize_for_match(content)
+            now = datetime.now().isoformat(timespec="seconds")
+
+            for item in long_memory[category]:
+                if not isinstance(item, dict):
+                    continue
+
+                existing = normalize_for_match(str(item.get("content", "")))
+                if existing == normalized_content:
+                    _ensure_fact_fields(item, category)
+                    item["updated_at"] = now
+                    item["category"] = category
+                    item["source_type"] = source
+                    item["confidence"] = confidence
+                    if sensitivity in SENSITIVITY_LEVELS:
+                        item["sensitivity"] = sensitivity
+                    self.save("long_memory")
+                    return "updated"
+
+            long_memory[category].append(
+                _new_fact_entry(
+                    content,
+                    category,
+                    source,
+                    scope=scope,
+                    sensitivity=sensitivity,
+                    confidence=confidence,
+                    retention_policy=retention_policy,
+                    expires_at=expires_at,
+                    tags=tags,
+                    status=status,
+                    user_confirmed=status == "confirmed",
+                )
             )
-        elif not isinstance(bucket, list):
-            bucket = []
-            long_memory[category] = bucket
-
-        normalized_content = normalize_for_match(content)
-        now = datetime.now().isoformat(timespec="seconds")
-
-        for item in long_memory[category]:
-            if not isinstance(item, dict):
-                continue
-
-            existing = normalize_for_match(str(item.get("content", "")))
-            if existing == normalized_content:
-                _ensure_fact_fields(item, category)
-                item["updated_at"] = now
-                item["category"] = category
-                item["source_type"] = source
-                item["confidence"] = confidence
-                if sensitivity in SENSITIVITY_LEVELS:
-                    item["sensitivity"] = sensitivity
-                self.save("long_memory")
-                return "updated"
-
-        long_memory[category].append(
-            _new_fact_entry(
-                content,
-                category,
-                source,
-                scope=scope,
-                sensitivity=sensitivity,
-                confidence=confidence,
-                retention_policy=retention_policy,
-                expires_at=expires_at,
-                tags=tags,
-                status=status,
-                user_confirmed=status == "confirmed",
-            )
-        )
-        self.save("long_memory")
-        return "created"
+            self.save("long_memory")
+            return "created"
 
     def forget_facts_matching(self, query: str) -> int:
         query_words = {
@@ -351,31 +362,32 @@ class Memory:
             return 0
 
         removed = 0
-        long_memory = self.data["long_memory"]
+        with self._lock:
+            long_memory = self.data["long_memory"]
 
-        for category, values in list(long_memory.items()):
-            if isinstance(values, list):
-                kept = []
-                for item in values:
-                    content = str(item.get("content", "")) if isinstance(item, dict) else str(item)
-                    content_words = set(re_split_words(content))
-                    score = len(query_words & content_words)
-                    if score >= max(1, min(3, len(query_words) // 2)):
-                        removed += 1
-                    else:
-                        kept.append(item)
-                long_memory[category] = kept
+            for category, values in list(long_memory.items()):
+                if isinstance(values, list):
+                    kept = []
+                    for item in values:
+                        content = str(item.get("content", "")) if isinstance(item, dict) else str(item)
+                        content_words = set(re_split_words(content))
+                        score = len(query_words & content_words)
+                        if score >= max(1, min(3, len(query_words) // 2)):
+                            removed += 1
+                        else:
+                            kept.append(item)
+                    long_memory[category] = kept
 
-            elif isinstance(values, dict):
-                for key, value in list(values.items()):
-                    content_words = set(re_split_words(f"{key} {value}"))
-                    score = len(query_words & content_words)
-                    if score >= max(1, min(3, len(query_words) // 2)):
-                        del values[key]
-                        removed += 1
+                elif isinstance(values, dict):
+                    for key, value in list(values.items()):
+                        content_words = set(re_split_words(f"{key} {value}"))
+                        score = len(query_words & content_words)
+                        if score >= max(1, min(3, len(query_words) // 2)):
+                            del values[key]
+                            removed += 1
 
-        if removed:
-            self.save("long_memory")
+            if removed:
+                self.save("long_memory")
 
         return removed
 
@@ -384,21 +396,22 @@ class Memory:
         if not target:
             return False
 
-        long_memory = self.data["long_memory"]
-        for values in long_memory.values():
-            if isinstance(values, list):
-                for index, item in enumerate(values):
-                    item_content = str(item.get("content", "")) if isinstance(item, dict) else str(item)
-                    if normalize_for_match(item_content) == target:
-                        del values[index]
-                        self.save("long_memory")
-                        return True
-            elif isinstance(values, dict):
-                for key, value in list(values.items()):
-                    if normalize_for_match(f"{key}: {value}") == target:
-                        del values[key]
-                        self.save("long_memory")
-                        return True
+        with self._lock:
+            long_memory = self.data["long_memory"]
+            for values in long_memory.values():
+                if isinstance(values, list):
+                    for index, item in enumerate(values):
+                        item_content = str(item.get("content", "")) if isinstance(item, dict) else str(item)
+                        if normalize_for_match(item_content) == target:
+                            del values[index]
+                            self.save("long_memory")
+                            return True
+                elif isinstance(values, dict):
+                    for key, value in list(values.items()):
+                        if normalize_for_match(f"{key}: {value}") == target:
+                            del values[key]
+                            self.save("long_memory")
+                            return True
 
         return False
 
@@ -406,12 +419,13 @@ class Memory:
         if max_facts <= 0:
             return
 
-        long_memory = self.data["long_memory"]
-        for category, values in long_memory.items():
-            if isinstance(values, list) and len(values) > max_facts:
-                long_memory[category] = values[-max_facts:]
+        with self._lock:
+            long_memory = self.data["long_memory"]
+            for category, values in long_memory.items():
+                if isinstance(values, list) and len(values) > max_facts:
+                    long_memory[category] = values[-max_facts:]
 
-        self.save("long_memory")
+            self.save("long_memory")
 
     def all_facts(self, *, include_expired: bool = False, include_rejected: bool = False) -> list[dict[str, Any]]:
         """Returns fact entries with the full Phase-B schema. By default excludes
@@ -421,45 +435,47 @@ class Memory:
         where the user needs to see and clean those up, not just facts fit for use."""
         entries: list[dict[str, Any]] = []
 
-        for category, values in self.data["long_memory"].items():
-            if category == "facts":
-                continue
+        with self._lock:
+            for category, values in self.data["long_memory"].items():
+                if category == "facts":
+                    continue
 
-            if isinstance(values, dict):
-                for key, value in values.items():
-                    entries.append(
-                        {
-                            "category": category,
-                            "key": key,
-                            "content": f"{key}: {value}",
-                        }
-                    )
+                if isinstance(values, dict):
+                    for key, value in values.items():
+                        entries.append(
+                            {
+                                "category": category,
+                                "key": key,
+                                "content": f"{key}: {value}",
+                            }
+                        )
 
-        for category, values in self.data["long_memory"].items():
-            if isinstance(values, list):
-                for item in values:
-                    if isinstance(item, dict):
-                        # Mutates item in place (still referencing self.data) so the
-                        # upgrade is picked up by the next save(), not just this read.
-                        _ensure_fact_fields(item, category)
-                        if not include_rejected and item.get("status") == "rejected":
-                            continue
-                        if not include_expired and is_fact_expired(item):
-                            continue
-                        entries.append(dict(item))
-                    elif item:
-                        entries.append({"category": category, "content": str(item)})
+            for category, values in self.data["long_memory"].items():
+                if isinstance(values, list):
+                    for item in values:
+                        if isinstance(item, dict):
+                            # Mutates item in place (still referencing self.data) so the
+                            # upgrade is picked up by the next save(), not just this read.
+                            _ensure_fact_fields(item, category)
+                            if not include_rejected and item.get("status") == "rejected":
+                                continue
+                            if not include_expired and is_fact_expired(item):
+                                continue
+                            entries.append(dict(item))
+                        elif item:
+                            entries.append({"category": category, "content": str(item)})
 
         return entries
 
     def get_fact_by_id(self, fact_id: str) -> dict[str, Any] | None:
-        for category, values in self.data["long_memory"].items():
-            if not isinstance(values, list):
-                continue
-            for item in values:
-                if isinstance(item, dict) and item.get("id") == fact_id:
-                    _ensure_fact_fields(item, category)
-                    return item
+        with self._lock:
+            for category, values in self.data["long_memory"].items():
+                if not isinstance(values, list):
+                    continue
+                for item in values:
+                    if isinstance(item, dict) and item.get("id") == fact_id:
+                        _ensure_fact_fields(item, category)
+                        return item
         return None
 
     def touch_fact(self, fact_id: str) -> None:
@@ -472,8 +488,17 @@ class Memory:
         with self._lock:
             item["last_used_at"] = datetime.now().isoformat(timespec="seconds")
             self.save("long_memory")
+            # activity_log is an in-memory ring buffer feeding a "what just happened"
+            # UI feed - fine for normal facts, but confidential/highly-sensitive
+            # content (health, finance, passwords) must not be echoed there in
+            # plaintext just because the Context Engine used it.
+            sensitivity = item.get("sensitivity", "normal")
+            if sensitivity in ("confidential", "highly-sensitive"):
+                label = "Vertraulicher Fakt verwendet"
+            else:
+                label = str(item.get("content", ""))[:60]
         from core.activity_log import record_activity
-        record_activity("memory", str(item.get("content", ""))[:60], reference=fact_id)
+        record_activity("memory", label, reference=fact_id)
 
     def update_fact(self, fact_id: str, **fields: Any) -> bool:
         """Edits a fact's editable metadata (content, category, sensitivity, scope,
@@ -502,17 +527,29 @@ class Memory:
         return True
 
     def confirm_fact(self, fact_id: str) -> bool:
-        return self.update_fact(fact_id, status="confirmed") and self._set_user_confirmed(fact_id, True)
-
-    def reject_fact(self, fact_id: str) -> bool:
-        return self.update_fact(fact_id, status="rejected") and self._set_user_confirmed(fact_id, False)
-
-    def _set_user_confirmed(self, fact_id: str, value: bool) -> bool:
+        # Set status and user_confirmed under one lock acquisition/save instead of
+        # two separate get_fact_by_id()+lock round trips - the previous two-call
+        # version could race with a concurrent delete_fact_by_id() between the two
+        # calls (status set, but user_confirmed flip silently lost) and always did
+        # two full-store writes for one logical change.
         item = self.get_fact_by_id(fact_id)
         if item is None:
             return False
         with self._lock:
-            item["user_confirmed"] = value
+            item["status"] = "confirmed"
+            item["user_confirmed"] = True
+            item["updated_at"] = datetime.now().isoformat(timespec="seconds")
+            self.save("long_memory")
+        return True
+
+    def reject_fact(self, fact_id: str) -> bool:
+        item = self.get_fact_by_id(fact_id)
+        if item is None:
+            return False
+        with self._lock:
+            item["status"] = "rejected"
+            item["user_confirmed"] = False
+            item["updated_at"] = datetime.now().isoformat(timespec="seconds")
             self.save("long_memory")
         return True
 
@@ -550,25 +587,35 @@ class Memory:
         return [fact for _, fact in scored_results]
 
     def forget(self, category: str, key: str):
-        long_memory = self.data["long_memory"]
-        if category in long_memory and key in long_memory[category]:
-            del long_memory[category][key]
-            self.save("long_memory")
+        with self._lock:
+            long_memory = self.data["long_memory"]
+            if category in long_memory and key in long_memory[category]:
+                del long_memory[category][key]
+                self.save("long_memory")
 
     def search(self, category: str, key: str):
-        return self.data["long_memory"].get(category, {}).get(key)
+        # A category can be a dict bucket (remember()) or a list bucket (Phase B
+        # facts via remember_fact()/upsert_fact()) - .get(key) on a list crashes
+        # with AttributeError, so guard the type before calling it.
+        values = self.data["long_memory"].get(category)
+        if not isinstance(values, dict):
+            return None
+        return values.get(key)
 
     def add_conversation(self, role: str, content: str):
-        self.data["conversation"].append({"role": role, "content": content})
-        self.save("conversation")
+        with self._lock:
+            self.data["conversation"].append({"role": role, "content": content})
+            self.save("conversation")
 
     def trim_conversation(self, max_messages: int = 40):
-        self.data["conversation"] = self.data["conversation"][-max_messages:]
-        self.save("conversation")
+        with self._lock:
+            self.data["conversation"] = self.data["conversation"][-max_messages:]
+            self.save("conversation")
 
     def clear_conversation(self):
-        self.data["conversation"] = []
-        self.save("conversation")
+        with self._lock:
+            self.data["conversation"] = []
+            self.save("conversation")
 
 
 def re_split_words(text: str) -> list[str]:
@@ -577,6 +624,8 @@ def re_split_words(text: str) -> list[str]:
 
 
 def normalize_memory_text(text: str) -> str:
+    if text is None:
+        return ""
     cleaned = " ".join(str(text).strip().split())
     return cleaned.strip(" .,!?:;")
 

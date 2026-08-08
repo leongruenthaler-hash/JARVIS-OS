@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 from datetime import datetime
@@ -31,7 +32,12 @@ class MailBackgroundWorker:
         self.base_path = base_path or data_root() / "memory"
         self.base_path.mkdir(parents=True, exist_ok=True)
         self.cache_path = self.base_path / "background_mail_cache.json"
-        self.lock = threading.Lock()
+        # RLock: _scan_safely() below acquires this itself so the scheduled loop
+        # and manual scan_now()/request_scan() can never run _scan() concurrently
+        # (which would race on cache read-modify-write). scan_now() already holds
+        # this lock when it calls _scan_safely() directly, so a plain Lock would
+        # deadlock - must be reentrant.
+        self.lock = threading.RLock()
         self.stop_event = threading.Event()
         self.thread: threading.Thread | None = None
         self.scan_thread: threading.Thread | None = None
@@ -157,14 +163,18 @@ class MailBackgroundWorker:
             self.stop_event.wait(60)
 
     def _scan_safely(self, reason: str, max_messages: int):
-        try:
-            self._scan(reason=reason, max_messages=max_messages)
-        except Exception as exc:
-            cache = self._load_cache()
-            cache["last_scan_at"] = datetime.now().isoformat(timespec="seconds")
-            cache["last_error"] = str(exc)
-            self._save_cache(cache)
-            print("Hintergrund-Mailcheck Fehler:", type(exc).__name__)
+        # Serializes against every other entry point that can trigger a scan
+        # (scheduled loop, request_scan()'s background thread, scan_now()) so two
+        # scans never read/write background_mail_cache.json concurrently.
+        with self.lock:
+            try:
+                self._scan(reason=reason, max_messages=max_messages)
+            except Exception as exc:
+                cache = self._load_cache()
+                cache["last_scan_at"] = datetime.now().isoformat(timespec="seconds")
+                cache["last_error"] = str(exc)
+                self._save_cache(cache)
+                print("Hintergrund-Mailcheck Fehler:", type(exc).__name__)
 
     def _scan(self, reason: str, max_messages: int):
         previous_cache = self._load_cache()
@@ -179,7 +189,12 @@ class MailBackgroundWorker:
         )
         current_ids = [message.message_id for message in messages if message.message_id]
         first_scan = not known_ids
-        new_messages = [
+        # On the very first scan there is no baseline yet - every message in the
+        # inbox would otherwise look "new" and trigger a misleading "N new mails"
+        # notification for mail that was simply already there. Establish the
+        # known_message_ids baseline this run instead; genuinely new mail is
+        # detected from the next scan onward.
+        new_messages = [] if first_scan else [
             message
             for message in messages
             if message.message_id and message.message_id not in known_ids
@@ -309,6 +324,12 @@ class MailBackgroundWorker:
             json.dumps(cache, indent=4, ensure_ascii=False),
             encoding="utf-8",
         )
+        # This cache holds mail senders/subjects/previews and calendar-action
+        # titles - owner-only, same as proactivity_engine.py's _restrict_to_owner.
+        try:
+            os.chmod(temp_path, 0o600)
+        except OSError:
+            pass
         temp_path.replace(self.cache_path)
 
     def _time_reached(self, now: datetime, time_text: str) -> bool:

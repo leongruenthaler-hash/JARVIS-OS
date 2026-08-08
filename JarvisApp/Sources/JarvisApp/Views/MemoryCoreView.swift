@@ -16,6 +16,10 @@ struct MemoryCoreView: View {
     private let pulseController = MemorySynapsePulseController()
     @State private var fieldPoints: [FieldPoint] = []
     @State private var fieldAssignments: [String: FieldPoint] = [:]
+    /// Facts keyed by id, rebuilt only when `facts` changes (see rebuildLayout()) so that
+    /// drawNodes()/pulseColor(), which run every animation frame, don't do an O(n) linear
+    /// scan of `facts` per node (that was O(nodes * facts) per frame).
+    @State private var factsByID: [String: MemoryFact] = [:]
 
     private struct FieldPoint: Identifiable, Equatable {
         let id: Int
@@ -62,6 +66,7 @@ struct MemoryCoreView: View {
 
     private func rebuildLayout() {
         layout = MemoryCoreLayout.compute(facts: facts)
+        factsByID = Dictionary(facts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         if fieldPoints.isEmpty {
             fieldPoints = (0..<48).map { index in
                 FieldPoint(
@@ -148,7 +153,7 @@ struct MemoryCoreView: View {
 
     private func drawNodes(in canvas: inout GraphicsContext, center: CGPoint, scale: CGFloat) {
         for node in layout.nodes {
-            guard let fact = facts.first(where: { $0.id == node.id }) else { continue }
+            guard let fact = factsByID[node.id] else { continue }
             let point = CGPoint(x: center.x + (node.position.x - 0.5) * scale, y: center.y + (node.position.y - 0.5) * scale)
             let color = memorySensitivityColor(fact.sensitivity)
             let baseOpacity = memoryStatusOpacity(fact.status)
@@ -240,7 +245,7 @@ struct MemoryCoreView: View {
     private func pulseColor(for target: PulseTarget) -> Color {
         switch target {
         case .node(let factID):
-            guard let fact = facts.first(where: { $0.id == factID }) else { return .cyan }
+            guard let fact = factsByID[factID] else { return .cyan }
             return memorySensitivityColor(fact.sensitivity)
         case .field:
             return .cyan
@@ -306,7 +311,7 @@ struct MemoryCoreView: View {
         for node in layout.nodes {
             let point = CGPoint(x: node.position.x * side, y: node.position.y * side)
             let distance = hypot(point.x - local.x, point.y - local.y)
-            if distance <= tolerance, let fact = facts.first(where: { $0.id == node.id }) {
+            if distance <= tolerance, let fact = factsByID[node.id] {
                 onSelect(fact)
                 return
             }

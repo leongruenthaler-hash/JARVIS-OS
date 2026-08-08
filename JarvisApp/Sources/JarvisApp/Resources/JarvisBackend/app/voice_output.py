@@ -5,12 +5,24 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
 import uuid
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import sounddevice as sd
+
+
+class _EdgeTTSPartialFailure(Exception):
+    """Raised internally when an Edge-TTS synth/playback failure happens partway
+    through a multi-chunk sequence, after one or more earlier chunks already played.
+    Carries only the text that was NOT yet spoken, so the macOS fallback repeats just
+    the remainder instead of the whole response from the beginning."""
+
+    def __init__(self, remaining_text: str, cause: Exception):
+        super().__init__(str(cause))
+        self.remaining_text = remaining_text
 
 
 class VoiceOutput:
@@ -22,6 +34,22 @@ class VoiceOutput:
         self.playing_with_sounddevice = False
         self.is_speaking = False
         self.warned_about_fallback = False
+        # Bumped by stop() and by every speak() call. A multi-chunk Edge-TTS sequence
+        # checks this between chunks so a stop() (or a newer speak()) fired from
+        # another thread while chunk N is mid-flight actually halts chunks N+1.. -
+        # without this, stop() only silenced the currently-playing chunk and the loop
+        # carried on synthesizing/playing the rest regardless.
+        self._generation_lock = threading.Lock()
+        self._generation = 0
+
+    def _bump_generation(self) -> int:
+        with self._generation_lock:
+            self._generation += 1
+            return self._generation
+
+    def _is_current(self, generation: int) -> bool:
+        with self._generation_lock:
+            return generation == self._generation
 
     def speak(self, text: str, voice: str | None = None):
         text = str(text).strip()
@@ -29,18 +57,27 @@ class VoiceOutput:
             return
 
         self.stop()
+        generation = self._bump_generation()
 
         provider = str(self.config.get("tts_provider", "edge")).strip().lower()
         if provider == "edge":
             try:
-                self._speak_edge(text, voice)
+                self._speak_edge(text, voice, generation)
+                return
+            except _EdgeTTSPartialFailure as exc:
+                self._warn_fallback(exc.__cause__ or exc)
+                if self._is_current(generation):
+                    self._speak_macos(exc.remaining_text, voice)
                 return
             except Exception as exc:
                 self._warn_fallback(exc)
 
-        self._speak_macos(text, voice)
+        if self._is_current(generation):
+            self._speak_macos(text, voice)
 
     def stop(self):
+        self._bump_generation()
+
         if self.playing_with_sounddevice:
             sd.stop()
             self.playing_with_sounddevice = False
@@ -66,7 +103,7 @@ class VoiceOutput:
             self.current_process = None
             self.is_speaking = False
 
-    def _speak_edge(self, text: str, voice: str | None = None):
+    def _speak_edge(self, text: str, voice: str | None = None, generation: int | None = None):
         edge_voice = str(
             voice
             or self.config.get("edge_voice")
@@ -88,14 +125,26 @@ class VoiceOutput:
             return
 
         self.is_speaking = True
-        for chunk in chunks:
+        for index, chunk in enumerate(chunks):
             if not chunk:
                 continue
+
+            if generation is not None and not self._is_current(generation):
+                # Superseded mid-sequence by stop() or a newer speak() call - don't
+                # synthesize/play the remaining chunks.
+                return
 
             audio_file = Path(tempfile.gettempdir()) / f"jarvis_edge_tts_{uuid.uuid4().hex}.mp3"
             try:
                 asyncio.run(self._save_edge_audio(chunk, edge_voice, audio_file))
                 self._play_audio_file(audio_file, wait=True)
+            except Exception as exc:
+                # A mid-sequence failure used to propagate straight out of
+                # _speak_edge, which speak() would catch and then re-speak the WHOLE
+                # original text via the macOS fallback - including the chunk(s) that
+                # already played fine via Edge-TTS. Only replay what's left instead.
+                remaining = " ".join(c for c in chunks[index:] if c)
+                raise _EdgeTTSPartialFailure(remaining, exc) from exc
             finally:
                 audio_file.unlink(missing_ok=True)
 
@@ -124,8 +173,14 @@ class VoiceOutput:
 
     def play_file(self, audio_file: Path | str) -> None:
         """Plays a pre-synthesized audio file (e.g. from synthesize_edge_to_file) and
-        blocks until playback finishes."""
-        self._play_audio_file(Path(audio_file), wait=True)
+        blocks until playback finishes, then deletes the temp file - this is the only
+        consumer of files produced by synthesize_edge_to_file, so it owns cleanup the
+        same way _speak_edge cleans up its own per-chunk temp files."""
+        path = Path(audio_file)
+        try:
+            self._play_audio_file(path, wait=True)
+        finally:
+            path.unlink(missing_ok=True)
 
     async def _save_edge_audio(self, text: str, voice: str, audio_file: Path):
         import edge_tts
@@ -190,6 +245,18 @@ class VoiceOutput:
         for sentence in sentences:
             sentence = sentence.strip()
             if not sentence:
+                continue
+
+            if len(sentence) > max_chars:
+                # A single sentence (no '.', '!' or '?' inside it) can itself exceed
+                # max_chars - e.g. a long comma-separated list or run-on clause. Left
+                # alone this became its own oversized, unbounded chunk (the whole
+                # point of edge_tts_chunk_chars was silently defeated). Split it
+                # further via _split_long_tts_part instead of emitting it whole.
+                if current:
+                    chunks.append(current)
+                    current = ""
+                chunks.extend(self._split_long_tts_part(sentence, max_chars))
                 continue
 
             if current and len(current) + 1 + len(sentence) > max_chars:

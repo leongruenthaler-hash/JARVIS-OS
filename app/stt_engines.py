@@ -342,14 +342,24 @@ def create_stt_engine(config: dict[str, Any]) -> BaseSTTEngine:
         return AppleSpeechEngine(locale=str(config.get("apple_speech_locale", "de-DE")))
 
     if engine_name == "moonshine_streaming":
-        return MoonshineStreamingEngine(
-            preferred_model=str(
-                config.get("moonshine_model", "UsefulSensors/moonshine-streaming-small")
-            ),
-            fallback_model=str(
-                config.get("moonshine_fallback_model", "UsefulSensors/moonshine-streaming-tiny")
+        try:
+            return MoonshineStreamingEngine(
+                preferred_model=str(
+                    config.get("moonshine_model", "UsefulSensors/moonshine-streaming-small")
+                ),
+                fallback_model=str(
+                    config.get("moonshine_fallback_model", "UsefulSensors/moonshine-streaming-tiny")
+                )
             )
-        )
+        except STTEngineError as exc:
+            # moonshine_streaming is the DEFAULT engine, and its own error message
+            # ("...oder nutze den automatischen Faster-Whisper-Fallback") promises this
+            # fallback - but nothing actually engaged it, so a fresh install without the
+            # optional moonshine/moonshine_onnx package installed raised uncaught here
+            # instead of falling back, same as the whisper_4bit branch below already does.
+            print(f"Moonshine Streaming nicht bereit: {exc}")
+            print("Fallback auf faster-whisper")
+            return _create_faster_whisper(config, cache_dir)
 
     if engine_name in {"whisper_4bit", "mlx_whisper_4bit", "quantized_whisper_4bit"}:
         try:

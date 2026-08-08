@@ -384,8 +384,16 @@ struct SettingsView: View {
             HStack(spacing: 10) {
                 Button {
                     Task {
-                        try? await appState.serverController.setOpenAIKey(apiKey)
-                        apiKey = ""
+                        // Only clear the field on success - it previously cleared
+                        // unconditionally, so a failed save (e.g. Keychain locked) silently
+                        // discarded the key the user just typed while the UI looked as if
+                        // it had worked.
+                        do {
+                            try await appState.serverController.setOpenAIKey(apiKey)
+                            apiKey = ""
+                        } catch {
+                            // Keep the typed key in the field so the user can retry.
+                        }
                         await appState.refreshStatus()
                     }
                 } label: {

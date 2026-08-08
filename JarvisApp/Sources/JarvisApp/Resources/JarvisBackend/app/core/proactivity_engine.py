@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -61,6 +62,11 @@ class ProactivityEngine:
         self.base_path.mkdir(parents=True, exist_ok=True)
         self.cache_path = self.base_path / "proactivity_events.json"
         self._rules: list[tuple[str, RuleFunc]] = []
+        # Guards the load-modify-save of proactivity_events.json. Without this,
+        # concurrent evaluate()/snooze()/dismiss_forever() calls can race and
+        # silently drop last_shown/history updates - the exact bookkeeping that
+        # enforces proactivity_cooldown_minutes and proactivity_max_per_hour.
+        self._lock = threading.Lock()
 
     def register(self, name: str, rule: RuleFunc) -> None:
         self._rules.append((name, rule))
@@ -91,60 +97,67 @@ class ProactivityEngine:
             return []
 
         now = datetime.now()
-        state = self._load_state()
 
-        candidates: list[ProactiveEvent] = []
-        for rule_name, rule in self._rules:
-            try:
-                raw_events = rule(context) or []
-            except Exception as exc:
-                # A single misbehaving rule (e.g. a data source that's temporarily
-                # unavailable) must never take down the whole evaluation pass.
-                print(f"Proactivity-Regel '{rule_name}' fehlgeschlagen: {type(exc).__name__}")
-                continue
-            for raw in raw_events:
-                priority = raw.get("priority") if raw.get("priority") in PRIORITIES else "information"
-                dedup_key = str(raw.get("dedup_key") or f"{rule_name}:{raw.get('message', '')}")
-                candidates.append(
-                    ProactiveEvent(
-                        id=uuid.uuid4().hex[:12],
-                        trigger=rule_name,
-                        priority=priority,
-                        message=str(raw.get("message") or ""),
-                        reason=str(raw.get("reason") or ""),
-                        data=dict(raw.get("data") or {}),
-                        dedup_key=dedup_key,
-                        created_at=now.isoformat(timespec="seconds"),
+        # Holds the lock across load -> filter -> save so a concurrent evaluate()
+        # (or snooze()/dismiss_forever()) can't read a stale state and clobber
+        # this call's last_shown/history writes - that race could otherwise let
+        # more events through than proactivity_cooldown_minutes / _max_per_hour
+        # allow, or silently drop a snooze/dismiss.
+        with self._lock:
+            state = self._load_state()
+
+            candidates: list[ProactiveEvent] = []
+            for rule_name, rule in self._rules:
+                try:
+                    raw_events = rule(context) or []
+                except Exception as exc:
+                    # A single misbehaving rule (e.g. a data source that's temporarily
+                    # unavailable) must never take down the whole evaluation pass.
+                    print(f"Proactivity-Regel '{rule_name}' fehlgeschlagen: {type(exc).__name__}")
+                    continue
+                for raw in raw_events:
+                    priority = raw.get("priority") if raw.get("priority") in PRIORITIES else "information"
+                    dedup_key = str(raw.get("dedup_key") or f"{rule_name}:{raw.get('message', '')}")
+                    candidates.append(
+                        ProactiveEvent(
+                            id=uuid.uuid4().hex[:12],
+                            trigger=rule_name,
+                            priority=priority,
+                            message=str(raw.get("message") or ""),
+                            reason=str(raw.get("reason") or ""),
+                            data=dict(raw.get("data") or {}),
+                            dedup_key=dedup_key,
+                            created_at=now.isoformat(timespec="seconds"),
+                        )
                     )
-                )
 
-        dismissed_forever = set(state.get("dismissed_forever", []))
-        snoozed_until = state.get("snoozed_until", {})
-        candidates = [event for event in candidates if event.dedup_key not in dismissed_forever]
-        candidates = [
-            event
-            for event in candidates
-            if not self._is_snoozed(event.dedup_key, snoozed_until, now)
-        ]
+            dismissed_forever = set(state.get("dismissed_forever", []))
+            snoozed_until = state.get("snoozed_until", {})
+            candidates = [event for event in candidates if event.dedup_key not in dismissed_forever]
+            candidates = [
+                event
+                for event in candidates
+                if not self._is_snoozed(event.dedup_key, snoozed_until, now)
+            ]
 
-        cooldown_minutes = int(config.get("proactivity_cooldown_minutes", 60))
-        last_shown = state.get("last_shown", {})
-        candidates = [
-            event
-            for event in candidates
-            if not self._within_cooldown(event.dedup_key, last_shown, now, cooldown_minutes)
-        ]
+            cooldown_minutes = int(config.get("proactivity_cooldown_minutes", 60))
+            last_shown = state.get("last_shown", {})
+            candidates = [
+                event
+                for event in candidates
+                if not self._within_cooldown(event.dedup_key, last_shown, now, cooldown_minutes)
+            ]
 
-        candidates = self._apply_quiet_hours(candidates, config, now)
-        candidates.sort(key=lambda event: PRIORITY_RANK.get(event.priority, 0), reverse=True)
-        candidates = self._apply_throttle(candidates, state, config, now)
+            candidates = self._apply_quiet_hours(candidates, config, now)
+            candidates.sort(key=lambda event: PRIORITY_RANK.get(event.priority, 0), reverse=True)
+            candidates = self._apply_throttle(candidates, state, config, now)
 
-        for event in candidates:
-            last_shown[event.dedup_key] = now.isoformat(timespec="seconds")
-            state["history"].append(event.to_dict())
-        state["last_shown"] = last_shown
-        if candidates:
-            self._save_state(state)
+            for event in candidates:
+                last_shown[event.dedup_key] = now.isoformat(timespec="seconds")
+                state["history"].append(event.to_dict())
+            state["last_shown"] = last_shown
+            if candidates:
+                self._save_state(state)
 
         return candidates
 
@@ -218,18 +231,20 @@ class ProactivityEngine:
         return kept
 
     def snooze(self, dedup_key: str, minutes: int = 60) -> None:
-        state = self._load_state()
-        state.setdefault("snoozed_until", {})[dedup_key] = (
-            datetime.now() + timedelta(minutes=minutes)
-        ).isoformat(timespec="seconds")
-        self._save_state(state)
+        with self._lock:
+            state = self._load_state()
+            state.setdefault("snoozed_until", {})[dedup_key] = (
+                datetime.now() + timedelta(minutes=minutes)
+            ).isoformat(timespec="seconds")
+            self._save_state(state)
 
     def dismiss_forever(self, dedup_key: str) -> None:
-        state = self._load_state()
-        dismissed = set(state.get("dismissed_forever", []))
-        dismissed.add(dedup_key)
-        state["dismissed_forever"] = sorted(dismissed)
-        self._save_state(state)
+        with self._lock:
+            state = self._load_state()
+            dismissed = set(state.get("dismissed_forever", []))
+            dismissed.add(dedup_key)
+            state["dismissed_forever"] = sorted(dismissed)
+            self._save_state(state)
 
     def recent_history(self, limit: int = 20) -> list[dict[str, Any]]:
         state = self._load_state()

@@ -105,6 +105,45 @@ struct ModelStatus: Codable, Equatable {
         case missingModels = "missing_models"
         case openAIKeyPresent = "openai_key_present"
     }
+
+    init(
+        provider: String = "ollama",
+        activeModel: String = "phi4-mini",
+        mode: String = "performance",
+        openAIEnabled: Bool = false,
+        ollamaInstalled: Bool = false,
+        ollamaRunning: Bool = false,
+        installedModels: [String] = [],
+        missingModels: [String] = [],
+        openAIKeyPresent: Bool = false
+    ) {
+        self.provider = provider
+        self.activeModel = activeModel
+        self.mode = mode
+        self.openAIEnabled = openAIEnabled
+        self.ollamaInstalled = ollamaInstalled
+        self.ollamaRunning = ollamaRunning
+        self.installedModels = installedModels
+        self.missingModels = missingModels
+        self.openAIKeyPresent = openAIKeyPresent
+    }
+
+    /// Custom decoding so the defaults above actually take effect for fields the backend
+    /// omits - Swift's synthesized Decodable ignores stored-property default values and
+    /// would otherwise require every key present, turning a partial/older `/api/models`
+    /// response into a hard decode failure instead of a degraded-but-usable status.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        provider = try container.decodeIfPresent(String.self, forKey: .provider) ?? "ollama"
+        activeModel = try container.decodeIfPresent(String.self, forKey: .activeModel) ?? "phi4-mini"
+        mode = try container.decodeIfPresent(String.self, forKey: .mode) ?? "performance"
+        openAIEnabled = try container.decodeIfPresent(Bool.self, forKey: .openAIEnabled) ?? false
+        ollamaInstalled = try container.decodeIfPresent(Bool.self, forKey: .ollamaInstalled) ?? false
+        ollamaRunning = try container.decodeIfPresent(Bool.self, forKey: .ollamaRunning) ?? false
+        installedModels = try container.decodeIfPresent([String].self, forKey: .installedModels) ?? []
+        missingModels = try container.decodeIfPresent([String].self, forKey: .missingModels) ?? []
+        openAIKeyPresent = try container.decodeIfPresent(Bool.self, forKey: .openAIKeyPresent) ?? false
+    }
 }
 
 struct ServerHealth: Codable {

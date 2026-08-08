@@ -272,7 +272,15 @@ def _run_applescript(script: str, app_name: str):
 
 
 def _escape_applescript_text(value: str) -> str:
-    return str(value).replace("\\", "\\\\").replace('"', '\\"').strip()
+    # AppleScript string literals cannot contain a raw newline - event/reminder notes
+    # (which can come from a mail body snippet via auto_calendar_from_mail_enabled)
+    # commonly span multiple lines, which previously broke the generated script's
+    # syntax mid-string instead of being embedded safely. Represent it via
+    # AppleScript's own `return` keyword by reopening/closing the string instead of
+    # ever emitting a raw newline byte into the script text.
+    normalized = str(value).strip().replace("\r\n", "\n").replace("\r", "\n")
+    escaped = normalized.replace("\\", "\\\\").replace('"', '\\"')
+    return escaped.replace("\n", '" & return & "')
 
 
 def _parse_items(raw_output: str, keys: list[str]) -> list[dict[str, str]]:

@@ -28,7 +28,7 @@ class DuckDuckGoHTMLParser(HTMLParser):
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]):
         attributes = dict(attrs)
-        css_class = attributes.get("class", "")
+        css_class = attributes.get("class") or ""
 
         if tag == "a" and "result__a" in css_class:
             self._in_title = True

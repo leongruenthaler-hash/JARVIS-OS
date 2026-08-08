@@ -27,7 +27,13 @@ class ModelRouter:
         self.config = config
         self.model_manager = model_manager
 
-    def route(self, user_text: str | None, provider: str | None = None, installed_models: list[str] | None = None) -> ModelRoute:
+    def route(
+        self,
+        user_text: str | None,
+        provider: str | None = None,
+        installed_models: list[str] | None = None,
+        force_local: bool = False,
+    ) -> ModelRoute:
         active_provider = str(provider or getattr(self.model_manager, "provider", self.config.get("ai_provider", "ollama"))).strip().lower()
         installed_models = installed_models or []
         text = self._normalize(user_text)
@@ -35,7 +41,11 @@ class ModelRouter:
         if mode not in {"performance", "balanced", "quality"}:
             mode = "performance"
 
-        if active_provider == "openai":
+        # "Privater Modus" (core/voice_modes.py forces_local_only): never route to the
+        # cloud provider for this turn, regardless of the user's configured default -
+        # falls through to the same local-model picking logic below as if the provider
+        # were "ollama".
+        if active_provider == "openai" and not force_local:
             return ModelRoute(
                 provider="openai",
                 model=str(self.config.get("openai_model", "gpt-5.4-nano")),
@@ -114,7 +124,7 @@ class ModelRouter:
         installed = {normalize_model_name(model) for model in installed_models}
         selected_mode = mode
         if selected_mode == "performance":
-            preferred = "phi4-mini" if simple or "phi4-mini" in installed or not installed else self._first_available(installed)
+            preferred = "phi4-mini" if "phi4-mini" in installed or not installed else self._first_available(installed)
             if complex_task and "gemma3:4b" in installed:
                 return "gemma3:4b"
             return preferred

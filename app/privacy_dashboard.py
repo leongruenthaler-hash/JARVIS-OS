@@ -40,12 +40,13 @@ class PrivacyDashboard:
         export_dir = self.base_path / "exports"
         export_dir.mkdir(parents=True, exist_ok=True)
         export_path = export_dir / f"jarvis_privacy_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        manager = ModelManager(self.config, self.base_path)
         payload: dict[str, Any] = {
             "created_at": datetime.now().isoformat(timespec="seconds"),
             "permissions": self.permission_manager.export(),
             "config_summary": {
-                "ai_provider": ModelManager(self.config, self.base_path).provider,
-                "active_model": ModelManager(self.config, self.base_path).active_model,
+                "ai_provider": manager.provider,
+                "active_model": manager.active_model,
                 "openai_model": self.config.get("openai_model"),
                 "stt_engine": self.config.get("stt_engine"),
                 "tts_provider": self.config.get("tts_provider"),
@@ -76,14 +77,20 @@ class PrivacyDashboard:
 
     def delete_all_data(self) -> str:
         preserved = {"privacy_permissions.json"}
+        failed = []
         for path in self.base_path.glob("*.json"):
             if path.name in preserved:
                 continue
             try:
                 path.unlink()
             except OSError:
-                continue
+                failed.append(path.name)
         logs = self.logger.clear()
+        if failed:
+            return (
+                f"Achtung: {len(failed)} Datei(en) konnten nicht gelöscht werden ({', '.join(failed)}). "
+                f"Logs gelöscht: {logs}."
+            )
         return f"Alle lokalen Jarvis-Daten wurden gelöscht. Logs gelöscht: {logs}."
 
     def clear_logs(self) -> str:

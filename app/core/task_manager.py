@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import uuid
 from datetime import datetime
 from typing import Any
@@ -26,6 +27,15 @@ class TaskManager:
 
     def __init__(self, memory: Memory) -> None:
         self.memory = memory
+        # create_task()/propose_task()/update_task()/delete_task() all do a
+        # read-modify-write on the shared "tasks" memory bucket (self._all() reads
+        # the whole list, mutate, self._save() writes the whole list back). Without a
+        # lock, two requests racing here (e.g. a voice turn creating a task while a
+        # dashboard chat request updates another one) can interleave so one thread's
+        # write overwrites the other's - silently dropping a just-created task or an
+        # in-flight status change. Same class of bug already fixed in
+        # ActionEngine.propose()/resolve() (see action_engine.py) for the same reason.
+        self._lock = threading.RLock()
 
     def _all(self) -> list[dict[str, Any]]:
         tasks = self.memory.get("tasks")
@@ -113,9 +123,10 @@ class TaskManager:
             source=source,
             source_reference=source_reference,
         )
-        tasks = self._all()
-        tasks.append(entry)
-        self._save(tasks)
+        with self._lock:
+            tasks = self._all()
+            tasks.append(entry)
+            self._save(tasks)
         return entry
 
     def propose_task(
@@ -145,29 +156,31 @@ class TaskManager:
             source=source,
             source_reference=source_reference,
         )
-        tasks = self._all()
-        tasks.append(entry)
-        self._save(tasks)
+        with self._lock:
+            tasks = self._all()
+            tasks.append(entry)
+            self._save(tasks)
         return entry
 
     def update_task(self, task_id: str, **fields: Any) -> bool:
         editable = {"title", "project", "priority", "deadline", "tags", "depends_on", "status"}
-        tasks = self._all()
-        for task in tasks:
-            if task.get("id") != task_id:
-                continue
-            for key, value in fields.items():
-                if key not in editable:
+        with self._lock:
+            tasks = self._all()
+            for task in tasks:
+                if task.get("id") != task_id:
                     continue
-                if key == "priority" and value not in PRIORITIES:
-                    continue
-                if key == "status" and value not in STATUSES:
-                    continue
-                task[key] = value
-            task["updated_at"] = datetime.now().isoformat(timespec="seconds")
-            self._save(tasks)
-            return True
-        return False
+                for key, value in fields.items():
+                    if key not in editable:
+                        continue
+                    if key == "priority" and value not in PRIORITIES:
+                        continue
+                    if key == "status" and value not in STATUSES:
+                        continue
+                    task[key] = value
+                task["updated_at"] = datetime.now().isoformat(timespec="seconds")
+                self._save(tasks)
+                return True
+            return False
 
     def set_status(self, task_id: str, status: str) -> bool:
         if status not in STATUSES:

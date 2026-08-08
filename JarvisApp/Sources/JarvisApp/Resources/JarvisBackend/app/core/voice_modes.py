@@ -50,10 +50,11 @@ def suppresses_voice_output(mode: str | None) -> bool:
 
 
 def forces_local_only(mode: str | None) -> bool:
-    """"Privater Modus" darf für diesen Zug keine externen Datenquellen (Websuche)
-    verwenden. Erzwingt aktuell NICHT den LLM-Provider selbst (Ollama vs. OpenAI) -
-    das würde tiefere, ungetestete Eingriffe in model_router.py brauchen. Siehe
-    docs/voice-system.md, Abschnitt "Bewusst nicht umgesetzt"."""
+    """"Privater Modus" darf für diesen Zug weder externe Datenquellen (Websuche)
+    noch den Cloud-LLM-Anbieter verwenden. Der Aufrufer muss dieses Flag als
+    `force_local=True` an LLMClient.plan()/ask()/ask_stream() durchreichen -
+    das erzwingt dort tatsächlich Ollama statt OpenAI, unabhängig vom sonst
+    konfigurierten Standard-Anbieter. Siehe docs/voice-system.md."""
     return normalize_mode(mode) == "privat"
 
 

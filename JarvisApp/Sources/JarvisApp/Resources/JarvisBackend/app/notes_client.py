@@ -222,4 +222,12 @@ def _looks_like_list(lines: list[str]) -> bool:
 
 
 def _escape_applescript_text(value: str) -> str:
-    return str(value).replace("\\", "\\\\").replace('"', '\\"').strip()
+    # AppleScript string literals cannot contain a raw newline - a literal \r/\n in
+    # value (e.g. a multi-line note title or folder name) previously broke the
+    # generated script's syntax mid-string instead of being embedded safely, and in
+    # principle let an embedded newline change how the rest of the script parses.
+    # Represent it via AppleScript's own `return` keyword by reopening/closing the
+    # string instead of ever emitting a raw newline byte into the script text.
+    normalized = str(value).strip().replace("\r\n", "\n").replace("\r", "\n")
+    escaped = normalized.replace("\\", "\\\\").replace('"', '\\"')
+    return escaped.replace("\n", '" & return & "')

@@ -164,12 +164,13 @@ def now_playing() -> dict | None:
         set trackAlbum to album of current track
         set stateText to player state as string
     end tell
-    return trackName & "\t" & trackArtist & "\t" & trackAlbum & "\t" & stateText
+    set sep to ASCII character 31
+    return trackName & sep & trackArtist & sep & trackAlbum & sep & stateText
     """
     output = _run_applescript(script)
     if output in ("NOT_RUNNING", "STOPPED", ""):
         return None
-    parts = output.split("\t")
+    parts = output.split("\x1f")
     if len(parts) < 4:
         return None
     title, artist, album, state = parts[0], parts[1], parts[2], parts[3]
@@ -227,4 +228,11 @@ def _run_applescript(script: str) -> str:
 
 
 def _escape_applescript_text(value: str) -> str:
-    return value.replace("\\", "\\\\").replace('"', '\\"').strip()
+    return (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\r\n", " ")
+        .replace("\r", " ")
+        .replace("\n", " ")
+        .strip()
+    )

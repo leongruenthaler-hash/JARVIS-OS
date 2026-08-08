@@ -289,6 +289,15 @@ class PhotoIndex:
                 "Ich habe passende Fotos gefunden, darf aber gerade keinen Ordner auf deinem Schreibtisch erstellen. "
                 "Aktiviere in Jarvis die Datei-Berechtigung und erlaube macOS den Zugriff auf den Schreibtisch."
             ) from exc
+        except FileExistsError as exc:
+            # unique_desktop_folder() checked for a free name and mkdir(exist_ok=False)
+            # re-checks it - a real but narrow race (something else creating the same
+            # folder name in between) previously surfaced as an unhandled crash instead
+            # of the same friendly error every other export failure gets here.
+            raise PhotosAccessError(
+                "Ich habe passende Fotos gefunden, aber der Zielordner auf deinem Schreibtisch wurde gerade "
+                "anderweitig angelegt. Versuch es gleich noch einmal."
+            ) from exc
         size = int(preview_size or self.config.get("photos_desktop_export_preview_size", 1800))
         exported = 0
         for index, match in enumerate(matches, start=1):

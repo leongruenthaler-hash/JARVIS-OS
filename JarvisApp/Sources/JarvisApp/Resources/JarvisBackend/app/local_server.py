@@ -31,6 +31,7 @@ from core import (
     normalize_voice_mode,
     voice_mode_disables_web_search,
     voice_mode_suppresses_voice_output,
+    voice_mode_forces_local_only,
 )
 from files_client import configured_roots, move_indexed_matches_to_folder, normalize_name, search_file_index_entries, search_files
 from llm_client import LLMClient
@@ -180,6 +181,7 @@ class JarvisLocalServer:
         self._listen_lock = threading.Lock()
         self._listen_cancel_event = threading.Event()
         self._audio_listener = None
+        self._audio_listener_lock = threading.Lock()
         self._tts_speaking = threading.Event()
         self.mail_worker = None
         self.photo_worker = None
@@ -290,14 +292,21 @@ class JarvisLocalServer:
         title = str(payload.get("title") or "").strip()
         if not title:
             return {"ok": False, "error": "missing_title"}
+        # list(x) on a non-list JSON value silently mangles it instead of raising:
+        # a string "urgent" becomes ['u','r','g','e','n','t'], a dict becomes its
+        # keys. Only accept an actual JSON array here, otherwise fall back to [].
+        raw_tags = payload.get("tags")
+        raw_depends_on = payload.get("depends_on")
+        tags = list(raw_tags) if isinstance(raw_tags, list) else []
+        depends_on = list(raw_depends_on) if isinstance(raw_depends_on, list) else []
         try:
             task = self.tasks.create_task(
                 title,
                 project=payload.get("project"),
                 priority=str(payload.get("priority") or "mittel"),
                 deadline=payload.get("deadline"),
-                tags=list(payload.get("tags") or []),
-                depends_on=list(payload.get("depends_on") or []),
+                tags=tags,
+                depends_on=depends_on,
                 source="manual",
             )
         except ValueError as exc:
@@ -1590,46 +1599,62 @@ class JarvisLocalServer:
             return {"ok": False, "message": _safe_error_detail(exc)}
 
     def _get_stt_engine(self):
-        if self._stt_engine is None:
-            _write_voice_bootstrap_status(
-                "loading_stt_model",
-                "Einmalige Vorbereitung: Sprachmodell wird geladen (kann beim ersten "
-                "Mal 1-2 Minuten dauern, danach deutlich schneller).",
-            )
-            try:
-                self._stt_engine = create_stt_engine(self.config)
-            finally:
-                _clear_voice_bootstrap_status()
+        # Double-checked locking: without self._stt_lock here, two overlapping
+        # requests that both find self._stt_engine is None (e.g. /api/voice/prewarm
+        # racing /api/listen right after startup) would each construct their own
+        # STT engine - wasted model load work, and whichever assignment "wins" leaks
+        # the other, already-initialized engine instance.
+        if self._stt_engine is not None:
+            return self._stt_engine
+        with self._stt_lock:
+            if self._stt_engine is None:
+                _write_voice_bootstrap_status(
+                    "loading_stt_model",
+                    "Einmalige Vorbereitung: Sprachmodell wird geladen (kann beim ersten "
+                    "Mal 1-2 Minuten dauern, danach deutlich schneller).",
+                )
+                try:
+                    self._stt_engine = create_stt_engine(self.config)
+                finally:
+                    _clear_voice_bootstrap_status()
         return self._stt_engine
 
     def _get_audio_listener(self):
+        # Same double-checked-locking concern as _get_stt_engine: without a lock,
+        # concurrent callers (prewarm vs. listen_once) could each construct their
+        # own StreamingAudioListener, and the discarded one may still hold an open
+        # audio input stream/device handle.
         if self._audio_listener is not None:
             return self._audio_listener
 
-        core = self._core_module()
-        try:
-            input_device = core.get_input_device() if hasattr(core, "get_input_device") else self.config.get("input_device")
-        except Exception:
-            input_device = self.config.get("input_device")
+        with self._audio_listener_lock:
+            if self._audio_listener is not None:
+                return self._audio_listener
 
-        self._audio_listener = StreamingAudioListener(
-            samplerate=int(self.config.get("samplerate", 16000)),
-            channels=1,
-            input_device=input_device,
-            chunk_seconds=float(self.config.get("chunk_seconds", 0.3)),
-            silence_limit=float(self.config.get("silence_limit", 0.55)),
-            volume_threshold=float(self.config.get("volume_threshold", 0.006)),
-            min_speech_seconds=float(self.config.get("min_speech_seconds", 0.45)),
-            min_audio_peak=float(self.config.get("min_audio_peak", 0.006)),
-            max_recording_seconds=min(
-                float(self.config.get("max_recording_seconds", 20)),
-                float(self.config.get("voice_listen_max_seconds", 10)),
-            ),
-            partial_transcript_interval_seconds=float(self.config.get("partial_transcript_interval_seconds", 1.15)),
-            partial_transcript_min_audio_seconds=float(self.config.get("partial_transcript_min_audio_seconds", 1.0)),
-            partial_transcript_max_audio_seconds=float(self.config.get("partial_transcript_max_audio_seconds", 6.0)),
-            is_speaking=self._tts_speaking.is_set,
-        )
+            core = self._core_module()
+            try:
+                input_device = core.get_input_device() if hasattr(core, "get_input_device") else self.config.get("input_device")
+            except Exception:
+                input_device = self.config.get("input_device")
+
+            self._audio_listener = StreamingAudioListener(
+                samplerate=int(self.config.get("samplerate", 16000)),
+                channels=1,
+                input_device=input_device,
+                chunk_seconds=float(self.config.get("chunk_seconds", 0.3)),
+                silence_limit=float(self.config.get("silence_limit", 0.55)),
+                volume_threshold=float(self.config.get("volume_threshold", 0.006)),
+                min_speech_seconds=float(self.config.get("min_speech_seconds", 0.45)),
+                min_audio_peak=float(self.config.get("min_audio_peak", 0.006)),
+                max_recording_seconds=min(
+                    float(self.config.get("max_recording_seconds", 20)),
+                    float(self.config.get("voice_listen_max_seconds", 10)),
+                ),
+                partial_transcript_interval_seconds=float(self.config.get("partial_transcript_interval_seconds", 1.15)),
+                partial_transcript_min_audio_seconds=float(self.config.get("partial_transcript_min_audio_seconds", 1.0)),
+                partial_transcript_max_audio_seconds=float(self.config.get("partial_transcript_max_audio_seconds", 6.0)),
+                is_speaking=self._tts_speaking.is_set,
+            )
         return self._audio_listener
 
     def set_voice_speaking(self, speaking: bool) -> dict[str, Any]:
@@ -1669,8 +1694,11 @@ class JarvisLocalServer:
             question = "Ja?"
         self._last_answer_source = "local"
         self._last_answer_model = self.models.active_model
-        route = self.llm.plan(transient_history or [], user_text=question)
+        # voice_mode must be known before plan() - "Privater Modus" (force_local below)
+        # changes which provider/model plan() picks, not just the system-prompt text.
         voice_mode = normalize_voice_mode(str((memory.get("settings") or {}).get("voice_mode") or ""))
+        force_local = voice_mode_forces_local_only(voice_mode)
+        route = self.llm.plan(transient_history or [], user_text=question, force_local=force_local)
 
         try:
             if hasattr(core, "is_end_command") and core.is_end_command(question):
@@ -1912,9 +1940,10 @@ class JarvisLocalServer:
                     user_text=question,
                     route=route,
                     on_chunk=_forward_chunk,
+                    force_local=force_local,
                 )
             else:
-                answer = self.llm.ask(messages, max_output_tokens=route.max_output_tokens, user_text=question, route=route)
+                answer = self.llm.ask(messages, max_output_tokens=route.max_output_tokens, user_text=question, route=route, force_local=force_local)
             print("VoicePerformanceEvent: llmResponseFinished", file=sys.stderr)
             if hasattr(core, "clean_ai_answer"):
                 answer = core.clean_ai_answer(answer)
@@ -2202,9 +2231,10 @@ class Handler(BaseHTTPRequestHandler):
                 SERVER.config["silence_limit"] = 0.72 if enabled else 0.9
                 SERVER.config["voice_listen_max_seconds"] = 9 if enabled else 10
                 save_config(SERVER.config)
-                if SERVER._audio_listener is not None:
-                    SERVER._audio_listener.stop_stream()
-                    SERVER._audio_listener = None
+                with SERVER._audio_listener_lock:
+                    if SERVER._audio_listener is not None:
+                        SERVER._audio_listener.stop_stream()
+                        SERVER._audio_listener = None
                 self._json(200, {"ok": True, "enabled": enabled})
             elif path == "/api/settings/store-conversation":
                 enabled = bool(payload.get("enabled"))
@@ -2363,14 +2393,24 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.flush()
 
     def _read_json(self) -> dict[str, Any]:
-        length = int(self.headers.get("Content-Length", "0") or 0)
+        # This is called from do_POST *before* the surrounding try/except, so any
+        # exception raised here (bad/missing Content-Length header, a client that
+        # disconnects mid-body, invalid UTF-8) would previously propagate unhandled
+        # out of do_POST instead of yielding a clean response.
+        try:
+            length = int(self.headers.get("Content-Length", "0") or 0)
+        except (TypeError, ValueError):
+            return {}
         if length <= 0:
             return {}
-        body = self.rfile.read(length)
+        try:
+            body = self.rfile.read(length)
+        except (OSError, ConnectionError):
+            return {}
         try:
             data = json.loads(body.decode("utf-8"))
             return data if isinstance(data, dict) else {}
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             return {}
 
     def _json(self, status: int, payload: dict[str, Any]):

@@ -22,9 +22,18 @@ class DesktopItem:
 
 def desktop_path() -> Path:
     path = Path.home() / "Desktop"
-    if not path.exists():
+    try:
+        exists = path.exists()
+        is_dir = exists and path.is_dir()
+    except OSError as exc:
+        raise DesktopAccessError(
+            "Ich habe keinen Zugriff auf deinen Desktop-Ordner. Öffne macOS "
+            "Systemeinstellungen > Datenschutz & Sicherheit > Dateien und Ordner und "
+            "erlaube Terminal oder VS Code den Zugriff auf den Schreibtisch-Ordner."
+        ) from exc
+    if not exists:
         raise DesktopAccessError("Ich finde deinen Desktop-Ordner gerade nicht.")
-    if not path.is_dir():
+    if not is_dir:
         raise DesktopAccessError("Dein Desktop-Pfad ist kein Ordner.")
     return path
 
@@ -108,7 +117,10 @@ def create_desktop_folder(folder_name: str) -> str:
     if folder.exists():
         return f"Der Ordner {folder.name} existiert auf deinem Schreibtisch schon."
 
-    folder.mkdir(parents=False, exist_ok=False)
+    try:
+        folder.mkdir(parents=False, exist_ok=False)
+    except OSError as exc:
+        return f"Ich konnte den Ordner {folder.name} nicht erstellen: {exc.strerror or exc}."
     return f"Erledigt. Ich habe den Ordner {folder.name} auf deinem Schreibtisch erstellt."
 
 
@@ -154,7 +166,10 @@ def move_desktop_item(source_name: str, target_folder_name: str) -> str:
 
     target_folder = _safe_child(root, clean_desktop_name(target_folder_name))
     if not target_folder.exists():
-        target_folder.mkdir(parents=False, exist_ok=False)
+        try:
+            target_folder.mkdir(parents=False, exist_ok=False)
+        except OSError as exc:
+            return f"Ich konnte den Ordner {target_folder.name} nicht erstellen: {exc.strerror or exc}."
     if not target_folder.is_dir():
         return f"{target_folder.name} ist kein Ordner."
 
@@ -162,7 +177,10 @@ def move_desktop_item(source_name: str, target_folder_name: str) -> str:
     if destination.exists():
         return f"Im Ordner {target_folder.name} gibt es bereits etwas mit dem Namen {source.name}. Ich habe nichts verschoben."
 
-    shutil.move(str(source), str(destination))
+    try:
+        shutil.move(str(source), str(destination))
+    except OSError as exc:
+        return f"Ich konnte {source.name} nicht verschieben: {exc.strerror or exc}."
     return f"Erledigt. Ich habe {source.name} in den Ordner {target_folder.name} verschoben."
 
 
@@ -176,7 +194,10 @@ def move_desktop_items_matching(query: str, target_folder_name: str, files_only:
 
     target_folder = find_desktop_folder(target_name) or _safe_child(primary_root, target_name)
     if not target_folder.exists():
-        target_folder.mkdir(parents=False, exist_ok=False)
+        try:
+            target_folder.mkdir(parents=False, exist_ok=False)
+        except OSError as exc:
+            return f"Ich konnte den Ordner {target_folder.name} nicht erstellen: {exc.strerror or exc}."
     if not target_folder.is_dir():
         return f"{target_folder.name} ist kein Ordner."
 
@@ -217,22 +238,34 @@ def move_desktop_items_matching(query: str, target_folder_name: str, files_only:
 
     moved = []
     skipped = []
+    failed = []
     for source in matches:
         destination = target_folder / source.name
         if destination.exists():
             skipped.append(source.name)
             continue
-        shutil.move(str(source), str(destination))
+        try:
+            shutil.move(str(source), str(destination))
+        except OSError:
+            failed.append(source.name)
+            continue
         moved.append(source.name)
 
     if not moved:
+        if failed:
+            sample = "; ".join(failed[:6])
+            return (
+                f"Ich konnte keine der gefundenen Dateien verschieben: {sample}. "
+                "Das sieht nach einem macOS-Zugriffs- oder iCloud-Schreibtisch-Problem aus."
+            )
         return f"Ich habe nichts verschoben, weil im Ordner {target_folder.name} schon passende Dateien vorhanden sind."
 
     sample = "; ".join(moved[:5])
     extra_count = len(moved) - len(moved[:5])
     extra = f" und {extra_count} weitere" if extra_count > 0 else ""
     skipped_text = f" {len(skipped)} Datei(en) waren schon vorhanden und wurden übersprungen." if skipped else ""
-    return f"Erledigt. Ich habe {len(moved)} Datei(en) mit {query} im Namen in den Ordner {target_folder.name} verschoben: {sample}{extra}.{skipped_text}"
+    failed_text = f" {len(failed)} Datei(en) konnten nicht verschoben werden." if failed else ""
+    return f"Erledigt. Ich habe {len(moved)} Datei(en) mit {query} im Namen in den Ordner {target_folder.name} verschoben: {sample}{extra}.{skipped_text}{failed_text}"
 
 
 def find_desktop_folder(name_query: str) -> Path | None:

@@ -23,6 +23,10 @@ struct DashboardView: View {
 
     @State private var systemStats: SystemStats?
     @State private var weatherSnapshot: WeatherSnapshot?
+    /// Set when `pollWeather()`'s fetch throws, so WeatherCardContent can show a distinct
+    /// error state instead of getting stuck on its loading spinner forever (see below -
+    /// the old code discarded the error via `try?` with no fallback state).
+    @State private var weatherFetchFailed = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -115,10 +119,20 @@ struct DashboardView: View {
     private func pollWeather() async {
         guard let location = appState.weatherLocation else {
             weatherSnapshot = nil
+            weatherFetchFailed = false
             return
         }
         while !Task.isCancelled {
-            weatherSnapshot = try? await WeatherService.shared.currentWeather(for: location)
+            do {
+                weatherSnapshot = try await WeatherService.shared.currentWeather(for: location)
+                weatherFetchFailed = false
+            } catch {
+                // Previously `try? await ...` discarded the error and left weatherSnapshot
+                // untouched, so a network failure showed an infinite loading spinner with
+                // no indication anything had gone wrong. Now WeatherCardContent can render
+                // an explicit error state.
+                weatherFetchFailed = true
+            }
             try? await Task.sleep(for: .seconds(15 * 60))
         }
     }
@@ -336,30 +350,47 @@ struct DashboardView: View {
         .help(appState.alwaysListenEnabled ? "Immer-Zuhören-Modus deaktivieren" : "Immer-Zuhören-Modus aktivieren")
     }
 
-    private var greetedName: String {
-        appState.userName.isEmpty ? "Leon" : appState.userName
-    }
-
+    /// Falls back to a name-less greeting - not a hardcoded placeholder name - when
+    /// `appState.userName` hasn't been set yet, so a fresh install (or a future user of
+    /// this app who isn't Leon) never sees a stranger's name greet them.
     private var greetingAttributed: AttributedString {
-        var text = AttributedString("Guten Tag, \(greetedName).")
+        let name = appState.userName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else {
+            var text = AttributedString("Guten Tag.")
+            text.foregroundColor = .white
+            return text
+        }
+        var text = AttributedString("Guten Tag, \(name).")
         text.foregroundColor = .white
-        if let range = text.range(of: greetedName) {
+        if let range = text.range(of: name) {
             text[range].foregroundColor = DashboardPalette.accent
         }
         return text
     }
 
-    private var currentTimeString: String {
+    /// Cached instead of allocated per-render: DashboardView's body re-evaluates every
+    /// few seconds (systemStats/music polling drive @State changes), and constructing a
+    /// DateFormatter is expensive enough that doing it from scratch on every render was
+    /// wasted work for a value that only needs to change once a minute.
+    private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
-        return formatter.string(from: Date())
-    }
+        return formatter
+    }()
 
-    private var currentDateString: String {
+    private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "EEEE, d. MMMM"
         formatter.locale = Locale(identifier: "de_DE")
-        return formatter.string(from: Date())
+        return formatter
+    }()
+
+    private var currentTimeString: String {
+        Self.timeFormatter.string(from: Date())
+    }
+
+    private var currentDateString: String {
+        Self.dateFormatter.string(from: Date())
     }
 
     // MARK: - Card grid (Grundgerüst only - empty bodies, filled in Etappe 3)
@@ -403,6 +434,7 @@ struct DashboardView: View {
                 WeatherCardContent(
                     hasLocation: appState.weatherLocation != nil,
                     snapshot: weatherSnapshot,
+                    fetchFailed: weatherFetchFailed,
                     openSettings: { activeSection = .section(.settings) }
                 )
             }
@@ -711,6 +743,7 @@ private struct DashboardLoadingPlaceholder: View {
 private struct WeatherCardContent: View {
     let hasLocation: Bool
     let snapshot: WeatherSnapshot?
+    var fetchFailed: Bool = false
     var openSettings: (() -> Void)?
 
     var body: some View {
@@ -737,6 +770,8 @@ private struct WeatherCardContent: View {
                 .foregroundStyle(DashboardPalette.textSecondary.opacity(0.8))
             }
             .frame(maxWidth: .infinity, minHeight: 64, alignment: .topLeading)
+        } else if fetchFailed {
+            DashboardPlaceholder(text: "Wetter konnte nicht geladen werden.")
         } else {
             DashboardLoadingPlaceholder()
         }

@@ -78,10 +78,22 @@ class LocalVisionService:
         )
 
     def describe_image(self, image_url: str | Path) -> dict[str, Any]:
-        image_path = Path(image_url)
         status = self.status()
         if not status.available:
             raise LocalVisionError(status.message)
+        return self._describe_image_with_status(Path(image_url), status)
+
+    def describe_images(self, image_urls: list[str | Path]) -> list[dict[str, Any]]:
+        # status() re-checks Ollama install/running state and re-lists installed
+        # models (model_manager shells out / calls the Ollama API for this) - call
+        # it once for the whole batch instead of once per image, same as a single
+        # describe_image() would, just without paying that cost N times.
+        status = self.status()
+        if not status.available:
+            raise LocalVisionError(status.message)
+        return [self._describe_image_with_status(Path(path), status) for path in image_urls]
+
+    def _describe_image_with_status(self, image_path: Path, status: LocalVisionStatus) -> dict[str, Any]:
         if not image_path.exists() or image_path.stat().st_size <= 0:
             raise LocalVisionError(f"Bildvorschau fehlt lokal: {image_path}")
 
@@ -96,9 +108,6 @@ class LocalVisionService:
         parsed = self._parse_response(response_text)
         parsed["model"] = status.model
         return parsed
-
-    def describe_images(self, image_urls: list[str | Path]) -> list[dict[str, Any]]:
-        return [self.describe_image(path) for path in image_urls]
 
     def describe_screen(self, image_url: str | Path) -> dict[str, Any]:
         """Wie describe_image(), aber mit einem auf Bildschirminhalte statt Fotos
@@ -208,8 +217,16 @@ class LocalVisionService:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(request, timeout=float(self.config.get("local_vision_timeout", 90))) as response:
-            data = json.loads(response.read().decode("utf-8"))
+        try:
+            with urllib.request.urlopen(request, timeout=float(self.config.get("local_vision_timeout", 90))) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            # Covers connection refused, DNS/URL errors, HTTP error status (e.g. the
+            # 400 "exceeds context size" case noted above) and a hung/timed-out
+            # request - all of urllib's failure modes here are OSError subclasses.
+            # Without this, callers that only catch LocalVisionError (per this
+            # class's own contract) would see an unhandled exception instead.
+            raise LocalVisionError(f"Lokales Vision-Modell nicht erreichbar: {exc}") from exc
         return str(data.get("response") or "").strip()
 
     def _parse_response(self, text: str) -> dict[str, Any]:

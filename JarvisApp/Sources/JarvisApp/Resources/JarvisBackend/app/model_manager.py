@@ -203,12 +203,17 @@ class ModelManager:
             has_key = bool(get_openai_api_key())
         except SecureStorageError:
             has_key = False
-        provider = self.provider
-        if provider == "openai" and not has_key:
+        if self.data.get("provider") == "openai" and self.data.get("openai_enabled") and has_key:
+            provider = "openai"
+        else:
             provider = "ollama"
+        if provider == "openai":
+            active_model = str(self.config.get("openai_model", "gpt-5.4-nano"))
+        else:
+            active_model = normalize_model_name(str(self.data.get("local_model") or DEFAULT_LOCAL_MODEL))
         return ModelStatus(
             provider=provider,
-            active_model=self.active_model,
+            active_model=active_model,
             openai_enabled=bool(self.data.get("openai_enabled", False) and has_key),
             ollama_installed=is_ollama_installed(),
             ollama_running=running,

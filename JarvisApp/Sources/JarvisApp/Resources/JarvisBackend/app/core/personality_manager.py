@@ -180,9 +180,15 @@ def normalize_jarvis_messages(
             continue
         normalized.append({"role": role, "content": content})
 
+    # Python quirk: list[-0:] is list[0:], i.e. the WHOLE list, not an empty one - so
+    # `normalized[-max(0, recent_limit):]` silently included full history instead of
+    # none whenever recent_limit was 0 (or negative). Guard the zero case explicitly.
+    limit = max(0, recent_limit)
+    trimmed = normalized[-limit:] if limit > 0 else []
+
     return [
         {"role": "system", "content": system_content},
-        *normalized[-max(0, recent_limit):],
+        *trimmed,
     ]
 
 

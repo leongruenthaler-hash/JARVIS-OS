@@ -127,8 +127,8 @@ def main() -> int:
                 try:
                     SERVER.memory.data.setdefault("personality", {}).setdefault("assistant", {})["creator"] = user_name
                     SERVER.memory.save("personality")
-                except Exception:
-                    pass
+                except Exception as exc:
+                    print(f"set_user_profile: failed to persist creator name to memory: {exc}", file=sys.stderr)
                 save_config(SERVER.config)
                 data = {"user_name": user_name, "salutation": salutation}
             else:

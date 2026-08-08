@@ -127,10 +127,10 @@ def execute_planned_calendar_action(action: dict[str, Any], config: dict[str, An
 
     kind = str(action.get("kind") or "")
     title = str(action.get("title") or "")
-    when = _datetime.fromisoformat(str(action.get("when")))
     notes = str(action.get("notes") or "")
 
     try:
+        when = _datetime.fromisoformat(str(action.get("when")))
         if kind == "event":
             create_calendar_event(
                 title,
@@ -146,7 +146,10 @@ def execute_planned_calendar_action(action: dict[str, Any], config: dict[str, An
                 list_name=config.get("reminders_list_name"),
                 notes=notes,
             )
-    except CalendarAccessError as exc:
+    except (CalendarAccessError, ValueError, TypeError) as exc:
+        # ValueError/TypeError guard against a missing or corrupted "when"/duration
+        # value (e.g. a stale persisted proposal) - without this, execute would
+        # raise an unhandled exception instead of surfacing a clean error result.
         return {**action, "status": "error", "error": str(exc)}
 
     return {**action, "status": "created"}
@@ -187,9 +190,15 @@ def plan_calendar_action(message: MailMessage, config: dict[str, Any]) -> dict[s
 
 
 def _combined_text(message: MailMessage) -> str:
+    # Deliberately excludes message.received: Mail.app formats it as a full
+    # German date string (e.g. "Donnerstag, 7. August 2025 um 21:15:00"), which
+    # contains a weekday name and a day/month/year pattern that would otherwise
+    # match the very date/weekday regexes used below - causing almost every
+    # invoice/event/deadline mail to get an extracted date derived from its own
+    # arrival timestamp instead of any date actually mentioned in the content.
     return " ".join(
         part
-        for part in (message.sender, message.subject, message.received, message.preview)
+        for part in (message.sender, message.subject, message.preview)
         if part
     )
 

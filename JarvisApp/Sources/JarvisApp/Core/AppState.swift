@@ -86,7 +86,6 @@ final class AppState: ObservableObject {
     private lazy var audioCaptureService = AudioCaptureService()
     private lazy var wakeWordListener = WakeWordListener()
     private var alwaysListenTask: Task<Void, Never>?
-    private var reconnectTask: Task<Void, Never>?
     private var scanPollingTask: Task<Void, Never>?
     private var isBootstrapping = false
     private var isVoiceRequestRunning = false
@@ -97,7 +96,6 @@ final class AppState: ObservableObject {
     private var activeSpeechPlayer: StreamingSpeechPlayer?
     private var voicePerformanceMarks: [String: Date] = [:]
     private let voiceFeedbackSounds = VoiceFeedbackSoundPlayer()
-    private var microphoneWarmupTask: Task<Bool, Never>?
     private var nextVoiceListenTask: Task<Void, Never>?
     private var backgroundReconnectTask: Task<Void, Never>?
     private var proactivityPollingTask: Task<Void, Never>?
@@ -1945,18 +1943,6 @@ final class AppState: ObservableObject {
             return "Antwort über OpenAI • \(model)"
         }
         return "Antwort über lokal • \(model)"
-    }
-
-    private func startReconnectLoop() {
-        guard reconnectTask == nil else { return }
-        reconnectTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(60))
-                guard let self else { return }
-                guard self.status == .offline else { continue }
-                await self.refreshStatus(startIfOffline: true)
-            }
-        }
     }
 
     private func startScanPolling() {

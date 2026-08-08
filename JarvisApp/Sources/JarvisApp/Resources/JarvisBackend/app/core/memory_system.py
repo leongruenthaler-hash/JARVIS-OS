@@ -47,17 +47,23 @@ class JarvisMemorySystem:
         return True
 
     def add_project_note(self, project: str, note: str) -> None:
-        projects = self.memory.get("projects") or {}
-        project_entry = projects.setdefault(project, {"notes": [], "updated_at": None})
-        project_entry.setdefault("notes", [])
-        project_entry["notes"].append(
-            {
-                "content": note,
-                "created_at": datetime.now().isoformat(timespec="seconds"),
-            }
-        )
-        project_entry["updated_at"] = datetime.now().isoformat(timespec="seconds")
-        self.memory.set("projects", projects)
+        # get() + set() is a read-modify-write pair with a gap in between - two
+        # concurrent calls (e.g. two requests handled on different threads by
+        # local_server.py) can both read the same "projects" dict, append to their
+        # own copy, and the second set() silently overwrites the first note. Hold
+        # Memory's own lock across the whole read-modify-write so it's atomic.
+        with self.memory._lock:
+            projects = self.memory.get("projects") or {}
+            project_entry = projects.setdefault(project, {"notes": [], "updated_at": None})
+            project_entry.setdefault("notes", [])
+            project_entry["notes"].append(
+                {
+                    "content": note,
+                    "created_at": datetime.now().isoformat(timespec="seconds"),
+                }
+            )
+            project_entry["updated_at"] = datetime.now().isoformat(timespec="seconds")
+            self.memory.set("projects", projects)
 
     def profile(self) -> dict[str, Any]:
         return self.memory.get("personality") or {}
