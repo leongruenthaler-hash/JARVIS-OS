@@ -103,6 +103,11 @@ final class AppState: ObservableObject {
     private var activityPollingTask: Task<Void, Never>?
     private var lastActivityPollAt: TimeInterval = 0
     private var shownProactiveEventIDs: Set<String> = []
+    // Baustein "Jarvis spricht proaktiv" (siehe plans/2026-08-09-jarvis-proaktiv-
+    // sprechen.md): Warteschlange fuer proaktive Hinweise, die gesprochen werden
+    // sollen, aber gerade nicht koennen, weil eine Konversation laeuft.
+    private var pendingProactiveSpeech: [String] = []
+    private var isDrainingProactiveSpeechQueue = false
     private var voiceStopGeneration = 0
     private var debugLoggingEnabled: Bool {
         UserDefaults.standard.bool(forKey: "JarvisDebugLogging")
@@ -182,6 +187,7 @@ final class AppState: ObservableObject {
                 messages.append(ChatMessage(role: .system, text: "💡 \(event.message)"))
             }
             await scheduleSystemNotifications(for: newEvents)
+            await speakOrQueueProactiveEvents(newEvents)
         } catch {
             // Best-effort - a failed proactivity poll must never surface as a user-facing
             // error the way a failed chat/voice action would.
@@ -211,6 +217,81 @@ final class AppState: ObservableObject {
             // Garantie, die der Server auch für Snooze/Dismiss verwendet).
             let request = UNNotificationRequest(identifier: event.dedupKey, content: content, trigger: nil)
             try? await center.add(request)
+        }
+    }
+
+    /// Jarvis spricht proaktive Hinweise (siehe
+    /// plans/2026-08-09-jarvis-proaktiv-sprechen.md) - zusaetzlich zur Chat-Nachricht
+    /// und Benachrichtigung, unaufgefordert, waehrend die App laeuft. Bewusst KEINE
+    /// eigene Prioritaets-Schwelle (auf Leons ausdruecklichen Wunsch: auch Kleinigkeiten
+    /// mit Mehrwert sollen gesprochen werden) - die bestehende serverseitige Drosselung
+    /// (Abkuehlzeit/max. pro Stunde/Ruhezeiten) haelt die Menge trotzdem im Rahmen, weil
+    /// ein Ereignis ueberhaupt nur ankommt, wenn diese Filter es schon durchgelassen haben.
+    func speakOrQueueProactiveEvents(_ events: [ProactiveEvent]) async {
+        pendingProactiveSpeech.append(contentsOf: events.map { $0.message })
+        await drainProactiveSpeechQueueIfIdle()
+    }
+
+    /// Eine laufende Konversation (Sie sprechen gerade mit Jarvis, oder Jarvis spricht
+    /// gerade eine Antwort) darf niemals von einem proaktiven Hinweis unterbrochen
+    /// werden - der Hinweis wird stattdessen zurueckgestellt und nachgeholt, sobald
+    /// voiceState wieder .idle wird (siehe setVoiceState unten). Absichtlich mehrere,
+    /// sich teils ueberschneidende Signale geprueft (isJarvisSpeaking/activeSpeechPlayer
+    /// zusaetzlich zu voiceState) - voiceState allein kann kurz hinter dem tatsaechlichen
+    /// TTS-Status zurueckbleiben.
+    private func isConversationInProgress() -> Bool {
+        if isJarvisSpeaking || activeSpeechPlayer != nil {
+            return true
+        }
+        switch voiceState {
+        case .userSpeaking, .liveTranscribing, .transcribing, .thinking, .listening, .jarvisSpeaking, .preparingMicrophone:
+            return true
+        case .idle, .alwaysListenStandby, .wakeWordChecking, .error:
+            return false
+        }
+    }
+
+    private func drainProactiveSpeechQueueIfIdle() async {
+        guard !isDrainingProactiveSpeechQueue else { return }
+        guard !pendingProactiveSpeech.isEmpty else { return }
+        guard !isConversationInProgress() else { return }
+
+        isDrainingProactiveSpeechQueue = true
+        defer { isDrainingProactiveSpeechQueue = false }
+
+        while !pendingProactiveSpeech.isEmpty {
+            guard !isConversationInProgress() else { break }
+            let text = pendingProactiveSpeech.removeFirst()
+            await speakProactiveMessage(text)
+        }
+    }
+
+    private func speakProactiveMessage(_ text: String) async {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        setVoiceState(.jarvisSpeaking, reason: "proactive_speech")
+        do {
+            isJarvisSpeaking = true
+            await serverController.setVoiceSpeakingState(true)
+            for segment in ttsSegments(from: trimmed) {
+                guard isJarvisSpeaking else { break }
+                try await ttsService.speak(segment) { _ in }
+            }
+            isJarvisSpeaking = false
+            await serverController.setVoiceSpeakingState(false)
+            if voiceState == .jarvisSpeaking {
+                setVoiceState(.idle, reason: "proactive_speech_finished")
+            }
+        } catch {
+            isJarvisSpeaking = false
+            await serverController.setVoiceSpeakingState(false)
+            // Kein lastError hier - ein fehlgeschlagener proaktiver Hinweis darf keinen
+            // sichtbaren Fehlerzustand ausloesen (der Nutzer hat nichts angefragt); der
+            // Hinweis bleibt ohnehin als Chat-Nachricht + Benachrichtigung sichtbar.
+            if voiceState == .jarvisSpeaking {
+                setVoiceState(.idle, reason: "proactive_speech_failed")
+            }
         }
     }
 
@@ -1901,6 +1982,15 @@ final class AppState: ObservableObject {
         }
         voiceState = newState
         voiceFeedbackSounds.play(for: newState)
+
+        // Ein Gespraech ist gerade zu Ende gegangen (oder Jarvis ist wieder im
+        // Leerlauf) - jetzt zurueckgestellte proaktive Hinweise nachholen, statt sie
+        // stillschweigend verschluckt zu lassen (siehe drainProactiveSpeechQueueIfIdle).
+        if newState == .idle && !pendingProactiveSpeech.isEmpty {
+            Task { [weak self] in
+                await self?.drainProactiveSpeechQueueIfIdle()
+            }
+        }
     }
 
     private func logVoiceEvent(_ message: String) {

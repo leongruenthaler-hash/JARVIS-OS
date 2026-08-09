@@ -162,6 +162,39 @@ Weise, wie es auch Snooze/Dismiss schon nutzen.
   AppIcon.appiconset`), jederzeit später ohne Code-Änderung durch ein
   finales Design ersetzbar.
 
+**Nachtrag (2026-08-09): Jarvis spricht proaktive Hinweise.** Siehe
+`plans/2026-08-09-jarvis-proaktiv-sprechen.md`. Bisher landete ein Hinweis
+nur still im Chat und als (meist lautlose) Systembenachrichtigung - jetzt
+spricht Jarvis ihn zusätzlich unaufgefordert aus, während die App läuft, mit
+derselben Sprachausgabe, die auch normale Chat-Antworten vorliest
+(`TTSService`/`ttsService.speak()`, kein Backend-Code geändert).
+
+- **Bewusst keine eigene Prioritäts-Schwelle** - auf Leons ausdrücklichen
+  Wunsch werden alle vier Stufen (`information`/`relevant`/`wichtig`/
+  `kritisch`) gesprochen, auch Kleinigkeiten mit Mehrwert. Die bestehende
+  serverseitige Drosselung (Abkühlzeit, max. 4/Stunde, Ruhezeiten) hält die
+  Menge trotzdem im Rahmen, weil ein Ereignis nur überhaupt ankommt, wenn
+  diese Filter es schon durchgelassen haben - keine Dopplung nötig.
+- **Nie eine laufende Konversation unterbrechen:** `AppState.
+  isConversationInProgress()` prüft `isJarvisSpeaking`/`activeSpeechPlayer`
+  und `voiceState` (blockierend bei `.userSpeaking`/`.liveTranscribing`/
+  `.transcribing`/`.thinking`/`.listening`/`.jarvisSpeaking`/
+  `.preparingMicrophone`). Kann ein Ereignis nicht sofort gesprochen werden,
+  landet es in `pendingProactiveSpeech` (neue Warteschlange) und wird
+  automatisch nachgeholt, sobald `voiceState` wieder auf `.idle` wechselt
+  (Hook in `setVoiceState()`) - nichts wird stillschweigend verschluckt.
+- **Mail→Kalender-Vorschläge bleiben unverändert Vorschläge**, die Sie
+  mündlich bestätigen - kein automatisches Eintragen, bewusst kein Bruch mit
+  dem bestehenden "immer erst bestätigen"-Prinzip.
+- Live auf dem echten Mac verifiziert: ein frisches, echtes
+  `low_disk_space`-Ereignis kam beim App-Start an, direkt danach lief eine
+  Audiowiedergabe an.
+
+**Zurückgestellt, als eigener Folge-Baustein geplant:** echte Nachrichten/
+News-Anbindung ("sehr wichtige Inhalte" proaktiv ansagen) - braucht eine
+Nachrichtenquelle und eine neue Proactivity-Regel, bewusst nicht Teil dieses
+Plans.
+
 ## Wo Hinweise ankommen
 
 - `GET /api/proactivity/events` - wertet aus und markiert als gezeigt (mit
