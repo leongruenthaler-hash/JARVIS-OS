@@ -66,10 +66,14 @@ def test_answer_calendar_query_today_excludes_far_future_events():
     """Regressionstest fuer den gemeldeten Bug: 'was steht heute an' zeigte
     Termine aus dem ganzen Jahr statt nur von heute."""
     now = datetime.now()
+    # Feste Uhrzeit relativ zum Tagesanfang statt "now + 1h" - andernfalls rollt der
+    # Termin kurz vor Mitternacht auf den naechsten Kalendertag und der Test wird
+    # abhaengig von der Uhrzeit, zu der er laeuft, faelschlich rot.
+    today_start = datetime(now.year, now.month, now.day)
     fake_items = [
         {
             "title": "Heute-Termin", "start": "heute", "end": "heute",
-            "start_dt": now + timedelta(hours=1), "end_dt": now + timedelta(hours=2), "all_day": False,
+            "start_dt": today_start + timedelta(hours=9), "end_dt": today_start + timedelta(hours=10), "all_day": False,
         },
         {
             "title": "Weit-weg-Termin", "start": "weit weg", "end": "weit weg",
