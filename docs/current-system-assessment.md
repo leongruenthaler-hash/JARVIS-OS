@@ -285,3 +285,30 @@ weiterhin die zwei parallelen, nicht deckungsgleichen Antwortpfade (Abschnitt
 7.2) - dieses strukturelle Problem bleibt bestehen. `model_router.py`s
 `_is_simple()`/`_is_complex()` nutzen bewusst weiterhin keine Fuzzy-Erkennung
 (niedrigere Priorität, siehe Plan).
+
+## 14. Proaktive Kalender-Nudges (2026-08-08)
+
+Baustein A aus `plans/2026-08-08-jarvis-proaktiver-wie-iron-man.md`
+umgesetzt: zwei neue, deterministische Proactivity-Regeln
+(`rule_calendar_event_starting_soon`, `rule_calendar_events_overlap` in
+`app/core/proactivity_rules.py`) - der zuvor im Code selbst als bewusst
+zurückgestellter Folgeschritt vermerkte Fall (siehe Abschnitt 7 dieser Datei,
+"Größte technische Schulden" #4, jetzt teilweise erledigt für den
+Kalender-Teil). Details, Konfigurationswerte und Design-Entscheidungen:
+`docs/proactivity.md`, `plans/2026-08-08-jarvis-termin-nudges.md`.
+
+Voraussetzung dafür war eine additive Erweiterung von
+`app/calendar_client.py::list_upcoming_calendar_items()` um numerische,
+sprachunabhängige Datumsfelder (statt nur locale-formatiertem Text) - dabei
+wurde die schon einmal riskante `whose`-AppleScript-Filterung (Commit
+`45dc902`) bewusst nicht wieder angefasst, nur die Ausgabe pro Termin
+erweitert.
+
+**Nebenbefund und behoben:** ein vom Nutzer gemeldeter Bug, bei dem "was
+steht heute an" Termine aus dem ganzen Jahr statt nur von heute zeigte -
+behoben durch eine zusätzliche, robuste Python-seitige Filterung anhand der
+neuen numerischen Zeitstempel in `jarvis.py::answer_calendar_query()`.
+
+13 neue Tests (insgesamt 113). Bewusst nicht umgesetzt: Reisezeit vor einem
+Termin, automatischer Abgleich mit aus Mails erkannten Terminvorschlägen
+(Baustein B) - siehe `docs/proactivity.md`, letzter Abschnitt.

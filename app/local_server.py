@@ -1075,11 +1075,28 @@ class JarvisLocalServer:
             if fact.get("status") == "pending_confirmation"
         ]
 
+        # Kalender-Nudges (rule_calendar_event_starting_soon/_overlap, siehe
+        # plans/2026-08-08-jarvis-termin-nudges.md) - nur lesen, wenn die
+        # Kalender-Permission bereits erteilt ist, exakt wie beim Mail-Block oben:
+        # Proactivity darf nie der erste, stille Ausloeser fuer einen Kalenderzugriff
+        # sein.
+        upcoming_calendar_events: list[dict[str, Any]] = []
+        if self.permissions.is_allowed("calendar"):
+            try:
+                from datetime import datetime, timedelta
+
+                lookahead_hours = float(self.config.get("proactivity_calendar_lookahead_hours", 6))
+                until = datetime.now() + timedelta(hours=lookahead_hours)
+                upcoming_calendar_events = list_upcoming_calendar_items(limit=20, until=until).get("items", [])
+            except Exception:
+                pass
+
         return {
             "config": self.config,
             "pending_calendar_actions": pending_calendar_actions,
             "new_mail_messages": new_mail_messages,
             "pending_confirmation_facts": pending_confirmation_facts,
+            "upcoming_calendar_events": upcoming_calendar_events,
         }
 
     def proactivity_events(self) -> dict[str, Any]:

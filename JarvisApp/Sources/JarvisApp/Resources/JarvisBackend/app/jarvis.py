@@ -3746,6 +3746,16 @@ def answer_calendar_query(text: str, normalized: str) -> str:
             until = datetime(now.year, now.month, now.day, 23, 59, 59)
 
         items = list_upcoming_calendar_items(limit=5, until=until).get("items", [])
+        if only_today:
+            # Zusaetzlich zur AppleScript-seitigen until-Vorfilterung (grob, haengt am
+            # Ende an einem locale-formatierten Datumsvergleich) wird hier noch einmal
+            # anhand des echten, numerisch geparsten start_dt gefiltert - robust,
+            # unabhaengig vom Systemdatumsformat. Behebt den gemeldeten Bug, dass "was
+            # steht heute an" teils Termine aus dem ganzen Jahr zeigte. Termine ohne
+            # start_dt (Parsing fehlgeschlagen) werden NICHT herausgefiltert, damit ein
+            # einzelner kaputter Termin nicht faelschlich "keine Termine heute" ergibt.
+            today = now.date()
+            items = [item for item in items if item.get("start_dt") is None or item["start_dt"].date() == today]
         if not items:
             return "Für heute sehe ich keine Termine." if only_today else "Ich sehe aktuell keine anstehenden Termine."
 

@@ -47,16 +47,33 @@ Ablauf pro Aufruf:
 | `pending_calendar_actions_waiting` | relevant | Aus Mails erkannte Kalender-Vorschläge (Phase 5/B) seit ≥2h unbestätigt |
 | `unconfirmed_memory_facts` | information | ≥3 Erinnerungen mit Status `pending_confirmation` |
 | `new_unread_mail` | relevant | ≥3 neue Mails seit letztem Hintergrundscan |
+| `calendar_event_starting_soon` | wichtig | Ein nicht-ganztägiger Termin beginnt innerhalb von `proactivity_calendar_event_soon_minutes` (Standard 15) |
+| `calendar_events_overlap` | relevant | Zwei Termine innerhalb von `proactivity_calendar_lookahead_hours` (Standard 6h) überschneiden sich zeitlich |
 
-**Bewusst nicht umgesetzt:** "Termin beginnt bald" und "zwei Termine
-überschneiden sich" (Master-Plan 8.4). `calendar_client.py` liefert
-Kalenderzeiten aktuell nur als lokal-formatierte Datums*strings* (macOS/
-AppleScript, sprachabhängig), nicht als robust parsbare Zeitstempel - genau
-die AppleScript-Abfrage, die heute schon einmal durch eine unvorsichtige
-Änderung kaputtging (siehe Commit `45dc902`). Ein zuverlässiger Fix (Datum in
-numerischen Komponenten statt als String ausgeben) ist ein sinnvoller, aber
-eigenständiger Folgeschritt, der nicht ungetestet in derselben Änderung wie
-die neue Proactivity Engine laufen sollte.
+**Nachtrag (2026-08-08):** "Termin beginnt bald" und "zwei Termine
+überschneiden sich" sind jetzt umgesetzt, siehe
+`plans/2026-08-08-jarvis-termin-nudges.md`. Die zuvor fehlende Grundlage
+(vergleichbare Zeitstempel statt lokal-formatierter Text) wurde **additiv**
+in `calendar_client.py::list_upcoming_calendar_items()` ergänzt: das
+AppleScript liefert jetzt zusätzlich zu den bestehenden Text-Feldern
+numerische Datumsbestandteile über AppleScripts eigene
+Datumsobjekt-Eigenschaften (`year of`/`month of`/`day of`/`hours of`/
+`minutes of` - sprachunabhängig, kein String-Parsing nötig), aus denen
+`start_dt`/`end_dt` gebaut werden. Die bereits einmal problematische
+`whose`-Filterung (Commit `45dc902`) wurde dabei bewusst nicht wieder
+angefasst - die bestehende prozedurale Schleife blieb unverändert, nur die
+Ausgabe pro Termin wurde um Felder ergänzt. Beide Regeln lesen
+`context["upcoming_calendar_events"]`, befüllt in
+`local_server.py::_proactivity_context()` - permission-gated wie der
+bestehende Mail-Block, liest also nie Kalenderdaten, bevor die Kalender-
+Permission erteilt wurde.
+
+Als Nebeneffekt der neuen `start_dt`-Zeitstempel wurde auch ein gemeldeter
+Bug behoben: "was steht heute an" zeigte teils Termine aus dem ganzen Jahr
+statt nur von heute, vermutlich weil die bisherige Filterung allein auf
+einem locale-formatierten AppleScript-Datumsvergleich beruhte.
+`jarvis.py::answer_calendar_query()` filtert den `only_today`-Fall jetzt
+zusätzlich anhand des robusten `start_dt` in Python nach.
 
 ## Wo Hinweise ankommen
 
@@ -81,7 +98,10 @@ die neue Proactivity Engine laufen sollte.
   nur über `config.json` (`proactivity_quiet_hours_start`/`_end`) steuerbar,
   wie die meisten anderen Zeitfenster-Einstellungen im Projekt
   (`background_mail_morning_time` etc.) auch nur über `config.json` laufen.
-- Kalender-basierte Trigger (siehe oben) - blockiert auf einer sichereren
-  Änderung an `calendar_client.py`.
 - Keine macOS-Systembenachrichtigungen (`UNUserNotificationCenter`) - Hinweise
   erscheinen aktuell nur als Chat-Nachricht, wenn die App offen ist.
+- Reisezeit vor einem Termin oder ein automatischer Abgleich mit aus Mails
+  erkannten Terminvorschlägen (Baustein B aus
+  `plans/2026-08-08-jarvis-proaktiver-wie-iron-man.md`) - bewusst nicht Teil
+  der Kalender-Nudges, könnte aber jetzt auf denselben `start_dt`/`end_dt`-
+  Feldern aufbauen.

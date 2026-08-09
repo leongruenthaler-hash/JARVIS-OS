@@ -7,16 +7,14 @@ from typing import Any
 
 """Default Proactivity Engine rules (Master-Plan Abschnitt 8.4).
 
-Deliberately scoped to data sources that are already robust, ISO-timestamped
-Python data - NOT Calendar.app's AppleScript output. calendar_client.py's
-"start"/"end" fields are locale-formatted date *strings* (e.g. German long
-form) with no reliable, dependency-free way to parse them back into a
-datetime here; a "Termin beginnt bald" / "zwei Termine ueberschneiden sich"
-rule needs calendar_client.py itself to emit numeric date components first
-(a real change to a working AppleScript query - see the calendar regression
-fixed earlier this session). That's flagged as a follow-up, not implemented
-here, to avoid touching that fragile query again without being able to test
-against a real Calendar.app.
+Die Kalender-Regeln (rule_calendar_event_starting_soon,
+rule_calendar_events_overlap) wurden nachtraeglich ergaenzt, siehe
+plans/2026-08-08-jarvis-termin-nudges.md: calendar_client.py liefert seitdem
+zusaetzlich zu den locale-formatierten Text-Feldern auch numerische
+Datumsbestandteile (year/month/day/hour/minute ueber AppleScripts eigene
+Datumsobjekt-Eigenschaften, sprachunabhaengig), aus denen ein echtes
+datetime pro Termin gebaut wird - vorher war das nicht moeglich (siehe
+docs/proactivity.md).
 """
 
 
@@ -136,11 +134,99 @@ def rule_new_unread_mail(context: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def rule_calendar_event_starting_soon(context: dict[str, Any]) -> list[dict[str, Any]]:
+    config = context.get("config") or {}
+    events = context.get("upcoming_calendar_events") or []
+    soon_minutes = float(config.get("proactivity_calendar_event_soon_minutes", 15))
+    now = datetime.now()
+
+    results: list[dict[str, Any]] = []
+    for event in events:
+        start_dt = event.get("start_dt")
+        if start_dt is None or event.get("all_day"):
+            continue
+        minutes_until = (start_dt - now).total_seconds() / 60
+        if 0 <= minutes_until <= soon_minutes:
+            title = str(event.get("title") or "Termin")
+            results.append(
+                {
+                    "priority": "wichtig",
+                    "message": f"{title} beginnt in {max(0, round(minutes_until))} Minute(n).",
+                    "reason": (
+                        f"Termin '{title}' beginnt um {start_dt:%H:%M} Uhr, das ist innerhalb "
+                        f"der konfigurierten {soon_minutes:.0f}-Minuten-Vorwarnzeit."
+                    ),
+                    "data": {"title": title, "start": start_dt.isoformat()},
+                    # Ein Zeitstempel pro dedup_key statt nur des Titels - derselbe
+                    # wiederkehrende Termin an einem anderen Tag soll trotzdem erneut
+                    # gemeldet werden, nicht dauerhaft als "schon gemeldet" gelten.
+                    "dedup_key": f"calendar_soon:{title}:{start_dt.isoformat()}",
+                }
+            )
+    return results
+
+
+def rule_calendar_events_overlap(context: dict[str, Any]) -> list[dict[str, Any]]:
+    config = context.get("config") or {}
+    events = context.get("upcoming_calendar_events") or []
+    lookahead_hours = float(config.get("proactivity_calendar_lookahead_hours", 6))
+    now = datetime.now()
+    horizon = now.timestamp() + lookahead_hours * 3600
+
+    candidates = [
+        event
+        for event in events
+        if event.get("start_dt") is not None
+        and event.get("end_dt") is not None
+        and now.timestamp() <= event["start_dt"].timestamp() <= horizon
+    ]
+    # Deterministisch sortieren, damit derselbe Termin-Vergleich immer denselben
+    # dedup_key erzeugt, egal in welcher Reihenfolge upcoming_calendar_events
+    # diesmal aus AppleScript zurueckkam.
+    candidates.sort(key=lambda event: (event["start_dt"], str(event.get("title") or "")))
+
+    results: list[dict[str, Any]] = []
+    seen_pairs: set[tuple[int, int]] = set()
+    for index, first in enumerate(candidates):
+        for other_index in range(index + 1, len(candidates)):
+            second = candidates[other_index]
+            if second["start_dt"] >= first["end_dt"]:
+                # Termine sind zeitlich sortiert - sobald der naechste Termin erst
+                # beginnt, nachdem der aktuelle schon vorbei ist, kann kein weiterer
+                # nachfolgender Termin mehr mit `first` ueberlappen.
+                break
+            if (index, other_index) in seen_pairs:
+                continue
+            seen_pairs.add((index, other_index))
+            first_title = str(first.get("title") or "Termin")
+            second_title = str(second.get("title") or "Termin")
+            results.append(
+                {
+                    "priority": "relevant",
+                    "message": (
+                        f"'{first_title}' ({first['start_dt']:%H:%M}) und '{second_title}' "
+                        f"({second['start_dt']:%H:%M}) überschneiden sich."
+                    ),
+                    "reason": f"Beide Termine liegen zeitlich innerhalb der naechsten {lookahead_hours:.0f} Stunden und überlappen sich.",
+                    "data": {
+                        "first_title": first_title,
+                        "second_title": second_title,
+                        "first_start": first["start_dt"].isoformat(),
+                        "second_start": second["start_dt"].isoformat(),
+                    },
+                    "dedup_key": f"calendar_overlap:{first['start_dt'].isoformat()}:{second['start_dt'].isoformat()}",
+                }
+            )
+    return results
+
+
 DEFAULT_RULES = (
     ("low_disk_space", rule_low_disk_space),
     ("pending_calendar_actions_waiting", rule_pending_calendar_actions_waiting),
     ("unconfirmed_memory_facts", rule_unconfirmed_memory_facts),
     ("new_unread_mail", rule_new_unread_mail),
+    ("calendar_event_starting_soon", rule_calendar_event_starting_soon),
+    ("calendar_events_overlap", rule_calendar_events_overlap),
 )
 
 

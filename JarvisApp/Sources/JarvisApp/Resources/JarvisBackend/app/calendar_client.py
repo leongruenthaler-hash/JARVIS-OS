@@ -90,7 +90,7 @@ def create_reminder(
     return f"Erinnerung erstellt: {title}"
 
 
-def list_upcoming_calendar_items(limit: int = 5, until: datetime | None = None) -> dict[str, list[dict[str, str]]]:
+def list_upcoming_calendar_items(limit: int = 5, until: datetime | None = None) -> dict[str, list[dict[str, object]]]:
     limit = max(1, int(limit))
     until_setup = ""
     until_check = ""
@@ -105,6 +105,12 @@ def list_upcoming_calendar_items(limit: int = 5, until: datetime | None = None) 
     # (confirmed: it silently returned zero events, breaking "welche Termine habe ich
     # heute" entirely) rather than a real speed win. Back to the plain procedural filter,
     # which is slower on calendars with long history but actually returns events.
+    #
+    # Zusaetzlich zu den bestehenden Text-Feldern (start/end, locale-formatiert, nur
+    # zur Anzeige) liefert das Skript jetzt auch numerische Datumsbestandteile (Jahr/
+    # Monat/Tag/Stunde/Minute) ueber AppleScripts eigene Datumsobjekt-Eigenschaften
+    # (year of/month of/...) statt ueber "as string" - sprachunabhaengig, kein
+    # Format-Raten in Python noetig (siehe plans/2026-08-08-jarvis-termin-nudges.md).
     script = f"""
     set fieldSeparator to ASCII character 31
     set recordSeparator to ASCII character 30
@@ -120,7 +126,9 @@ def list_upcoming_calendar_items(limit: int = 5, until: datetime | None = None) 
                 try
                     set startDate to start date of eventRef
                     if startDate is greater than nowDate{until_check} then
-                        set outputText to outputText & name of calendarRef as string & fieldSeparator & summary of eventRef as string & fieldSeparator & startDate as string & fieldSeparator & end date of eventRef as string & recordSeparator
+                        set endDate to end date of eventRef
+                        set isAllDay to allday event of eventRef
+                        set outputText to outputText & name of calendarRef as string & fieldSeparator & summary of eventRef as string & fieldSeparator & startDate as string & fieldSeparator & endDate as string & fieldSeparator & (year of startDate as string) & fieldSeparator & (month of startDate as integer as string) & fieldSeparator & (day of startDate as string) & fieldSeparator & (hours of startDate as string) & fieldSeparator & (minutes of startDate as string) & fieldSeparator & (year of endDate as string) & fieldSeparator & (month of endDate as integer as string) & fieldSeparator & (day of endDate as string) & fieldSeparator & (hours of endDate as string) & fieldSeparator & (minutes of endDate as string) & fieldSeparator & (isAllDay as string) & recordSeparator
                         set itemCount to itemCount + 1
                     end if
                 end try
@@ -131,7 +139,44 @@ def list_upcoming_calendar_items(limit: int = 5, until: datetime | None = None) 
     return outputText
     """
     raw = _run_applescript(script, app_name="Kalender")
-    return {"items": _parse_items(raw, ["calendar", "title", "start", "end"])}
+    return {"items": _parse_calendar_items(raw)}
+
+
+_CALENDAR_ITEM_KEYS = [
+    "calendar", "title", "start", "end",
+    "start_year", "start_month", "start_day", "start_hour", "start_minute",
+    "end_year", "end_month", "end_day", "end_hour", "end_minute",
+    "all_day",
+]
+
+
+def _build_datetime(item: dict[str, str], prefix: str) -> datetime | None:
+    """Baut ein datetime aus den numerischen AppleScript-Feldern (siehe
+    list_upcoming_calendar_items). Gibt None statt eine Exception zu werfen, wenn
+    ein einzelner Termin unerwartete/fehlende Werte hat - ein kaputtes Feld bei
+    einem Termin darf nie die ganze Terminliste zum Absturz bringen."""
+    try:
+        return datetime(
+            int(item[f"{prefix}_year"]),
+            int(item[f"{prefix}_month"]),
+            int(item[f"{prefix}_day"]),
+            int(item[f"{prefix}_hour"]),
+            int(item[f"{prefix}_minute"]),
+        )
+    except (KeyError, ValueError, TypeError):
+        return None
+
+
+def _parse_calendar_items(raw_output: str) -> list[dict[str, object]]:
+    items = _parse_items(raw_output, _CALENDAR_ITEM_KEYS)
+    result: list[dict[str, object]] = []
+    for item in items:
+        enriched: dict[str, object] = dict(item)
+        enriched["start_dt"] = _build_datetime(item, "start")
+        enriched["end_dt"] = _build_datetime(item, "end")
+        enriched["all_day"] = str(item.get("all_day", "")).strip().lower() == "true"
+        result.append(enriched)
+    return result
 
 
 def list_open_reminders(limit: int = 5) -> dict[str, list[dict[str, str]]]:
