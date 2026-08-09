@@ -772,3 +772,54 @@ eine automatische Anthropic-Bestätigungsmail) wurden manuell über
 `/api/mail/calendar-actions/resolve` verworfen, bevor Leon sie zu Gesicht
 bekommen hätte. 31 neue Tests insgesamt (15 + 13 + 3), Testsuite komplett
 grün, Xcode-Build erfolgreich.
+
+## 25. CLI- und Server-Antwortpfad zusammengeführt (2026-08-10)
+
+`app/jarvis.py::main()` (CLI) und `app/local_server.py::_answer_with_core()`
+(App) implementierten seit Monaten dieselbe Domänen-Erkennungs-Kette (~14
+Handler in identischer Reihenfolge, jeweils mit Berechtigungs-Gate) zweimal
+unabhängig von Hand gepflegt - der Code kommentierte das selbst
+ausdrücklich. Siehe
+`plans/2026-08-09-jarvis-cli-server-aufraeumen.md`.
+
+**Umbau:** neue gemeinsame Funktion `jarvis.py::answer_message()` (plus
+`AnswerWorkers`/`AnswerResult`-Hilfsklassen) besitzt jetzt die komplette
+Kette - Stufe 1 Stichwort-Erkennung, Baustein E (mehrstufige Aufträge),
+Stufe 2 Modell-Klassifikation, Websuche, finaler LLM-Aufruf. `main()` und
+`_answer_with_core()` rufen sie auf und behalten nur noch echte
+Aufrufer-Eigenheiten: CLI macht `print`/`speak`, Server macht
+Streaming/`_finalize_answer`/Pipeline-Logging; beide behalten ihre eigenen
+Vorab-Kurzbefehle (CLI: `route_fast_intent`/Tagesbriefing; Server:
+Dashboard-Statusfragen), die nur für den jeweiligen Aufrufer Sinn ergeben.
+
+**Zwei echte, bisher unbemerkte Verhaltens-Unterschiede beim Vergleich
+gefunden** (bestätigt das eigentliche Risiko dieses Bausteins - unabhängig
+gepflegter, eigentlich identischer Code driftet auseinander, ohne dass es
+auffällt):
+1. Der finale, werkzeuglose LLM-Aufruf der CLI übergab für die
+   Routing-Entscheidung immer eine leere History und kein `force_local` -
+   "Privater Modus" wirkte sich im CLI-Pfad dadurch vermutlich gar nicht
+   aus. Nach Rücksprache mit Leon **angehoben**: beide Pfade nutzen jetzt
+   dieselbe Routing-Logik (`_routing_history()` liest bei der CLI dieselbe
+   persistierte Gesprächs-Historie, die `build_input()` ohnehin schon
+   nutzt).
+2. Der Server speicherte über `_finalize_answer()` **jede** Handler-Antwort
+   im Gesprächsverlauf, die CLI dagegen bewusst NICHT für
+   System-/Präferenz-/Stil-/Projekt-/Lokal-/Datenschutz-Antworten und mit
+   `auto_memory=False` für Modell-/Gedächtnis-Befehle. Übernommen wurde die
+   bewusstere, zurückhaltendere CLI-Variante - der Server speichert jetzt
+   ebenfalls nicht mehr jede Kurzantwort auf Hausmeister-Kommandos im
+   Verlauf.
+
+**Kein Regressions-Sicherheitsnetz vorher vorhanden** (weder `main()` noch
+`_answer_with_core()` hatten je einen End-to-End-Test) - 12 neue
+Charakterisierungs-Tests (`tests/test_answer_message.py`) decken jetzt
+Dispatch-Reihenfolge, Berechtigungs-Gates, die record_exchange-Unterschiede
+pro Handler-Typ, `pending_mail_followup`-Übergänge sowie den
+Stufe-2-/Chat-Fallback ab.
+
+287 Tests insgesamt, alle grün. Xcode-Build erfolgreich. Live auf dem
+echten Mac gegen den Server-Pfad verifiziert: allgemeiner Chat, Kalender,
+Notizen, Mail-Übersicht und Modellwechsel laufen alle korrekt über die neue
+gemeinsame Funktion; Gesprächsverlauf bestätigt die neue,
+zurückhaltendere Aufzeichnung für Hausmeister-Kommandos.

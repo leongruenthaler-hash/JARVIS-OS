@@ -8,9 +8,10 @@ import re
 import threading
 import time
 import warnings
+from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 warnings.filterwarnings(
     "ignore",
@@ -77,6 +78,8 @@ from core import (
     voice_mode_instruction,
     voice_mode_forces_compact,
     voice_mode_forces_local_only,
+    voice_mode_disables_web_search,
+    normalize_voice_mode,
 )
 from core.intent_matching import has_domain_fuzzy, normalize_umlauts
 from core.multistep_planner import plan_multistep
@@ -5517,6 +5520,321 @@ def run_privacy_test() -> int:
     return 0
 
 
+@dataclass
+class AnswerWorkers:
+    """Mutable Container fuer die beiden Hintergrund-Worker, die waehrend
+    answer_message() bei Bedarf lazy erzeugt werden (siehe photo_worker/mail_worker
+    unten) - main() und local_server.py::_answer_with_core() halten je eine Instanz
+    davon ueber die gesamte Laufzeit, damit ein einmal erzeugter Worker wiederverwendet
+    statt bei jeder Anfrage neu gestartet wird."""
+
+    photo_worker: Any = None
+    mail_worker: Any = None
+    model_manager: Any = None
+
+
+@dataclass
+class AnswerResult:
+    text: str
+    pending_mail_followup: bool
+    provider: str
+    model: str
+
+
+def _routing_history(memory: Memory, config: dict[str, Any], transient_history: list[dict[str, str]] | None) -> list[dict[str, str]]:
+    """History, die NUR fuer die Routing-Entscheidung (llm.plan(), kompaktes Prompt
+    ja/nein, force_local) genutzt wird - nicht zu verwechseln mit dem eigentlichen
+    Gespraechs-Kontext, den build_input() unabhaengig davon selbst aus dem Gedaechtnis
+    zusammenstellt. Der Server bekommt seine transient_history vom Client (der
+    Swift-App) mitgeliefert; die CLI hat keinen separaten Client und griff bisher
+    fuer genau diese Routing-Entscheidung faelschlich auf eine leere Liste zurueck,
+    obwohl dieselbe persistierte Historie wie in build_input() zur Verfuegung steht -
+    siehe plans/2026-08-09-jarvis-cli-server-aufraeumen.md, offene Frage 1 (behoben:
+    CLI nutzt jetzt dieselbe Quelle)."""
+    if transient_history is not None:
+        return transient_history
+    if not bool(config.get("privacy_store_conversation", False)):
+        return []
+    try:
+        return ConversationManager().as_messages(recent_limit=RECENT_CONTEXT_MESSAGES)
+    except Exception:
+        return []
+
+
+def answer_message(
+    question: str,
+    memory: Memory,
+    llm: LLMClient,
+    config: dict[str, Any],
+    *,
+    workers: AnswerWorkers,
+    pending_mail_followup: bool = False,
+    transient_history: list[dict[str, str]] | None = None,
+    on_llm_chunk: Callable[[str], None] | None = None,
+) -> AnswerResult:
+    """Gemeinsame Antwort-Logik fuer beide Aufrufer (main()'s CLI-Schleife und
+    local_server.py::_answer_with_core(), das die App nutzt) - siehe
+    plans/2026-08-09-jarvis-cli-server-aufraeumen.md. Besitzt die komplette
+    Domaenen-Erkennungs-Kette (Stufe 1 Stichworte, Stufe 2 Modell-Klassifikation,
+    Websuche, finaler LLM-Aufruf); jeder Aufrufer bleibt nur noch fuer eigene I/O
+    zustaendig (CLI: print/speak/record_exchange; Server: HTTP-Response/Streaming/
+    _finalize_answer) sowie fuer aufrufer-spezifische Vorab-Kurzbefehle (CLI:
+    route_fast_intent/Tagesbriefing; Server: Dashboard-Statusfragen), die bewusst
+    NICHT Teil dieser Funktion sind, weil sie nur fuer den jeweiligen Aufrufer Sinn
+    ergeben. `config` wird explizit uebergeben statt das Modul-globale CONFIG zu
+    nutzen, weil local_server.py sein eigenes, unabhaengig geladenes Config-Dict
+    zur Laufzeit mutiert (z.B. fast_voice_mode) - ein globaler Zugriff wuerde genau
+    das Dual-Instance-Cache-Problem reproduzieren, das diese Sitzung mehrfach an
+    anderer Stelle behoben hat."""
+    voice_mode = normalize_voice_mode(str((memory.get("settings") or {}).get("voice_mode") or ""))
+    force_local = voice_mode_forces_local_only(voice_mode)
+    routing_history = _routing_history(memory, config, transient_history)
+    route = llm.plan(routing_history, user_text=question, force_local=force_local)
+
+    def _result(text: Any, mail_followup: bool = pending_mail_followup) -> AnswerResult:
+        return AnswerResult(text=str(text), pending_mail_followup=mail_followup, provider=route.provider, model=route.model)
+
+    if is_end_command(question):
+        return _result("Alles klar. Ich bin wieder still, bis du Jarvis sagst.")
+
+    # record_mode steuert bewusst pro Handler, ob/wie record_exchange() aufgerufen
+    # wird - das ist die einzige Stelle, an der main() und _answer_with_core() vor
+    # der Zusammenfuehrung tatsaechlich unterschiedlich handelten (main() liess
+    # System-/Praeferenz-/Stil-/Projekt-/Lokal-/Datenschutz-Antworten bewusst
+    # ungespeichert, waehrend der Server sie ueber _finalize_answer immer speicherte).
+    # Uebernommen wurde main()s bewusstere, zurueckhaltendere Variante - siehe
+    # plans/2026-08-09-jarvis-cli-server-aufraeumen.md.
+    direct_handlers: list[tuple[str, tuple, dict, str]] = [
+        ("handle_system_command", (question,), {}, "none"),
+        ("handle_preference_command", (memory, question), {}, "none"),
+        ("handle_style_command", (memory, question), {}, "none"),
+        ("handle_project_command", (question,), {}, "none"),
+        ("handle_local_command", (question,), {}, "none"),
+        ("handle_privacy_command", (memory, question), {}, "none"),
+        ("handle_model_command", (question,), {"memory": memory, "model_manager": workers.model_manager}, "no_auto_memory"),
+        ("handle_memory_command", (memory, question), {}, "no_auto_memory"),
+        ("handle_pending_note_flow", (memory, question), {}, "normal"),
+        ("handle_pending_domain_clarification_flow", (memory, question), {"photo_worker": workers.photo_worker}, "normal"),
+        ("handle_pending_action_flow", (memory, question), {"photo_worker": workers.photo_worker}, "normal"),
+    ]
+    if has_pending_action(memory):
+        pending_action_handler = direct_handlers.pop()
+        local_command_index = next(i for i, entry in enumerate(direct_handlers) if entry[0] == "handle_local_command")
+        direct_handlers.insert(local_command_index, pending_action_handler)
+
+    module = sys.modules[__name__]
+    for name, args, kwargs, record_mode in direct_handlers:
+        handler = getattr(module, name)
+        declined_mail_permission = False
+        if name == "handle_pending_action_flow":
+            settings_before = memory.get("settings") or {}
+            pending_permission_before = settings_before.get("pending_permission")
+            declined_mail_permission = (
+                isinstance(pending_permission_before, dict)
+                and pending_permission_before.get("permission") == "mail"
+            )
+        answer = handler(*args, **kwargs)
+        if answer is not None:
+            mail_followup = pending_mail_followup
+            if declined_mail_permission and not has_permission("mail"):
+                mail_followup = False
+            if record_mode == "normal":
+                record_exchange(memory, question, answer)
+            elif record_mode == "no_auto_memory":
+                record_exchange(memory, question, answer, auto_memory=False)
+            return _result(answer, mail_followup)
+
+    # Baustein E (mehrstufige Auftraege, siehe
+    # plans/2026-08-09-jarvis-mehrstufige-auftraege.md) - bewusst als eigene Stufe VOR
+    # der normalen Einzelschritt-Domaenenerkennung, aber nur aktiv, wenn schon die
+    # Stichwort-Erkennung mind. zwei Domaenen im selben Satz sieht
+    # (looks_like_multistep_request). Findet der Planer keinen gueltigen Plan (None),
+    # faellt die Anfrage unveraendert in den bestehenden Einzelschritt-Weg unten durch
+    # - nie raten.
+    if looks_like_multistep_request(question):
+        steps = plan_multistep(
+            llm,
+            question,
+            max_steps=int(config.get("multistep_planner_max_steps", 4)),
+            max_output_tokens=int(config.get("multistep_planner_max_output_tokens", 300)),
+        )
+        if steps:
+            answer = execute_multistep_plan(steps, memory, photo_worker=workers.photo_worker)
+            record_exchange(memory, question, answer)
+            return _result(answer)
+
+    # Baustein D (Verhaltensmuster erkennen, siehe
+    # plans/2026-08-08-jarvis-verhaltensmuster-erkennen.md) - zaehlt NUR welche
+    # Faehigkeit erkannt wurde und wann (Wochentag/grobe Tageszeit), NIE den
+    # Anfrage-Wortlaut. Nur aktiv, wenn die eigene, standardmaessig deaktivierte
+    # Berechtigung "usage_patterns" erteilt ist.
+    if has_permission("usage_patterns"):
+        record_pattern_event_if_matched(question)
+
+    notes_permission = ensure_privacy_domain_permission(memory, "notes", "Jarvis würde eine Notiz über Apple Notes erstellen oder ändern.") if has_domain(question, "notes") else None
+    if notes_permission is not None:
+        return _result(notes_permission)
+    notes_answer = handle_notes_command(memory, question)
+    if notes_answer is not None:
+        record_exchange(memory, question, notes_answer)
+        return _result(notes_answer)
+
+    # Aufgaben (task_manager.py) liegen rein in Jarvis' eigenem Speicher, keine
+    # macOS-Berechtigung noetig - anders als Notizen/Kalender/Mail also kein
+    # ensure_privacy_domain_permission()-Gate davor.
+    tasks_answer = handle_tasks_command(memory, question)
+    if tasks_answer is not None:
+        record_exchange(memory, question, tasks_answer)
+        return _result(tasks_answer)
+
+    calendar_permission = None
+    if has_domain(question, "calendar") or looks_like_calendar_query(question):
+        calendar_permission = ensure_privacy_domain_permission(memory, "calendar", "Jarvis würde Kalenderdaten verwenden.")
+        if calendar_permission is None and "erinner" in normalize_text(question):
+            calendar_permission = ensure_privacy_domain_permission(memory, "reminders", "Jarvis würde eine Erinnerung verwenden.")
+    if calendar_permission is not None:
+        return _result(calendar_permission)
+    calendar_answer = handle_calendar_command(question, memory=memory)
+    if calendar_answer is not None:
+        record_exchange(memory, question, calendar_answer)
+        return _result(calendar_answer)
+
+    normalized_question = normalize_text(question)
+    file_permission = ensure_privacy_domain_permission(memory, "files", "Jarvis würde deinen Schreibtisch oder Dateien lokal lesen oder ändern.") if has_domain(question, "files") or "desktop" in normalized_question or "schreibtisch" in normalized_question else None
+    if file_permission is not None:
+        return _result(file_permission)
+    for file_handler in (handle_desktop_command, handle_file_command):
+        answer = file_handler(question, memory=memory)
+        if answer is not None:
+            record_exchange(memory, question, answer)
+            return _result(answer, mail_followup=False)
+
+    photo_permission = ensure_privacy_domain_permission(memory, "photos", "Jarvis würde deine Fotos-App oder den lokalen Fotoindex verwenden.") if has_domain(question, "photos") else None
+    if photo_permission is None and has_domain(question, "photos") and any(term in normalized_question for term in ("openai", "vision", "analysiere", "analysieren", "was siehst")):
+        photo_permission = ensure_cloud_llm_permission(memory, question)
+    if photo_permission is not None:
+        return _result(photo_permission)
+    if workers.photo_worker is None and has_domain(question, "photos") and has_permission("photos"):
+        workers.photo_worker = PhotoBackgroundWorker(config)
+        workers.photo_worker.start()
+    photo_answer = handle_photo_command(question, workers.photo_worker, memory=memory)
+    if photo_answer is not None:
+        record_exchange(memory, question, photo_answer)
+        return _result(photo_answer, mail_followup=False)
+
+    screen_permission = ensure_privacy_domain_permission(memory, "screen", "Jarvis würde einen einzelnen Screenshot deines aktiven Fensters aufnehmen und lokal analysieren.") if has_domain(question, "screen") else None
+    if screen_permission is not None:
+        return _result(screen_permission)
+    screen_answer = handle_screen_command(question, memory=memory) if has_permission("screen") else None
+    if screen_answer is not None:
+        record_exchange(memory, question, screen_answer)
+        return _result(screen_answer, mail_followup=False)
+
+    mail_export_permission = ensure_privacy_domain_permission(memory, "mail", "Jarvis würde Mail-Übersichten lesen und passende Anhänge oder Notizen auf den Schreibtisch kopieren.") if has_domain(question, "mail") else None
+    if mail_export_permission is not None:
+        return _result(mail_export_permission)
+    mail_document_export_answer = handle_mail_document_export_command(question, memory=memory)
+    if mail_document_export_answer is not None:
+        record_exchange(memory, question, mail_document_export_answer)
+        return _result(mail_document_export_answer, mail_followup=False)
+
+    if workers.mail_worker is None and has_domain(question, "mail") and has_permission("mail"):
+        workers.mail_worker = MailBackgroundWorker(config)
+        workers.mail_worker.start()
+    background_mail_answer = handle_background_mail_command(question, workers.mail_worker)
+    if background_mail_answer is not None:
+        record_exchange(memory, question, background_mail_answer)
+        return _result(background_mail_answer, mail_followup=True)
+
+    mail_followup_intent = pending_mail_followup and (
+        is_mail_time_followup(question) or is_mail_status_followup(question)
+    )
+    mail_permission = ensure_privacy_domain_permission(memory, "mail", "Jarvis würde Apple Mail lokal lesen oder bearbeiten.") if has_domain(question, "mail") or mail_followup_intent else None
+    if mail_permission is not None:
+        return _result(mail_permission)
+    mail_settings_before = memory.get("settings") or {}
+    had_pending_mail_delete = isinstance(mail_settings_before.get("pending_mail_delete"), dict)
+    mail_answer = handle_mail_command(llm, question, force=mail_followup_intent, memory=memory)
+    if mail_answer is not None:
+        record_exchange(memory, question, mail_answer)
+        return _result(mail_answer, mail_followup=False if had_pending_mail_delete else True)
+
+    contact_permission = ensure_privacy_domain_permission(memory, "contacts", "Jarvis würde Kontakte lesen oder einen Anruf vorbereiten.") if has_domain(question, "contacts") else None
+    if contact_permission is not None:
+        return _result(contact_permission)
+    contact_answer = handle_contact_command(question, memory=memory)
+    if contact_answer is not None:
+        record_exchange(memory, question, contact_answer)
+        return _result(contact_answer, mail_followup=False)
+
+    music_permission = ensure_privacy_domain_permission(memory, "music", "Jarvis würde Apple Music oder die Musik-Wiedergabe steuern.") if has_domain(question, "music") else None
+    if music_permission is not None:
+        return _result(music_permission)
+    music_answer = handle_music_command(question)
+    if music_answer is not None:
+        record_exchange(memory, question, music_answer)
+        return _result(music_answer, mail_followup=False)
+
+    # Stufe 2 der Absichtserkennung (siehe plans/2026-08-08-jarvis-intelligenz-
+    # verbessern.md): keiner der obigen Stichwort-Treffer (auch nicht fuzzy) hat
+    # gegriffen - statt stillschweigend in den werkzeuglosen Chat zu fallen, fragt
+    # Jarvis aktiv nach, falls eine kurze Modell-Klassifikation eine Faehigkeit fuer
+    # plausibel haelt. Findet die Klassifikation nichts, faellt der Code normal
+    # weiter in den Chat-Zweig unten.
+    domain_clarification = maybe_ask_domain_clarification(llm, memory, question)
+    if domain_clarification is not None:
+        record_exchange(memory, question, domain_clarification)
+        return _result(domain_clarification)
+
+    web_context = None
+    if (
+        bool(config.get("web_search_enabled", True))
+        and not voice_mode_disables_web_search(voice_mode)
+        and should_use_web_search(question)
+    ):
+        internet_permission = ensure_privacy_domain_permission(memory, "internet", "Jarvis würde eine Websuche im Internet ausführen.")
+        if internet_permission is not None:
+            return _result(internet_permission)
+        try:
+            search_query = build_search_query(question)
+            results = search_web(search_query, max_results=int(config.get("web_search_max_results", 3)))
+            if results:
+                web_context = format_search_results(results)
+        except Exception:
+            web_context = None
+
+    llm_permission = ensure_cloud_llm_permission(memory, question)
+    if llm_permission is not None:
+        return _result(llm_permission)
+
+    try:
+        messages = build_input(memory, question, web_context, transient_history=transient_history, compact=route.compact_prompt)
+    except TypeError:
+        messages = build_input(memory, question, web_context)
+    messages = normalize_jarvis_messages(
+        messages,
+        recent_limit=min(int(config.get("recent_context_messages", 6)) + 1, 7),
+    )
+
+    if callable(on_llm_chunk):
+        answer = llm.ask_stream(
+            messages,
+            max_output_tokens=route.max_output_tokens,
+            user_text=question,
+            route=route,
+            on_chunk=on_llm_chunk,
+            force_local=force_local,
+        )
+    else:
+        answer = llm.ask(messages, max_output_tokens=route.max_output_tokens, user_text=question, route=route, force_local=force_local)
+    answer = clean_ai_answer(answer)
+    promised = execute_promised_action_if_possible(llm, question, answer)
+    if promised is not None:
+        answer = promised
+    record_exchange(memory, question, answer)
+    return _result(answer, mail_followup="mail" in normalize_text(question))
+
+
 def main():
     llm = LLMClient(CONFIG)
     memory = Memory()
@@ -5533,19 +5851,21 @@ def main():
             print("Ohne Mikrofonfreigabe startet Jarvis nicht.")
             return
 
-    mail_worker = MailBackgroundWorker(CONFIG) if has_permission("mail") else None
-    photo_worker = PhotoBackgroundWorker(CONFIG) if has_permission("photos") else None
-    if mail_worker is not None:
-        mail_worker.start()
-    if photo_worker is not None:
-        photo_worker.start()
+    workers = AnswerWorkers(
+        mail_worker=MailBackgroundWorker(CONFIG) if has_permission("mail") else None,
+        photo_worker=PhotoBackgroundWorker(CONFIG) if has_permission("photos") else None,
+    )
+    if workers.mail_worker is not None:
+        workers.mail_worker.start()
+    if workers.photo_worker is not None:
+        workers.photo_worker.start()
     try:
         stt_engine = create_stt_engine(CONFIG)
     except STTEngineError as exc:
-        if mail_worker is not None:
-            mail_worker.stop()
-        if photo_worker is not None:
-            photo_worker.stop()
+        if workers.mail_worker is not None:
+            workers.mail_worker.stop()
+        if workers.photo_worker is not None:
+            workers.photo_worker.stop()
         print(f"STT konnte nicht gestartet werden: {type(exc).__name__}")
         print("Installiere Moonshine mit: .venv/bin/python -m pip install moonshine-onnx")
         return
@@ -5633,6 +5953,11 @@ def main():
             stop_speaking()
 
             if is_end_command(question):
+                # CLI-eigener Nebeneffekt (conversation_active=False, "wieder auf
+                # Weckwort warten") - bleibt bewusst ein eigener Vorab-Check statt
+                # sich auf answer_message()s eigene is_end_command-Pruefung zu
+                # verlassen, die diesen Zustand nicht kennt (existiert nur im
+                # Server-Pfad als reine Text-Antwort ohne conversation_active).
                 answer = "Alles klar. Ich bin wieder still, bis du Jarvis sagst."
                 conversation_active = False
                 print(f"\nJARVIS: {console_text(answer, 'answer')}")
@@ -5645,349 +5970,35 @@ def main():
                 speak(fast_intent_answer, voice=voice)
                 continue
 
-            system_answer = handle_system_command(question)
-            if system_answer is not None:
-                print(f"\nJARVIS: {console_text(system_answer, 'answer')}")
-                speak(system_answer, voice=voice)
-                continue
-
             briefing_answer = handle_daily_briefing_command(memory, question)
             if briefing_answer is not None:
                 print(f"\nJARVIS: {console_text(briefing_answer, 'answer')}")
                 speak(briefing_answer, voice=voice)
                 continue
 
-            preference_answer = handle_preference_command(memory, question)
-            if preference_answer is not None:
-                print(f"\nJARVIS: {console_text(preference_answer, 'answer')}")
-                speak(preference_answer, voice=voice)
-                continue
-
-            style_answer = handle_style_command(memory, question)
-            if style_answer is not None:
-                print(f"\nJARVIS: {console_text(style_answer, 'answer')}")
-                speak(style_answer, voice=voice)
-                continue
-
-            project_answer = handle_project_command(question)
-            if project_answer is not None:
-                print(f"\nJARVIS: {console_text(project_answer, 'answer')}")
-                speak(project_answer, voice=voice)
-                continue
-
-            if has_pending_action(memory):
-                settings_before = memory.get("settings") or {}
-                pending_permission_before = settings_before.get("pending_permission")
-                declined_mail_permission = (
-                    isinstance(pending_permission_before, dict)
-                    and pending_permission_before.get("permission") == "mail"
-                )
-                pending_action_answer = handle_pending_action_flow(memory, question, photo_worker=photo_worker)
-                if pending_action_answer is not None:
-                    if declined_mail_permission and not has_permission("mail"):
-                        pending_mail_followup = False
-                    record_exchange(memory, question, pending_action_answer)
-                    print(f"\nJARVIS: {console_text(pending_action_answer, 'answer')}")
-                    speak(pending_action_answer, voice=voice)
-                    continue
-
-            local_answer = handle_local_command(question)
-            if local_answer is not None:
-                print(f"\nJARVIS: {console_text(local_answer, 'answer')}")
-                speak(local_answer, voice=voice)
-                continue
-
-            privacy_answer = handle_privacy_command(memory, question)
-            if privacy_answer is not None:
-                print(f"\nJARVIS: {console_text(privacy_answer, 'answer')}")
-                speak(privacy_answer, voice=voice)
-                continue
-
-            model_answer = handle_model_command(question, memory=memory)
-            if model_answer is not None:
-                record_exchange(memory, question, model_answer, auto_memory=False)
-                print(f"\nJARVIS: {console_text(model_answer, 'answer')}")
-                speak(model_answer, voice=voice)
-                continue
-
-            memory_answer = handle_memory_command(memory, question)
-            if memory_answer is not None:
-                record_exchange(memory, question, memory_answer, auto_memory=False)
-                print(f"\nJARVIS: {console_text(memory_answer, 'answer')}")
-                speak(memory_answer, voice=voice)
-                continue
-
-            pending_note_answer = handle_pending_note_flow(memory, question)
-            if pending_note_answer is not None:
-                record_exchange(memory, question, pending_note_answer)
-                print(f"\nJARVIS: {console_text(pending_note_answer, 'answer')}")
-                speak(pending_note_answer, voice=voice)
-                continue
-
-            pending_domain_answer = handle_pending_domain_clarification_flow(memory, question, photo_worker=photo_worker)
-            if pending_domain_answer is not None:
-                record_exchange(memory, question, pending_domain_answer)
-                print(f"\nJARVIS: {console_text(pending_domain_answer, 'answer')}")
-                speak(pending_domain_answer, voice=voice)
-                continue
-
-            if has_permission("usage_patterns"):
-                record_pattern_event_if_matched(question)
-
-            if looks_like_multistep_request(question):
-                multistep_steps = plan_multistep(
-                    llm,
-                    question,
-                    max_steps=int(CONFIG.get("multistep_planner_max_steps", 4)),
-                    max_output_tokens=int(CONFIG.get("multistep_planner_max_output_tokens", 300)),
-                )
-                if multistep_steps:
-                    multistep_answer = execute_multistep_plan(multistep_steps, memory, photo_worker=photo_worker)
-                    record_exchange(memory, question, multistep_answer)
-                    print(f"\nJARVIS: {console_text(multistep_answer, 'answer')}")
-                    speak(multistep_answer, voice=voice)
-                    continue
-
-            permission_answer = ensure_privacy_domain_permission(memory, "notes", "Jarvis würde eine Notiz über Apple Notes erstellen oder ändern.") if has_domain(question, "notes") else None
-            if permission_answer is not None:
-                print(f"\nJARVIS: {console_text(permission_answer, 'answer')}")
-                speak(permission_answer, voice=voice)
-                continue
-
-            notes_answer = handle_notes_command(memory, question)
-            if notes_answer is not None:
-                record_exchange(memory, question, notes_answer)
-                print(f"\nJARVIS: {console_text(notes_answer, 'answer')}")
-                speak(notes_answer, voice=voice)
-                continue
-
-            tasks_answer = handle_tasks_command(memory, question)
-            if tasks_answer is not None:
-                record_exchange(memory, question, tasks_answer)
-                print(f"\nJARVIS: {console_text(tasks_answer, 'answer')}")
-                speak(tasks_answer, voice=voice)
-                continue
-
-            calendar_permission = None
-            if has_domain(question, "calendar") or looks_like_calendar_query(question):
-                calendar_permission = ensure_privacy_domain_permission(memory, "calendar", "Jarvis würde Kalenderdaten verwenden.")
-                if calendar_permission is None and "erinner" in normalize_text(question):
-                    calendar_permission = ensure_privacy_domain_permission(memory, "reminders", "Jarvis würde eine Erinnerung verwenden.")
-            if calendar_permission is not None:
-                print(f"\nJARVIS: {console_text(calendar_permission, 'answer')}")
-                speak(calendar_permission, voice=voice)
-                continue
-
-            calendar_answer = handle_calendar_command(question, memory=memory)
-            if calendar_answer is not None:
-                record_exchange(memory, question, calendar_answer)
-                print(f"\nJARVIS: {console_text(calendar_answer, 'answer')}")
-                speak(calendar_answer, voice=voice)
-                continue
-
-            file_permission = ensure_privacy_domain_permission(memory, "files", "Jarvis würde deinen Schreibtisch oder Dateien lokal lesen oder ändern.") if has_domain(question, "files") or "desktop" in normalize_text(question) or "schreibtisch" in normalize_text(question) else None
-            if file_permission is not None:
-                print(f"\nJARVIS: {console_text(file_permission, 'answer')}")
-                speak(file_permission, voice=voice)
-                continue
-
-            desktop_answer = handle_desktop_command(question, memory=memory)
-            if desktop_answer is not None:
-                pending_mail_followup = False
-                record_exchange(memory, question, desktop_answer)
-                print(f"\nJARVIS: {console_text(desktop_answer, 'answer')}")
-                speak(desktop_answer, voice=voice)
-                continue
-
-            file_answer = handle_file_command(question, memory=memory)
-            if file_answer is not None:
-                pending_mail_followup = False
-                record_exchange(memory, question, file_answer)
-                print(f"\nJARVIS: {console_text(file_answer, 'answer')}")
-                speak(file_answer, voice=voice)
-                continue
-
-            photo_permission = ensure_privacy_domain_permission(memory, "photos", "Jarvis würde deine Fotos-App oder den lokalen Fotoindex verwenden.") if has_domain(question, "photos") else None
-            if photo_permission is None and has_domain(question, "photos") and any(term in normalize_text(question) for term in ("openai", "vision", "analysiere", "analysieren", "was siehst")):
-                photo_permission = ensure_cloud_llm_permission(memory, question)
-            if photo_permission is not None:
-                print(f"\nJARVIS: {console_text(photo_permission, 'answer')}")
-                speak(photo_permission, voice=voice)
-                continue
-            if photo_worker is None and has_domain(question, "photos") and has_permission("photos"):
-                photo_worker = PhotoBackgroundWorker(CONFIG)
-                photo_worker.start()
-
-            photo_answer = handle_photo_command(question, photo_worker, memory=memory)
-            if photo_answer is not None:
-                pending_mail_followup = False
-                record_exchange(memory, question, photo_answer)
-                print(f"\nJARVIS: {console_text(photo_answer, 'answer')}")
-                speak(photo_answer, voice=voice)
-                continue
-
-            screen_permission = ensure_privacy_domain_permission(memory, "screen", "Jarvis würde einen einzelnen Screenshot deines aktiven Fensters aufnehmen und lokal analysieren.") if has_domain(question, "screen") else None
-            if screen_permission is not None:
-                print(f"\nJARVIS: {console_text(screen_permission, 'answer')}")
-                speak(screen_permission, voice=voice)
-                continue
-
-            screen_answer = handle_screen_command(question, memory=memory) if has_permission("screen") else None
-            if screen_answer is not None:
-                pending_mail_followup = False
-                record_exchange(memory, question, screen_answer)
-                print(f"\nJARVIS: {console_text(screen_answer, 'answer')}")
-                speak(screen_answer, voice=voice)
-                continue
-
-            mail_export_permission = ensure_privacy_domain_permission(memory, "mail", "Jarvis würde Mail-Übersichten lesen und passende Anhänge oder Notizen auf den Schreibtisch kopieren.") if has_domain(question, "mail") else None
-            if mail_export_permission is not None:
-                print(f"\nJARVIS: {console_text(mail_export_permission, 'answer')}")
-                speak(mail_export_permission, voice=voice)
-                continue
-
-            mail_document_export_answer = handle_mail_document_export_command(question, memory=memory)
-            if mail_document_export_answer is not None:
-                pending_mail_followup = False
-                record_exchange(memory, question, mail_document_export_answer)
-                print(f"\nJARVIS: {console_text(mail_document_export_answer, 'answer')}")
-                speak(mail_document_export_answer, voice=voice)
-                continue
-
-            if mail_worker is None and has_domain(question, "mail") and has_permission("mail"):
-                mail_worker = MailBackgroundWorker(CONFIG)
-                mail_worker.start()
-
-            background_mail_answer = handle_background_mail_command(question, mail_worker)
-            if background_mail_answer is not None:
-                pending_mail_followup = True
-                record_exchange(memory, question, background_mail_answer)
-                print(f"\nJARVIS: {console_text(background_mail_answer, 'answer')}")
-                speak(background_mail_answer, voice=voice)
-                continue
-
-            mail_followup_intent = pending_mail_followup and (
-                is_mail_time_followup(question) or is_mail_status_followup(question)
-            )
-            mail_permission = ensure_privacy_domain_permission(memory, "mail", "Jarvis würde Apple Mail lokal lesen oder bearbeiten.") if has_domain(question, "mail") or mail_followup_intent else None
-            if mail_permission is not None:
-                print(f"\nJARVIS: {console_text(mail_permission, 'answer')}")
-                speak(mail_permission, voice=voice)
-                continue
-
-            mail_settings_before = memory.get("settings") or {}
-            had_pending_mail_delete = isinstance(mail_settings_before.get("pending_mail_delete"), dict)
-            mail_answer = handle_mail_command(
-                llm,
+            answer_started = time.perf_counter()
+            result = answer_message(
                 question,
-                force=mail_followup_intent,
-                memory=memory,
+                memory,
+                llm,
+                CONFIG,
+                workers=workers,
+                pending_mail_followup=pending_mail_followup,
             )
-            if mail_answer is not None:
-                pending_mail_followup = False if had_pending_mail_delete else True
-                record_exchange(memory, question, mail_answer)
-                print(f"\nJARVIS: {console_text(mail_answer, 'answer')}")
-                speak(mail_answer, voice=voice)
-                continue
-
-            contact_permission = ensure_privacy_domain_permission(memory, "contacts", "Jarvis würde Kontakte lesen oder einen Anruf vorbereiten.") if has_domain(question, "contacts") else None
-            if contact_permission is not None:
-                print(f"\nJARVIS: {console_text(contact_permission, 'answer')}")
-                speak(contact_permission, voice=voice)
-                continue
-
-            contact_answer = handle_contact_command(question, memory=memory)
-            if contact_answer is not None:
-                pending_mail_followup = False
-                record_exchange(memory, question, contact_answer)
-                print(f"\nJARVIS: {console_text(contact_answer, 'answer')}")
-                speak(contact_answer, voice=voice)
-                continue
-
-            music_permission = ensure_privacy_domain_permission(memory, "music", "Jarvis würde Apple Music oder die Musik-Wiedergabe steuern.") if has_domain(question, "music") else None
-            if music_permission is not None:
-                print(f"\nJARVIS: {console_text(music_permission, 'answer')}")
-                speak(music_permission, voice=voice)
-                continue
-
-            music_answer = handle_music_command(question)
-            if music_answer is not None:
-                pending_mail_followup = False
-                record_exchange(memory, question, music_answer)
-                print(f"\nJARVIS: {console_text(music_answer, 'answer')}")
-                speak(music_answer, voice=voice)
-                continue
-
-            # Stufe 2 der Absichtserkennung, siehe local_server.py::_answer_with_core
-            # fuer den ausfuehrlichen Kommentar - identisches Prinzip fuer diesen
-            # (separaten, CLI-only) Antwortpfad.
-            domain_clarification = maybe_ask_domain_clarification(llm, memory, question)
-            if domain_clarification is not None:
-                record_exchange(memory, question, domain_clarification)
-                print(f"\nJARVIS: {console_text(domain_clarification, 'answer')}")
-                speak(domain_clarification, voice=voice)
-                continue
-
-            web_context = None
-            web_seconds = 0.0
-            if WEB_SEARCH_ENABLED and should_use_web_search(question):
-                internet_permission = ensure_privacy_domain_permission(memory, "internet", "Jarvis würde eine Websuche im Internet ausführen.")
-                if internet_permission is not None:
-                    print(f"\nJARVIS: {console_text(internet_permission, 'answer')}")
-                    speak(internet_permission, voice=voice)
-                    continue
-                search_query = build_search_query(question)
-                print(f"Websuche: {console_text(search_query, 'search')}")
-                try:
-                    web_started = time.perf_counter()
-                    results = search_web(search_query, max_results=WEB_SEARCH_MAX_RESULTS)
-                    web_seconds = time.perf_counter() - web_started
-                    if results:
-                        web_context = format_search_results(results)
-                    else:
-                        print("Websuche: keine Ergebnisse gefunden.")
-                except Exception as exc:
-                    print("Websuche Fehler:", type(exc).__name__)
-
-            llm_permission = ensure_cloud_llm_permission(memory, question)
-            if llm_permission is not None:
-                print(f"\nJARVIS: {console_text(llm_permission, 'answer')}")
-                speak(llm_permission, voice=voice)
-                continue
-
-            print("Antwort wird generiert...")
-            llm_started = time.perf_counter()
-            route = llm.plan([], user_text=question)
-            answer = clean_ai_answer(
-                llm.ask(
-                    build_input(memory, question, web_context, compact=route.compact_prompt),
-                    max_output_tokens=route.max_output_tokens if route.provider == "ollama" else OPENAI_MAX_OUTPUT_TOKENS,
-                    user_text=question,
-                    route=route,
-                )
-            )
-            llm_seconds = time.perf_counter() - llm_started
-            promised_action_answer = execute_promised_action_if_possible(llm, question, answer)
-            if promised_action_answer is not None:
-                answer = promised_action_answer
-            pending_mail_followup = "mail" in normalize_text(question)
+            answer_seconds = time.perf_counter() - answer_started
+            pending_mail_followup = result.pending_mail_followup
+            answer = result.text
             if PERFORMANCE_LOG:
-                print(
-                    "Zeit: "
-                    f"Whisper={transcribe_seconds:.2f}s | "
-                    f"Web={web_seconds:.2f}s | "
-                    f"KI={llm_seconds:.2f}s"
-                )
-            record_exchange(memory, question, answer)
+                print(f"Zeit: Whisper={transcribe_seconds:.2f}s | Antwort={answer_seconds:.2f}s")
 
             print(f"\nJARVIS: {console_text(answer, 'answer')}")
             speak(answer, voice=voice)
 
         except KeyboardInterrupt:
-            if mail_worker is not None:
-                mail_worker.stop()
-            if photo_worker is not None:
-                photo_worker.stop()
+            if workers.mail_worker is not None:
+                workers.mail_worker.stop()
+            if workers.photo_worker is not None:
+                workers.photo_worker.stop()
             break
         except Exception as exc:
             print("Fehler:", type(exc).__name__)

@@ -1769,11 +1769,6 @@ class JarvisLocalServer:
             question = "Ja?"
         self._last_answer_source = "local"
         self._last_answer_model = self.models.active_model
-        # voice_mode must be known before plan() - "Privater Modus" (force_local below)
-        # changes which provider/model plan() picks, not just the system-prompt text.
-        voice_mode = normalize_voice_mode(str((memory.get("settings") or {}).get("voice_mode") or ""))
-        force_local = voice_mode_forces_local_only(voice_mode)
-        route = self.llm.plan(transient_history or [], user_text=question, force_local=force_local)
 
         try:
             if hasattr(core, "is_end_command") and core.is_end_command(question):
@@ -1787,267 +1782,15 @@ class JarvisLocalServer:
             if photo_fast is not None:
                 return photo_fast
 
-            direct_handlers = [
-                ("handle_system_command", (question,), {}),
-                ("handle_preference_command", (memory, question), {}),
-                ("handle_style_command", (memory, question), {}),
-                ("handle_project_command", (question,), {}),
-                ("handle_local_command", (question,), {}),
-                ("handle_privacy_command", (memory, question), {}),
-                ("handle_model_command", (question,), {"memory": memory, "model_manager": self.models}),
-                ("handle_memory_command", (memory, question), {}),
-                ("handle_pending_note_flow", (memory, question), {}),
-                ("handle_pending_domain_clarification_flow", (memory, question), {"photo_worker": self.photo_worker}),
-                ("handle_pending_action_flow", (memory, question), {"photo_worker": self.photo_worker}),
-            ]
-            if hasattr(core, "has_pending_action") and core.has_pending_action(memory):
-                pending_action_handler = direct_handlers.pop()
-                local_command_index = next(i for i, entry in enumerate(direct_handlers) if entry[0] == "handle_local_command")
-                direct_handlers.insert(local_command_index, pending_action_handler)
-
-            for name, args, kwargs in direct_handlers:
-                handler = getattr(core, name, None)
-                if handler is None:
-                    continue
-                declined_mail_permission = False
-                if name == "handle_pending_action_flow":
-                    settings_before = memory.get("settings") or {}
-                    pending_permission_before = settings_before.get("pending_permission")
-                    declined_mail_permission = (
-                        isinstance(pending_permission_before, dict)
-                        and pending_permission_before.get("permission") == "mail"
-                    )
-                answer = handler(*args, **kwargs)
-                if answer is not None:
-                    if declined_mail_permission and not core.has_permission("mail"):
-                        self.pending_mail_followup = False
-                    answer = self._finalize_answer(core, question, answer)
-                    return str(answer)
-
-            if hasattr(core, "looks_like_multistep_request") and hasattr(core, "plan_multistep") and hasattr(core, "execute_multistep_plan"):
-                # Baustein E (mehrstufige Auftraege, siehe
-                # plans/2026-08-09-jarvis-mehrstufige-auftraege.md) - bewusst als
-                # eigene Stufe VOR der normalen Einzelschritt-Domaenenerkennung, aber
-                # nur aktiv, wenn schon die Stichwort-Erkennung mind. zwei Domaenen
-                # im selben Satz sieht (looks_like_multistep_request). Findet der
-                # Planer keinen gueltigen Plan (None), faellt die Anfrage unveraendert
-                # in den bestehenden Einzelschritt-Weg unten durch - nie raten.
-                if core.looks_like_multistep_request(question):
-                    steps = core.plan_multistep(
-                        self.llm,
-                        question,
-                        max_steps=int(self.config.get("multistep_planner_max_steps", 4)),
-                        max_output_tokens=int(self.config.get("multistep_planner_max_output_tokens", 300)),
-                    )
-                    if steps:
-                        answer = core.execute_multistep_plan(steps, memory, photo_worker=self.photo_worker)
-                        return self._finalize_answer(core, question, answer)
-
-            if hasattr(core, "has_domain") and hasattr(core, "has_permission"):
-                # Baustein D (Verhaltensmuster erkennen, siehe
-                # plans/2026-08-08-jarvis-verhaltensmuster-erkennen.md) - zaehlt NUR
-                # welche Faehigkeit erkannt wurde und wann (Wochentag/grobe Tageszeit),
-                # NIE den Anfrage-Wortlaut. Nur aktiv, wenn die eigene, standardmaessig
-                # deaktivierte Berechtigung "usage_patterns" erteilt ist.
-                if self.permissions.is_allowed("usage_patterns") and hasattr(core, "record_pattern_event_if_matched"):
-                    core.record_pattern_event_if_matched(question)
-
-                notes_permission = core.ensure_privacy_domain_permission(memory, "notes", "Jarvis würde eine Notiz über Apple Notes erstellen oder ändern.") if core.has_domain(question, "notes") else None
-                if notes_permission is not None:
-                    return str(notes_permission)
-                notes_handler = getattr(core, "handle_notes_command", None)
-                if notes_handler is not None:
-                    answer = notes_handler(memory, question)
-                    if answer is not None:
-                        answer = self._finalize_answer(core, question, answer)
-                        return str(answer)
-
-                # Aufgaben (task_manager.py) liegen rein in Jarvis' eigenem Speicher,
-                # keine macOS-Berechtigung noetig - anders als Notizen/Kalender/Mail
-                # also kein ensure_privacy_domain_permission()-Gate davor.
-                tasks_handler = getattr(core, "handle_tasks_command", None)
-                if tasks_handler is not None:
-                    answer = tasks_handler(memory, question)
-                    if answer is not None:
-                        answer = self._finalize_answer(core, question, answer)
-                        return str(answer)
-
-                calendar_permission = None
-                if core.has_domain(question, "calendar") or core.looks_like_calendar_query(question):
-                    calendar_permission = core.ensure_privacy_domain_permission(memory, "calendar", "Jarvis würde Kalenderdaten verwenden.")
-                    if calendar_permission is None and "erinner" in core.normalize_text(question):
-                        calendar_permission = core.ensure_privacy_domain_permission(memory, "reminders", "Jarvis würde eine Erinnerung verwenden.")
-                if calendar_permission is not None:
-                    return str(calendar_permission)
-                calendar_handler = getattr(core, "handle_calendar_command", None)
-                if calendar_handler is not None:
-                    answer = calendar_handler(question, memory=memory)
-                    if answer is not None:
-                        answer = self._finalize_answer(core, question, answer)
-                        return str(answer)
-
-                normalized_question = core.normalize_text(question) if hasattr(core, "normalize_text") else question.lower()
-                file_permission = core.ensure_privacy_domain_permission(memory, "files", "Jarvis würde deinen Schreibtisch oder Dateien lokal lesen oder ändern.") if core.has_domain(question, "files") or "desktop" in normalized_question or "schreibtisch" in normalized_question else None
-                if file_permission is not None:
-                    return str(file_permission)
-                for file_handler_name in ("handle_desktop_command", "handle_file_command"):
-                    handler = getattr(core, file_handler_name, None)
-                    if handler is not None:
-                        answer = handler(question, memory=memory)
-                        if answer is not None:
-                            self.pending_mail_followup = False
-                            answer = self._finalize_answer(core, question, answer)
-                            return str(answer)
-
-                photo_permission = core.ensure_privacy_domain_permission(memory, "photos", "Jarvis würde deine Fotos-App oder den lokalen Fotoindex verwenden.") if core.has_domain(question, "photos") else None
-                if photo_permission is None and core.has_domain(question, "photos") and any(term in normalized_question for term in ("openai", "vision", "analysiere", "analysieren", "was siehst")):
-                    photo_permission = core.ensure_cloud_llm_permission(memory, question)
-                if photo_permission is not None:
-                    return str(photo_permission)
-
-                if core.has_domain(question, "photos") and self.photo_worker is None and core.has_permission("photos"):
-                    worker_cls = getattr(core, "PhotoBackgroundWorker", None)
-                    if worker_cls is not None:
-                        self.photo_worker = worker_cls(self.config)
-                        self.photo_worker.start()
-                photo_handler = getattr(core, "handle_photo_command", None)
-                if photo_handler is not None:
-                    answer = photo_handler(question, self.photo_worker, memory=memory)
-                    if answer is not None:
-                        self.pending_mail_followup = False
-                        answer = self._finalize_answer(core, question, answer)
-                        return str(answer)
-
-                screen_permission = core.ensure_privacy_domain_permission(memory, "screen", "Jarvis würde einen einzelnen Screenshot deines aktiven Fensters aufnehmen und lokal analysieren.") if core.has_domain(question, "screen") else None
-                if screen_permission is not None:
-                    return str(screen_permission)
-                screen_handler = getattr(core, "handle_screen_command", None)
-                if screen_handler is not None and core.has_permission("screen"):
-                    answer = screen_handler(question, memory=memory)
-                    if answer is not None:
-                        self.pending_mail_followup = False
-                        answer = self._finalize_answer(core, question, answer)
-                        return str(answer)
-
-                mail_export_permission = core.ensure_privacy_domain_permission(memory, "mail", "Jarvis würde Mail-Übersichten lesen und passende Anhänge oder Notizen auf den Schreibtisch kopieren.") if core.has_domain(question, "mail") else None
-                if mail_export_permission is not None:
-                    return str(mail_export_permission)
-                mail_document_export_handler = getattr(core, "handle_mail_document_export_command", None)
-                if mail_document_export_handler is not None:
-                    answer = mail_document_export_handler(question, memory=memory)
-                    if answer is not None:
-                        self.pending_mail_followup = False
-                        answer = self._finalize_answer(core, question, answer)
-                        return str(answer)
-
-                if core.has_domain(question, "mail") and self.mail_worker is None and core.has_permission("mail"):
-                    worker_cls = getattr(core, "MailBackgroundWorker", None)
-                    if worker_cls is not None:
-                        self.mail_worker = worker_cls(self.config)
-                        self.mail_worker.start()
-                background_mail_handler = getattr(core, "handle_background_mail_command", None)
-                if background_mail_handler is not None:
-                    answer = background_mail_handler(question, self.mail_worker)
-                    if answer is not None:
-                        self.pending_mail_followup = True
-                        answer = self._finalize_answer(core, question, answer)
-                        return str(answer)
-
-                mail_followup_intent = self.pending_mail_followup and (
-                    hasattr(core, "is_mail_time_followup")
-                    and hasattr(core, "is_mail_status_followup")
-                    and (core.is_mail_time_followup(question) or core.is_mail_status_followup(question))
-                )
-                mail_permission = core.ensure_privacy_domain_permission(memory, "mail", "Jarvis würde Apple Mail lokal lesen oder bearbeiten.") if core.has_domain(question, "mail") or mail_followup_intent else None
-                if mail_permission is not None:
-                    return str(mail_permission)
-                mail_handler = getattr(core, "handle_mail_command", None)
-                if mail_handler is not None:
-                    mail_settings_before = memory.get("settings") or {}
-                    had_pending_mail_delete = isinstance(mail_settings_before.get("pending_mail_delete"), dict)
-                    answer = mail_handler(self.llm, question, force=mail_followup_intent, memory=memory)
-                    if answer is not None:
-                        self.pending_mail_followup = False if had_pending_mail_delete else True
-                        answer = self._finalize_answer(core, question, answer)
-                        return str(answer)
-
-                contact_permission = core.ensure_privacy_domain_permission(memory, "contacts", "Jarvis würde Kontakte lesen oder einen Anruf vorbereiten.") if core.has_domain(question, "contacts") else None
-                if contact_permission is not None:
-                    return str(contact_permission)
-                contact_handler = getattr(core, "handle_contact_command", None)
-                if contact_handler is not None:
-                    answer = contact_handler(question, memory=memory)
-                    if answer is not None:
-                        self.pending_mail_followup = False
-                        answer = self._finalize_answer(core, question, answer)
-                        return str(answer)
-
-                music_permission = core.ensure_privacy_domain_permission(memory, "music", "Jarvis würde Apple Music oder die Musik-Wiedergabe steuern.") if core.has_domain(question, "music") else None
-                if music_permission is not None:
-                    return str(music_permission)
-                music_handler = getattr(core, "handle_music_command", None)
-                if music_handler is not None:
-                    answer = music_handler(question)
-                    if answer is not None:
-                        self.pending_mail_followup = False
-                        answer = self._finalize_answer(core, question, answer)
-                        return str(answer)
-
-                # Stufe 2 der Absichtserkennung (siehe
-                # plans/2026-08-08-jarvis-intelligenz-verbessern.md): keiner der
-                # obigen Stichwort-Treffer (auch nicht fuzzy) hat gegriffen - statt
-                # stillschweigend in den werkzeuglosen Chat zu fallen, fragt Jarvis
-                # aktiv nach, falls eine kurze Modell-Klassifikation eine Faehigkeit
-                # fuer plausibel haelt. Findet die Klassifikation nichts, faellt der
-                # Code normal weiter in den Chat-Zweig unten.
-                if hasattr(core, "maybe_ask_domain_clarification"):
-                    clarification = core.maybe_ask_domain_clarification(self.llm, memory, question)
-                    if clarification is not None:
-                        answer = self._finalize_answer(core, question, clarification)
-                        return str(answer)
-
-            web_context = None
-            if (
-                bool(self.config.get("web_search_enabled", True))
-                and not voice_mode_disables_web_search(voice_mode)
-                and hasattr(core, "should_use_web_search")
-                and core.should_use_web_search(question)
-            ):
-                permission = core.ensure_privacy_domain_permission(memory, "internet", "Jarvis würde eine Websuche im Internet ausführen.")
-                if permission is not None:
-                    return str(permission)
-                try:
-                    search_query = core.build_search_query(question)
-                    results = core.search_web(search_query, max_results=int(self.config.get("web_search_max_results", 3)))
-                    if results:
-                        web_context = core.format_search_results(results)
-                except Exception:
-                    web_context = None
-
-            if hasattr(core, "ensure_cloud_llm_permission"):
-                permission = core.ensure_cloud_llm_permission(memory, question)
-                if permission is not None:
-                    return str(permission)
-
-            if hasattr(core, "build_input"):
-                try:
-                    messages = core.build_input(memory, question, web_context, transient_history=transient_history, compact=route.compact_prompt)
-                except TypeError:
-                    messages = core.build_input(memory, question, web_context)
-            else:
-                messages = [
-                    {"role": "system", "content": JARVIS_SYSTEM_PROMPT},
-                    *(transient_history or []),
-                    {"role": "user", "content": question},
-                ]
-            messages = normalize_jarvis_messages(
-                messages,
-                recent_limit=min(int(self.config.get("recent_context_messages", 6)) + 1, 7),
+            # Gemeinsame Domaenen-Erkennungs-Kette mit main() (jarvis.py) - siehe
+            # plans/2026-08-09-jarvis-cli-server-aufraeumen.md. Alles, was hier noch
+            # steht, ist bewusst Server-spezifisch geblieben: Dashboard-Kurzbefehle
+            # oben, Streaming/Pipeline-Logging/Worker-Zustand unten.
+            workers = core.AnswerWorkers(
+                photo_worker=self.photo_worker,
+                mail_worker=self.mail_worker,
+                model_manager=self.models,
             )
-            self._pipeline_log("finalPrompt/messages", messages=messages)
-            print("VoicePerformanceEvent: llmResponseStarted", file=sys.stderr)
-            self._last_answer_source = route.provider
-            self._last_answer_model = route.model
 
             first_chunk_sent = False
 
@@ -2059,25 +1802,27 @@ class JarvisLocalServer:
                 if callable(on_llm_chunk):
                     on_llm_chunk(chunk)
 
-            if callable(on_llm_chunk):
-                answer = self.llm.ask_stream(
-                    messages,
-                    max_output_tokens=route.max_output_tokens,
-                    user_text=question,
-                    route=route,
-                    on_chunk=_forward_chunk,
-                    force_local=force_local,
-                )
-            else:
-                answer = self.llm.ask(messages, max_output_tokens=route.max_output_tokens, user_text=question, route=route, force_local=force_local)
+            print("VoicePerformanceEvent: llmResponseStarted", file=sys.stderr)
+            result = core.answer_message(
+                question,
+                memory,
+                self.llm,
+                self.config,
+                workers=workers,
+                pending_mail_followup=self.pending_mail_followup,
+                transient_history=transient_history,
+                on_llm_chunk=_forward_chunk if callable(on_llm_chunk) else None,
+            )
+            self.photo_worker = workers.photo_worker
+            self.mail_worker = workers.mail_worker
+            self.pending_mail_followup = result.pending_mail_followup
+            self._last_answer_source = result.provider
+            self._last_answer_model = result.model
             print("VoicePerformanceEvent: llmResponseFinished", file=sys.stderr)
-            if hasattr(core, "clean_ai_answer"):
-                answer = core.clean_ai_answer(answer)
-            promised = core.execute_promised_action_if_possible(self.llm, question, answer) if hasattr(core, "execute_promised_action_if_possible") else None
-            if promised is not None:
-                answer = promised
-            self.pending_mail_followup = "mail" in core.normalize_text(question) if hasattr(core, "normalize_text") else "mail" in question.lower()
-            answer = self._finalize_answer(core, question, answer)
+            # answer_message() already called record_exchange() itself (with the
+            # correct per-handler auto_memory behavior) - _finalize_answer() must not
+            # record a second time here.
+            answer = self._finalize_answer(core, question, result.text, record=False)
             return str(answer)
         except Exception as exc:
             fast = self._handle_fast_commands(question)
@@ -2093,7 +1838,7 @@ class JarvisLocalServer:
             return f"Ich konnte die Anfrage gerade nicht sauber ausführen. Technisch war es: {_safe_error(exc)}."
 
 
-    def _finalize_answer(self, core, question: str, answer: Any) -> str:
+    def _finalize_answer(self, core, question: str, answer: Any, *, record: bool = True) -> str:
         text = str(answer or "").strip()
         if hasattr(core, "clean_ai_answer"):
             try:
@@ -2102,7 +1847,8 @@ class JarvisLocalServer:
                 pass
         print("VoicePerformanceEvent: llmResponseFinished", file=sys.stderr)
         self._pipeline_log("assistantResponse", text=text)
-        self._record_exchange(core, question, text)
+        if record:
+            self._record_exchange(core, question, text)
         return text
 
     def _clean_history(self, history: list[dict[str, str]] | None) -> list[dict[str, str]]:
