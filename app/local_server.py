@@ -1771,7 +1771,7 @@ class JarvisLocalServer:
                 ("handle_project_command", (question,), {}),
                 ("handle_local_command", (question,), {}),
                 ("handle_privacy_command", (memory, question), {}),
-                ("handle_model_command", (question,), {"memory": memory}),
+                ("handle_model_command", (question,), {"memory": memory, "model_manager": self.models}),
                 ("handle_memory_command", (memory, question), {}),
                 ("handle_pending_note_flow", (memory, question), {}),
                 ("handle_pending_domain_clarification_flow", (memory, question), {"photo_worker": self.photo_worker}),

@@ -553,3 +553,71 @@ mag es") wurde beim Verifizieren tatsächlich in der echten Gedächtnis-Ansicht
 gespeichert (aus dem Testsatz "Ich mag es, wenn du kurze Antworten gibst.").
 Über die Gedächtnis-Ansicht in der App lösch- oder ablehnbar wie jede andere
 Erinnerung - wurde bewusst nicht automatisch entfernt.
+
+## 20. Bug-Muster-Audit: weitere Dual-Instance-Stellen gesucht (2026-08-09)
+
+Nachdem der Gedächtnis-Bug (Abschnitt 19) genau einem wiederkehrenden Muster
+folgte - eine Klasse cacht ihre Datei bei Konstruktion in `self.data`,
+schreibt bei jeder Änderung den GANZEN Cache zurück, und eine zweite,
+kurzlebige Instanz neben einer langlebigen kann so einen Schreibvorgang
+unsichtbar machen und später stillschweigend überschreiben - wurde
+systematisch nach weiteren Stellen mit demselben Muster gesucht (`Memory`,
+`TaskManager`, `PermissionManager`, `ConversationManager`,
+`UsagePatternStore`, `ActionEngine`, `PrivacyLogger`, `PrivacyDashboard`,
+`ModelManager` in `app/jarvis.py`, `app/local_server.py`, `app/core/*.py`).
+
+**Bestätigter, behobener Bug: `ModelManager`.** Exakt dasselbe Muster wie bei
+`Memory`/`JarvisMemorySystem`: `local_server.py::self.models` ist eine
+langlebige, serverweite Instanz (Zeile 172), aber `jarvis.py::
+handle_model_command()` baute bei jedem Aufruf eine **eigene, frische**
+`ModelManager(CONFIG)`. Beide Pfade sind im selben laufenden Prozess
+erreichbar: `_handle_fast_commands()` (nutzt `self.models`) fängt nur einen
+Teil der Modell-Befehle ab (z. B. nicht "cloud ki"), alles andere fällt in
+`handle_model_command()` über die Domänen-Handler-Liste durch. Konkret
+nachgestellt: "gemma" über `self.models` gesetzt → "cloud ki" (nur von
+`handle_model_command()` erkannt) baut eine frische, zu diesem Zeitpunkt
+schon wieder aktuelle Instanz und schreibt korrekt - aber `self.models`
+weiß davon nichts. Ein späterer Befehl über `self.models` (z. B. "qwen")
+überschreibt die Datei dann mit `self.models`' eigenem, veraltetem Stand und
+macht den Cloud-Wechsel spurlos rückgängig.
+
+**Fix:** `handle_model_command()` bekommt einen neuen optionalen Parameter
+`model_manager` - wird er übergeben, wird er direkt weiterverwendet (keine
+zweite Instanz), sonst wie bisher eine neue gebaut (CLI-Pfad `jarvis.py::
+main()` hält ohnehin keine langlebige `ModelManager`-Instanz über die
+Schleife hinweg, dort ist eine frische Instanz pro Aufruf unproblematisch).
+`local_server.py`s Aufrufstelle in der `direct_handlers`-Liste übergibt jetzt
+`self.models` mit.
+
+4 neue Tests (`tests/test_model_manager_shared_instance.py`, neu) - insgesamt
+179 Tests: der Bug in Isolation nachgestellt (dokumentiert die Ursache),
+Regressionstest, dass `handle_model_command()` die übergebene Instanz direkt
+mutiert statt eine neue zu bauen, End-to-End-Variante mit geteilter Instanz
+über mehrere Aufrufe, sowie ein Test, dass der bisherige CLI-Pfad (keine
+Instanz übergeben) unverändert funktioniert.
+
+**Geprüft und als unkritisch eingestuft** (kein Datenverlust, da diese
+Klassen entweder gar keinen Cache halten und bei jedem Zugriff frisch von der
+Platte lesen, oder nie in mehrere gleichzeitig aktive, konkurrierend
+schreibende Instanzen aufgeteilt sind): `TaskManager` (delegiert komplett an
+die übergebene `Memory`-Instanz, hält selbst keinen Cache),
+`ConversationManager` (wird nie langlebig gehalten, jede Instanz liest beim
+Konstruieren den aktuellen Stand), `UsagePatternStore`/`VoicePerformanceLog`
+(laden bei jeder Methode frisch von der Platte), `ProactivityEngine`
+(lädt/speichert seinen State bei jedem `evaluate()`-Aufruf frisch),
+`ActionEngine` (hält keinen eigenen Datei-State, operiert nur auf der
+übergebenen `Memory`-Instanz), `PrivacyLogger` (kein In-Prozess-Cache,
+hängt nur an die Log-Datei an).
+
+**Nicht behoben, niedrigere Priorität (Sichtbarkeits-, kein
+Datenverlust-Problem):** `PermissionManager` cacht ebenfalls nach demselben
+Muster, und `local_server.py`s langlebige `self.permissions`/
+`self.dashboard.permission_manager`-Instanzen werden nur lesend genutzt -
+alle tatsächlichen Berechtigungsänderungen laufen über kurzlebige,
+Funktions-lokale `PermissionManager()`-Instanzen (`ensure_permission()` etc.),
+die nie langlebig gehalten werden und deshalb nie schreibend miteinander
+kollidieren. Der Datenschutz-Status (`/api/privacy/status`,
+`self.permissions.is_allowed(...)`) kann dadurch aber bis zum nächsten
+Server-Neustart einen veralteten Berechtigungsstand zeigen, wenn eine
+Berechtigung zwischenzeitlich anderweitig geändert wurde. Bewusst
+zurückgestellt - Leon entscheidet, ob das behoben werden soll.

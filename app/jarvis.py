@@ -1672,12 +1672,24 @@ def is_internet_check(text: str) -> bool:
 
 
 
-def handle_model_command(text: str, memory: Memory | None = None) -> str | None:
+def handle_model_command(
+    text: str,
+    memory: Memory | None = None,
+    model_manager: ModelManager | None = None,
+) -> str | None:
     normalized = normalize_text(text)
     if not any(term in normalized for term in ("modell", "gemma", "qwen", "openai", "lokal", "cloud")):
         return None
 
-    manager = ModelManager(CONFIG)
+    # `model_manager` laesst den Aufrufer eine bereits vorhandene, langlebige
+    # Instanz durchreichen (siehe local_server.py::self.models) statt hier immer
+    # eine neue zu bauen - ModelManager cacht model_settings.json genau wie
+    # Memory (siehe Gedaechtnis-Bugfix), eine zweite, kurzlebige Instanz wuerde
+    # sonst denselben Daten-Verlust-Bug reproduzieren: ein Schreibvorgang ueber
+    # diese frische Instanz waere fuer die langlebige unsichtbar, und ein
+    # spaeterer Schreibvorgang der langlebigen Instanz wuerde ihn stillschweigend
+    # wieder ueberschreiben.
+    manager = model_manager or ModelManager(CONFIG)
 
     if any(term in normalized for term in ("welches modell", "welches model", "modell nutzt", "model nutzt", "modell verwendest", "model verwendest")):
         return manager.status_text()
