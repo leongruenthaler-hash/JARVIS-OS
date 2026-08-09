@@ -312,3 +312,23 @@ neuen numerischen Zeitstempel in `jarvis.py::answer_calendar_query()`.
 13 neue Tests (insgesamt 113). Bewusst nicht umgesetzt: Reisezeit vor einem
 Termin, automatischer Abgleich mit aus Mails erkannten Terminvorschlägen
 (Baustein B) - siehe `docs/proactivity.md`, letzter Abschnitt.
+
+## 15. Mail und Kalender verknüpfen (2026-08-08)
+
+Baustein B aus `plans/2026-08-08-jarvis-proaktiver-wie-iron-man.md`
+umgesetzt: neue Regel `rule_mail_matches_upcoming_event` in
+`app/core/proactivity_rules.py` - erste Proactivity-Regel, die zwei
+Datenquellen (neue Mails + anstehende Termine) gemeinsam auswertet statt
+isoliert. Vergleicht den Absendernamen jeder neuen Mail per Fuzzy-
+Wortvergleich (`app/core/intent_matching.py`) gegen die Titel anstehender
+Termine im Lookahead-Fenster aus Baustein A.
+
+**Bewusste Einschränkung:** Abgleich läuft gegen den Termin-Titel, nicht
+gegen echte Termin-Teilnehmer - Letzteres bräuchte eine weitere Erweiterung
+der Calendar.app-AppleScript-Abfrage, die bewusst nicht direkt im Anschluss
+an die vorsichtige Baustein-A-Änderung vorgenommen wurde. Details, gefundene
+Falsch-Positiv-Fälle (generische Absender wie "Info"/"Support") und deren
+Behebung: `docs/proactivity.md`.
+
+6 neue Tests (insgesamt 119). Bewusst nicht umgesetzt: Teilnehmer-basierter
+Abgleich (siehe oben), Reisezeit vor einem Termin.

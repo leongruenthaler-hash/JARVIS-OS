@@ -12,9 +12,11 @@ if str(CORE_DIR) not in sys.path:
     sys.path.insert(0, str(CORE_DIR))
 
 from proactivity_rules import (  # noqa: E402
+    _extract_sender_name,
     rule_calendar_event_starting_soon,
     rule_calendar_events_overlap,
     rule_low_disk_space,
+    rule_mail_matches_upcoming_event,
     rule_new_unread_mail,
     rule_pending_calendar_actions_waiting,
     rule_unconfirmed_memory_facts,
@@ -176,3 +178,54 @@ def test_calendar_events_overlap_silent_for_non_overlapping_events():
         {"title": "B", "start_dt": now + timedelta(minutes=90), "end_dt": now + timedelta(minutes=120)},
     ]
     assert rule_calendar_events_overlap({"config": CALENDAR_CONFIG, "upcoming_calendar_events": events}) == []
+
+
+def test_extract_sender_name_with_display_name():
+    assert _extract_sender_name("Max Mustermann <max@firma.de>") == "Max Mustermann"
+
+
+def test_extract_sender_name_quoted_display_name():
+    assert _extract_sender_name('"Max Mustermann" <max@firma.de>') == "Max Mustermann"
+
+
+def test_extract_sender_name_email_only_fallback():
+    assert _extract_sender_name("max.mustermann@firma.de") == "max mustermann"
+
+
+def test_mail_matches_upcoming_event_fires_on_name_in_title():
+    now = datetime.now()
+    messages = [{"id": "m1", "sender": "Max Mustermann <max@firma.de>", "subject": "Re: Projekt"}]
+    events = [{"title": "Call mit Max", "start_dt": now + timedelta(hours=2), "end_dt": now + timedelta(hours=3)}]
+    result = rule_mail_matches_upcoming_event(
+        {"config": CALENDAR_CONFIG, "new_mail_messages": messages, "upcoming_calendar_events": events}
+    )
+    assert len(result) == 1
+    assert result[0]["priority"] == "relevant"
+    assert "Max Mustermann" in result[0]["message"]
+    assert "Call mit Max" in result[0]["message"]
+
+
+def test_mail_matches_upcoming_event_silent_when_no_matching_title():
+    now = datetime.now()
+    messages = [{"id": "m2", "sender": "Erika Musterfrau <erika@firma.de>", "subject": "Hallo"}]
+    events = [{"title": "Call mit Max", "start_dt": now + timedelta(hours=2), "end_dt": now + timedelta(hours=3)}]
+    assert (
+        rule_mail_matches_upcoming_event(
+            {"config": CALENDAR_CONFIG, "new_mail_messages": messages, "upcoming_calendar_events": events}
+        )
+        == []
+    )
+
+
+def test_mail_matches_upcoming_event_ignores_generic_sender_and_title_words():
+    now = datetime.now()
+    # Regressionsfall aus diesem Gespraech: generischer Absendername "Info"
+    # matchte faelschlich einen Termin "Info-Abend Schule".
+    messages = [{"id": "m3", "sender": "Info <info@shop.de>", "subject": "Bestellung"}]
+    events = [{"title": "Info-Abend Schule", "start_dt": now + timedelta(hours=1), "end_dt": now + timedelta(hours=2)}]
+    assert (
+        rule_mail_matches_upcoming_event(
+            {"config": CALENDAR_CONFIG, "new_mail_messages": messages, "upcoming_calendar_events": events}
+        )
+        == []
+    )

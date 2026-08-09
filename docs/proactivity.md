@@ -49,6 +49,7 @@ Ablauf pro Aufruf:
 | `new_unread_mail` | relevant | ≥3 neue Mails seit letztem Hintergrundscan |
 | `calendar_event_starting_soon` | wichtig | Ein nicht-ganztägiger Termin beginnt innerhalb von `proactivity_calendar_event_soon_minutes` (Standard 15) |
 | `calendar_events_overlap` | relevant | Zwei Termine innerhalb von `proactivity_calendar_lookahead_hours` (Standard 6h) überschneiden sich zeitlich |
+| `mail_matches_upcoming_event` | relevant | Absendername einer neuen Mail passt zum Titel eines anstehenden Termins (Baustein B, "Connect the dots") |
 
 **Nachtrag (2026-08-08):** "Termin beginnt bald" und "zwei Termine
 überschneiden sich" sind jetzt umgesetzt, siehe
@@ -74,6 +75,30 @@ statt nur von heute, vermutlich weil die bisherige Filterung allein auf
 einem locale-formatierten AppleScript-Datumsvergleich beruhte.
 `jarvis.py::answer_calendar_query()` filtert den `only_today`-Fall jetzt
 zusätzlich anhand des robusten `start_dt` in Python nach.
+
+**Nachtrag (2026-08-08, Baustein B):** `mail_matches_upcoming_event` verknüpft
+erstmals zwei Datenquellen statt nur eine ("Connect the dots", siehe
+`plans/2026-08-08-jarvis-mail-kalender-verknuepfen.md`) - vergleicht den
+Absendernamen jeder neuen Mail (`context["new_mail_messages"]`) gegen den
+Titel jedes anstehenden Termins im Lookahead-Fenster
+(`context["upcoming_calendar_events"]`), per Fuzzy-Wortvergleich
+(`core/intent_matching.py`, dieselbe Technik wie bei der Absichtserkennung).
+
+**Bewusste Einschränkung:** der Abgleich läuft gegen den Termin-**Titel**,
+nicht gegen echte Termin-**Teilnehmer** - Calendar.app's AppleScript-Zugriff
+auf Teilnehmerdaten wurde bewusst nicht zusätzlich erschlossen, um nicht kurz
+nach der vorsichtigen Baustein-A-Erweiterung eine weitere, riskantere
+Änderung an derselben, historisch fragilen Abfrage vorzunehmen (siehe
+Commit `45dc902`). Funktioniert gut, wenn Termine wie im Alltag üblich einen
+Namen im Titel tragen ("Call mit Max"), erkennt aber keine Verbindung, wenn
+der Name nur als Teilnehmer hinterlegt ist. Ein Teilnehmer-basierter Abgleich
+bleibt ein möglicher, separat zu planender Folgeschritt.
+
+Beim Testen fiel ein Falsch-Positiv-Risiko auf: generische
+Absender-Bezeichnungen wie "Info" oder "Support" (automatisierte
+Firmen-Postfächer) matchten zufällig Termine mit ähnlichen Wörtern im Titel
+(z. B. "Info-Abend"). Behoben über eine eigene `_GENERIC_SENDER_WORDS`-
+Ausnahmeliste, analog zur bereits bestehenden `_GENERIC_TITLE_WORDS`-Liste.
 
 ## Wo Hinweise ankommen
 

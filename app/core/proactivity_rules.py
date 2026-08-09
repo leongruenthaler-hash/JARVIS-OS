@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import re
 import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+from core.intent_matching import fuzzy_word_match
 
 """Default Proactivity Engine rules (Master-Plan Abschnitt 8.4).
 
@@ -220,6 +223,124 @@ def rule_calendar_events_overlap(context: dict[str, Any]) -> list[dict[str, Any]
     return results
 
 
+_GERMAN_WEEKDAYS = ("Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag")
+
+# Haeufige, generische Termin-Titel-Woerter, die nie fuer sich allein einen
+# Mail-Termin-Treffer ausloesen duerfen (sonst z.B. jede Mail mit "Meeting" im
+# Namen faelschlich zu jedem Termin mit "Meeting" im Titel passen wuerde) -
+# dieselbe Lehre wie die Fuellwort-Ausnahmeliste in core/intent_matching.py.
+_GENERIC_TITLE_WORDS = frozenset(
+    {
+        "meeting", "call", "termin", "termine", "besprechung", "gespraech",
+        "sync", "review", "planning", "standup", "abstimmung", "video",
+        "telefonat", "chat", "the", "und", "mit", "bei", "von", "zum", "zur",
+    }
+)
+
+# Generische Absender-Bezeichnungen (automatisierte Mails, Firmen-Postfaecher) -
+# kein echter Personenname, darf also nie fuer sich allein einen Treffer
+# ausloesen (beim Testen konkret aufgefallen: "Info <info@shop.de>" matchte
+# faelschlich "Info-Abend Schule").
+_GENERIC_SENDER_WORDS = frozenset(
+    {
+        "info", "support", "service", "team", "kontakt", "kundenservice",
+        "noreply", "no-reply", "newsletter", "hello", "hallo", "admin",
+        "office", "buero", "mail", "kunde", "bestellung", "rechnung",
+    }
+)
+
+
+def _extract_sender_name(sender: str) -> str:
+    """Baut einen Anzeigenamen aus dem rohen AppleScript-sender-Text
+    ('Name <email@beispiel.de>' oder nur einer reinen E-Mail-Adresse)."""
+    sender = str(sender or "").strip()
+    if "<" in sender:
+        name_part = sender.split("<", 1)[0].strip().strip('"').strip()
+        email_part = sender.split("<", 1)[1].split(">", 1)[0]
+    else:
+        name_part = ""
+        email_part = sender
+
+    if name_part:
+        return name_part
+
+    local_part = email_part.split("@", 1)[0]
+    return re.sub(r"[._\-]+", " ", local_part).strip()
+
+
+def rule_mail_matches_upcoming_event(context: dict[str, Any]) -> list[dict[str, Any]]:
+    config = context.get("config") or {}
+    messages = context.get("new_mail_messages") or []
+    events = context.get("upcoming_calendar_events") or []
+    if not messages or not events:
+        return []
+
+    lookahead_hours = float(config.get("proactivity_calendar_lookahead_hours", 6))
+    now = datetime.now()
+    horizon = now.timestamp() + lookahead_hours * 3600
+    candidate_events = [
+        event
+        for event in events
+        if event.get("start_dt") is not None and now.timestamp() <= event["start_dt"].timestamp() <= horizon
+    ]
+    if not candidate_events:
+        return []
+
+    results: list[dict[str, Any]] = []
+    seen_pairs: set[str] = set()
+    for message in messages:
+        sender_name = _extract_sender_name(str(message.get("sender") or ""))
+        name_words = [
+            word
+            for word in sender_name.lower().split()
+            if len(word) > 2 and word not in _GENERIC_SENDER_WORDS
+        ]
+        if not name_words:
+            continue
+
+        for event in candidate_events:
+            title = str(event.get("title") or "")
+            title_words = [
+                word
+                for word in re.findall(r"[a-zA-ZäöüÄÖÜß]+", title.lower())
+                if len(word) > 2 and word not in _GENERIC_TITLE_WORDS
+            ]
+            if not title_words:
+                continue
+            if not any(fuzzy_word_match(word, tuple(title_words), max_distance=1) for word in name_words):
+                continue
+
+            start_dt = event["start_dt"]
+            mail_id = str(message.get("id") or message.get("subject") or "")
+            pair_key = f"{mail_id}:{title}:{start_dt.isoformat()}"
+            if pair_key in seen_pairs:
+                continue
+            seen_pairs.add(pair_key)
+
+            weekday = _GERMAN_WEEKDAYS[start_dt.weekday()]
+            results.append(
+                {
+                    "priority": "relevant",
+                    "message": (
+                        f"Mail von {sender_name} ist da — ihr habt '{title}' am {weekday} "
+                        f"um {start_dt:%H:%M} Uhr."
+                    ),
+                    "reason": f"Absendername '{sender_name}' passt zum Titel des anstehenden Termins '{title}'.",
+                    "data": {
+                        "sender": sender_name,
+                        "subject": str(message.get("subject") or ""),
+                        "event_title": title,
+                        "event_start": start_dt.isoformat(),
+                    },
+                    "dedup_key": f"mail_event_match:{pair_key}",
+                }
+            )
+            # Ein Treffer pro Mail reicht - verhindert, dass eine einzelne Mail
+            # gegen mehrere aehnlich benannte Termine mehrfach meldet.
+            break
+    return results
+
+
 DEFAULT_RULES = (
     ("low_disk_space", rule_low_disk_space),
     ("pending_calendar_actions_waiting", rule_pending_calendar_actions_waiting),
@@ -227,6 +348,7 @@ DEFAULT_RULES = (
     ("new_unread_mail", rule_new_unread_mail),
     ("calendar_event_starting_soon", rule_calendar_event_starting_soon),
     ("calendar_events_overlap", rule_calendar_events_overlap),
+    ("mail_matches_upcoming_event", rule_mail_matches_upcoming_event),
 )
 
 
