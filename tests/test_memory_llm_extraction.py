@@ -19,6 +19,7 @@ from memory import Memory
         "Ich wohne seit letztem Jahr in Berlin",
         "Mein Lieblingsessen ist Pizza",
         "Ich arbeite als Softwareentwickler",
+        "Ich lebe schon seit 18 Jahren in Amberg in Deutschland",
     ],
 )
 def test_looks_like_memory_candidate_true_for_statements(text):

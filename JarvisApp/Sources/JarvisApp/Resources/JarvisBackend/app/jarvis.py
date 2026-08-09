@@ -1074,6 +1074,7 @@ _MEMORY_CANDIDATE_STATEMENT_VERBS = (
     "heiße",
     "heisse",
     "wohne",
+    "lebe",
     "arbeite",
     "studiere",
     "fahre",
@@ -2552,7 +2553,17 @@ def classify_domain_via_llm(llm: LLMClient, question: str) -> list[str]:
                 "Antworte NUR mit dem Kategorie-Wort, klein geschrieben, ohne Satzzeichen "
                 "und ohne Erklaerung. Bist du unsicher zwischen zwei Kategorien, antworte "
                 "mit beiden, getrennt durch ein Komma. Passt erkennbar keine Kategorie, "
-                "antworte mit 'keine'."
+                "antworte mit 'keine'.\n\n"
+                "Eine reine Aussage ueber die Person selbst (Wohnort, Alter, Vorlieben, "
+                "Beruf, Eigenschaften) ist KEINE der obigen Faehigkeiten, auch wenn sie "
+                "Woerter wie Jahre, Datum oder einen Ortsnamen enthaelt - solche Saetze "
+                "beantwortest du immer mit 'keine'.\n"
+                "Beispiele:\n"
+                "'Ich lebe schon seit 18 Jahren in Amberg in Deutschland' -> keine\n"
+                "'Ich mag lieber kurze Antworten' -> keine\n"
+                "'Wie ist das Wetter heute' -> keine\n"
+                "'Trag morgen um 9 Uhr einen Termin beim Arzt ein' -> calendar\n"
+                "'Hast du neue Mails fuer mich' -> mail"
             ),
         },
         {"role": "user", "content": question},

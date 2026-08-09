@@ -671,3 +671,42 @@ Wort, nicht mehr als Teilstring von "deaktiviere".
 "deaktiviere X" verbietet jetzt korrekt, "aktiviere X"/"erlaube X" erlauben
 weiterhin korrekt, "verbiete X" verbietet weiterhin korrekt. Live auf dem
 echten Mac verifiziert.
+
+## 23. Selbstauskunft fälschlich als Mail/Kalender-Rückfrage eingestuft (2026-08-09)
+
+Von Leon per Screenshot gemeldet: die reine Selbstauskunft "Jarvis ich lebe
+schon seit 18 Jahren in Amberg in Deutschland" löste keine normale Antwort
+aus, sondern die Stufe-2-Rückfrage "Ging es dabei um deine Mails oder deinen
+Kalender oder eine Erinnerung?" - ein klar falsches Ergebnis für eine reine
+Tatsachenaussage.
+
+**Ursache, zwei zusammenwirkende Lücken:**
+1. `looks_like_memory_candidate()` erkannte den Satz nicht als Gedächtnis-
+   Kandidat, weil `_MEMORY_CANDIDATE_STATEMENT_VERBS` das Verb "lebe" nicht
+   enthielt (nur "wohne" war gelistet). Der Satz wurde deshalb NICHT für die
+   LLM-Gedächtnis-Extraktion (Abschnitt zur Gedächtnis-Härtung) vorgemerkt.
+2. Weil der Satz dadurch bei keinem der Domänen-Handler und auch nicht bei
+   der Gedächtnis-Erkennung griff, landete er bei Stufe 2 der
+   Absichtserkennung (`classify_domain_via_llm`) - dem kleinen lokalen
+   Modell (phi4-mini) als reiner Sicherheitsnetz-Klassifikator. Ohne
+   Beispiele im Prompt stufte das Modell die Aussage fälschlich als
+   mail/calendar-relevant ein, statt mit "keine" zu antworten - dieselbe
+   Über-Klassifikations-Schwäche des kleinen Modells wie beim News-Baustein
+   (Abschnitt 18) und der Gedächtnis-Extraktion.
+
+**Fix:**
+1. `"lebe"` zu `_MEMORY_CANDIDATE_STATEMENT_VERBS` ergänzt (`app/jarvis.py`)
+   - der Satz wird jetzt korrekt als Gedächtnis-Kandidat erkannt.
+2. Prompt von `classify_domain_via_llm()` um eine explizite Regel und
+   Beispiele gehärtet: reine Selbstauskünfte (Wohnort, Alter, Vorlieben,
+   Beruf, Eigenschaften) werden immer mit "keine" beantwortet, auch wenn sie
+   Jahreszahlen oder Ortsnamen enthalten - als zweite, unabhängige
+   Absicherung, falls ein zukünftiger Satz erneut durch die (naturgemäß nie
+   vollständige) Verb-Liste rutscht.
+
+2 neue Tests (`tests/test_memory_llm_extraction.py`,
+`tests/test_domain_matching.py`) - insgesamt 244 Tests. Xcode-Build
+erfolgreich, live auf dem echten Mac mit exakt Leons ursprünglichem Satz
+verifiziert: die Aussage wird jetzt normal beantwortet und landet korrekt
+als `pending_confirmation`-Fakt im Gedächtnis, statt eine falsche Rückfrage
+auszulösen.

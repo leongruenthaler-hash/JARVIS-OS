@@ -145,6 +145,18 @@ def test_classify_domain_via_llm_none_label_returns_empty():
     assert jarvis.classify_domain_via_llm(llm, "wie geht es dir") == []
 
 
+def test_classify_domain_via_llm_prompt_contains_self_statement_example():
+    # Regressionstest fuer den Live-Bug: eine reine Selbstauskunft ("Ich lebe seit
+    # 18 Jahren in Amberg") wurde faelschlich als mail/calendar klassifiziert. Der
+    # Prompt muss ein explizites Gegenbeispiel enthalten (gleiche Haertungs-Technik
+    # wie beim News-Baustein).
+    llm = _FakeLLM("keine")
+    jarvis.classify_domain_via_llm(llm, "Ich lebe schon seit 18 Jahren in Amberg in Deutschland")
+    system_content = llm.last_messages[0]["content"]
+    assert "Amberg" in system_content
+    assert "keine" in system_content
+
+
 def test_classify_domain_via_llm_swallows_exceptions():
     class _BrokenLLM:
         def ask(self, *args, **kwargs):
