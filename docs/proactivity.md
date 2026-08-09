@@ -130,6 +130,38 @@ eigenen, standardmäßig **deaktivierten** Berechtigung `usage_patterns`
 `tests/test_proactivity_rules.py`) - insgesamt 138 Tests. Details:
 `plans/2026-08-08-jarvis-verhaltensmuster-erkennen.md`.
 
+**Nachtrag (2026-08-09):** echte macOS-Systembenachrichtigungen sind jetzt
+umgesetzt (siehe `plans/2026-08-09-jarvis-systembenachrichtigungen.md`) - rein
+SwiftUI-seitig, kein Backend-Code geändert, da `GET /api/proactivity/events`
+bereits alle nötigen Felder liefert. `AppState.refreshProactivityEvents()`
+(`JarvisApp/Sources/JarvisApp/Core/AppState.swift`) plant für jedes neue
+Ereignis zusätzlich zur bestehenden Chat-Nachricht eine lokale
+`UNNotificationRequest` - `dedup_key` dient dabei als Notification-Identifier,
+verhindert also doppelte Zustellung bei wiederholtem Polling auf dieselbe
+Weise, wie es auch Snooze/Dismiss schon nutzen.
+
+- **Ton nur bei `kritisch`** (z. B. wenig Speicherplatz, Termin startet
+  gleich) - alle anderen Prioritätsstufen bleiben lautlos.
+- **`.active`/`.passive` statt `.timeSensitive`/`.critical`:** Letztere
+  bräuchten ein von Apple genehmigtes Entitlement, das ohne zahlendes
+  Developer-Team (das Projekt ist ad hoc signiert, `CODE_SIGN_IDENTITY = "-"`)
+  nicht ausgestellt werden kann. `.active` ist die höchste realistisch
+  nutzbare Stufe hier.
+- **Berechtigung wird genau einmal angefragt** (`NotificationPermissionManager`,
+  neu, `JarvisApp/Sources/JarvisApp/Core/NotificationPermissionManager.swift`)
+  - beim ersten tatsächlichen Proactivity-Ereignis, nicht pauschal beim
+  App-Start. Eine Ablehnung wird dauerhaft respektiert, es wird nicht erneut
+  gefragt.
+- **Klick auf die Benachrichtigung** bringt Jarvis in den Vordergrund
+  (`JarvisAppDelegate` implementiert jetzt `UNUserNotificationCenterDelegate`,
+  `JarvisApp/Sources/JarvisApp/App/JarvisMacApp.swift`) - nutzt dieselbe
+  Aktivierungslogik wie ein normaler App-Start.
+- Als Nebeneffekt wurde dabei auch ein fehlendes App-Icon ergänzt (das Projekt
+  hatte bis dahin gar keinen Asset-Katalog, `ASSETCATALOG_COMPILER_APPICON_NAME`
+  war leer) - ein einfacher, funktionaler Platzhalter (`Assets.xcassets/
+  AppIcon.appiconset`), jederzeit später ohne Code-Änderung durch ein
+  finales Design ersetzbar.
+
 ## Wo Hinweise ankommen
 
 - `GET /api/proactivity/events` - wertet aus und markiert als gezeigt (mit
@@ -153,8 +185,6 @@ eigenen, standardmäßig **deaktivierten** Berechtigung `usage_patterns`
   nur über `config.json` (`proactivity_quiet_hours_start`/`_end`) steuerbar,
   wie die meisten anderen Zeitfenster-Einstellungen im Projekt
   (`background_mail_morning_time` etc.) auch nur über `config.json` laufen.
-- Keine macOS-Systembenachrichtigungen (`UNUserNotificationCenter`) - Hinweise
-  erscheinen aktuell nur als Chat-Nachricht, wenn die App offen ist.
 - Reisezeit vor einem Termin oder ein automatischer Abgleich mit aus Mails
   erkannten Terminvorschlägen (Baustein B aus
   `plans/2026-08-08-jarvis-proaktiver-wie-iron-man.md`) - bewusst nicht Teil

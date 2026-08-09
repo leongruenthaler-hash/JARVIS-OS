@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UserNotifications
 
 @main
 struct JarvisMacApp: App {
@@ -34,12 +35,36 @@ struct JarvisMacApp: App {
     }
 }
 
-final class JarvisAppDelegate: NSObject, NSApplicationDelegate {
+final class JarvisAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     weak var serverController: LocalServerController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         Self.activateJarvisWindow()
+        UNUserNotificationCenter.current().delegate = self
+    }
+
+    /// Klick auf eine Proactivity-Systembenachrichtigung bringt Jarvis in den
+    /// Vordergrund (siehe plans/2026-08-09-jarvis-systembenachrichtigungen.md) - nutzt
+    /// dieselbe Aktivierungslogik wie ein normaler App-Start/-Fokuswechsel.
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        Self.activateJarvisWindow()
+        completionHandler()
+    }
+
+    /// Ohne das würde macOS eine Benachrichtigung stillschweigend unterdrücken, solange
+    /// die App bereits im Vordergrund ist - genau dann soll sie aber trotzdem erscheinen
+    /// (die App im Vordergrund heißt nicht, dass der Chat-Verlauf gerade sichtbar ist).
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound, .badge])
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {

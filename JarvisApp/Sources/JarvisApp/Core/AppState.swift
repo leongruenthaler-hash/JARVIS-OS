@@ -2,6 +2,7 @@ import AppKit
 import AVFoundation
 import Foundation
 import SwiftUI
+import UserNotifications
 
 @MainActor
 final class AppState: ObservableObject {
@@ -174,13 +175,42 @@ final class AppState: ObservableObject {
         do {
             let events = try await serverController.proactivityEvents()
             proactiveEvents = events
-            for event in events where !shownProactiveEventIDs.contains(event.id) {
+            let newEvents = events.filter { !shownProactiveEventIDs.contains($0.id) }
+            guard !newEvents.isEmpty else { return }
+            for event in newEvents {
                 shownProactiveEventIDs.insert(event.id)
                 messages.append(ChatMessage(role: .system, text: "💡 \(event.message)"))
             }
+            await scheduleSystemNotifications(for: newEvents)
         } catch {
             // Best-effort - a failed proactivity poll must never surface as a user-facing
             // error the way a failed chat/voice action would.
+        }
+    }
+
+    /// Ergänzt die bestehende Chat-Nachricht um eine echte macOS-Systembenachrichtigung
+    /// (siehe plans/2026-08-09-jarvis-systembenachrichtigungen.md) - die Chat-Nachricht
+    /// bleibt die vollständige Historie, die Benachrichtigung ist nur der zusätzliche
+    /// "sofort sichtbar"-Kanal, auch wenn die App gerade nicht im Vordergrund ist. Fragt
+    /// die Berechtigung nur beim ersten tatsächlichen Ereignis an (nicht pauschal beim
+    /// App-Start) und respektiert eine einmal erteilte Ablehnung dauerhaft.
+    private func scheduleSystemNotifications(for events: [ProactiveEvent]) async {
+        let authorized = await NotificationPermissionManager.shared.requestAuthorizationIfNeeded()
+        guard authorized else { return }
+
+        let center = UNUserNotificationCenter.current()
+        for event in events {
+            let content = UNMutableNotificationContent()
+            content.title = "Jarvis"
+            content.body = event.message
+            content.interruptionLevel = (event.priority == "wichtig" || event.priority == "kritisch") ? .active : .passive
+            content.sound = event.priority == "kritisch" ? .default : nil
+
+            // dedup_key als Identifier: eine erneute Anfrage mit derselben ID ersetzt die
+            // vorhandene Benachrichtigung statt sie zu duplizieren (dieselbe Eindeutigkeits-
+            // Garantie, die der Server auch für Snooze/Dismiss verwendet).
+            let request = UNNotificationRequest(identifier: event.dedupKey, content: content, trigger: nil)
+            try? await center.add(request)
         }
     }
 
