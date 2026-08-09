@@ -47,6 +47,15 @@ def test_has_domain_fuzzy_multiword_terms_do_not_leak_stopword_fragments():
     assert has_domain_fuzzy("zeig mir bilder von rom", ("bilder von",)) is True
 
 
+def test_has_domain_fuzzy_single_word_term_requires_word_boundary():
+    assert has_domain_fuzzy("was siehst du auf meinem bildschirm", ("bild",)) is False
+    assert has_domain_fuzzy("zeig mir das bild", ("bild",)) is True
+
+
+def test_has_domain_fuzzy_multiword_term_still_uses_plain_substring():
+    assert has_domain_fuzzy("kannst du das e mail machen", ("e mail",)) is True
+
+
 def test_levenshtein_distance_basic():
     assert levenshtein_distance("mail", "mail") == 0
     assert levenshtein_distance("mail", "meil") == 1
@@ -82,6 +91,23 @@ def test_has_domain_does_not_false_positive_on_common_filler_word():
 def test_has_domain_existing_multiword_phrases_still_work():
     assert jarvis.has_domain("erinnere mich an den zahnarzt", "calendar") is True
     assert jarvis.has_domain("zeig mir bilder von rom", "photos") is True
+
+
+def test_has_domain_single_word_term_no_longer_matches_as_substring_of_longer_word():
+    # Regressionsfall aus dem Testlauf auf dem echten Mac: "bild" ist ein
+    # Domaenen-Stichwort fuer "photos" und war zugleich ein Teilstring von
+    # "bildschirm" - jede Bildschirm-Anfrage wurde dadurch faelschlich als
+    # Fotos-Anfrage erkannt (hat sogar echte Fotos in einen Ordner kopiert statt
+    # einen Screenshot zu machen). Einzelwort-Begriffe zaehlen jetzt nur noch als
+    # eigenstaendiges Wort.
+    assert jarvis.has_domain("was siehst du auf meinem bildschirm", "photos") is False
+    assert jarvis.has_domain("was siehst du auf meinem bildschirm", "screen") is True
+    assert jarvis.has_domain("mach einen screenshot von meinem bildschirm", "photos") is False
+
+
+def test_has_domain_single_word_term_still_matches_as_standalone_word():
+    assert jarvis.has_domain("zeig mir das bild", "photos") is True
+    assert jarvis.has_domain("zeig mir meine bilder", "photos") is True
 
 
 # --- Stufe 2: LLM-Klassifikation als Sicherheitsnetz ------------------------

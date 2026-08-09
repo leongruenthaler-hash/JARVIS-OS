@@ -22,6 +22,7 @@ _PLANNER_DOMAINS = {
     "files": "Dateien und Schreibtisch",
     "music": "Apple Music",
     "contacts": "Kontakte und Anrufe",
+    "tasks": "interne Aufgabenliste (nur lesen)",
 }
 
 _JSON_ARRAY_PATTERN = re.compile(r"\[.*\]", re.DOTALL)

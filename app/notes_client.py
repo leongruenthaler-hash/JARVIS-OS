@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import re
 import subprocess
+from datetime import datetime
 
 
 class NotesAccessError(RuntimeError):
@@ -111,13 +112,61 @@ def append_to_note(title: str, text: str, folder_name: str | None = None) -> str
     return f"Notiz aktualisiert: {title}"
 
 
-def _run_applescript(script: str):
+def list_recent_notes(limit: int = 5) -> list[dict]:
+    """Liest Titel + Änderungsdatum aller Notizen ueber alle Accounts/Ordner (kein
+    Textinhalt - reine Uebersicht, siehe handle_notes_command in jarvis.py, das
+    bisher gar keinen Lese-Pfad hatte und jede Lese-Anfrage faelschlich in den
+    Erstellen-Flow laufen liess). Zahlen statt formatiertem Datumstext, dieselbe
+    Technik wie calendar_client.py::_build_datetime() - sprachunabhaengig, kein
+    fragiles String-Parsing eines lokal formatierten AppleScript-Datums noetig."""
+    script = """
+    tell application "Notes"
+        set output to {}
+        repeat with accountRef in accounts
+            repeat with folderRef in folders of accountRef
+                repeat with noteRef in notes of folderRef
+                    set noteTitle to name of noteRef as string
+                    set modDate to modification date of noteRef
+                    set y to year of modDate as string
+                    set mo to (month of modDate as integer) as string
+                    set d to day of modDate as string
+                    set h to hours of modDate as string
+                    set mi to minutes of modDate as string
+                    set end of output to noteTitle & "\t" & y & "\t" & mo & "\t" & d & "\t" & h & "\t" & mi
+                end repeat
+            end repeat
+        end repeat
+        set AppleScript's text item delimiters to return
+        set outputText to output as string
+        set AppleScript's text item delimiters to ""
+        return outputText
+    end tell
+    """
+    raw = _run_applescript(script, timeout=25, capture=True) or ""
+
+    notes: list[dict] = []
+    for line in raw.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 6:
+            continue
+        title, year, month, day, hour, minute = parts
+        try:
+            modified = datetime(int(year), int(month), int(day), int(hour), int(minute))
+        except ValueError:
+            continue
+        notes.append({"title": title, "modified": modified})
+
+    notes.sort(key=lambda note: note["modified"], reverse=True)
+    return notes[:limit]
+
+
+def _run_applescript(script: str, *, timeout: int = 12, capture: bool = False):
     try:
         result = subprocess.run(
             ["osascript", "-e", script],
             capture_output=True,
             text=True,
-            timeout=12,
+            timeout=timeout,
         )
     except subprocess.TimeoutExpired:
         raise NotesAccessError(
@@ -125,7 +174,7 @@ def _run_applescript(script: str):
         )
 
     if result.returncode == 0:
-        return
+        return result.stdout.strip() if capture else None
 
     error_text = (result.stderr or result.stdout).strip()
     lowered_error = error_text.lower()

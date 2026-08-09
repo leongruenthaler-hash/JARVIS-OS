@@ -1839,6 +1839,16 @@ class JarvisLocalServer:
                         answer = self._finalize_answer(core, question, answer)
                         return str(answer)
 
+                # Aufgaben (task_manager.py) liegen rein in Jarvis' eigenem Speicher,
+                # keine macOS-Berechtigung noetig - anders als Notizen/Kalender/Mail
+                # also kein ensure_privacy_domain_permission()-Gate davor.
+                tasks_handler = getattr(core, "handle_tasks_command", None)
+                if tasks_handler is not None:
+                    answer = tasks_handler(memory, question)
+                    if answer is not None:
+                        answer = self._finalize_answer(core, question, answer)
+                        return str(answer)
+
                 calendar_permission = None
                 if core.has_domain(question, "calendar") or core.looks_like_calendar_query(question):
                     calendar_permission = core.ensure_privacy_domain_permission(memory, "calendar", "Jarvis würde Kalenderdaten verwenden.")

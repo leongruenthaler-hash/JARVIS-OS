@@ -92,7 +92,7 @@ from music_client import (
     play_search,
     previous_track,
 )
-from notes_client import NotesAccessError, append_to_note, create_note
+from notes_client import NotesAccessError, append_to_note, create_note, list_recent_notes
 from permission_manager import PermissionManager
 from privacy_dashboard import PrivacyDashboard
 from privacy_logger import PrivacyLogger
@@ -715,6 +715,15 @@ DOMAIN_TERMS = {
         "rufe",
         "telefonier",
         "telefoniere",
+    ),
+    "tasks": (
+        "aufgabe",
+        "aufgaben",
+        "aufgabenliste",
+        "to do",
+        "todo",
+        "todos",
+        "offene aufgaben",
     ),
 }
 
@@ -2396,7 +2405,7 @@ def handle_pending_note_flow(memory: Memory, text: str) -> str | None:
     return None
 
 
-_DOMAIN_CLARIFICATION_LABELS = ("mail", "calendar", "notes", "files", "photos", "screen", "contacts", "music")
+_DOMAIN_CLARIFICATION_LABELS = ("mail", "calendar", "notes", "files", "photos", "screen", "contacts", "music", "tasks")
 
 
 def classify_domain_via_llm(llm: LLMClient, question: str) -> list[str]:
@@ -2444,6 +2453,7 @@ _DOMAIN_CLARIFICATION_PHRASES = {
     "screen": "deinen Bildschirm",
     "contacts": "deine Kontakte",
     "music": "die Musik",
+    "tasks": "deine Aufgaben",
 }
 
 
@@ -2504,6 +2514,8 @@ def _dispatch_confirmed_domain(
 
     if domain == "notes":
         return handle_notes_command(memory, question)
+    if domain == "tasks":
+        return handle_tasks_command(memory, question)
     if domain == "calendar":
         return handle_calendar_command(question, memory=memory)
     if domain == "files":
@@ -3015,6 +3027,57 @@ def handle_pending_action_flow(
     return None
 
 
+_NOTES_READ_TRIGGERS = (
+    "zeig mir",
+    "zeig",
+    "zeige",
+    "welche notiz",
+    "welche notizen",
+    "was steht in",
+    "was steht meinen",
+    "liste meine notizen",
+    "liste der notizen",
+    "übersicht",
+    "uebersicht",
+    "meine notizen",
+    "letzten notizen",
+    "letzte notiz",
+)
+
+_NOTES_CREATE_VERBS = (
+    "erstelle",
+    "erstell",
+    "mach",
+    "mache",
+    "schreib",
+    "schreibe",
+    "notiere",
+    "leg an",
+    "lege an",
+    "neue notiz",
+    "füge",
+    "fuege",
+    "hinzufügen",
+    "hinzufuegen",
+    "ergänze",
+    "ergaenze",
+)
+
+
+def _looks_like_notes_read_request(text: str) -> bool:
+    """Erkennt eine Lese-/Uebersichts-Anfrage ("was steht in meinen Notizen",
+    "zeig mir meine Notizen"), damit handle_notes_command() sie nicht mehr
+    faelschlich in den Erstellen-Flow laufen laesst (bisher gab es dafuer gar
+    keinen Pfad - jede Notizen-Anfrage ohne erkennbaren Titel fragte "Wie soll
+    die Notiz heissen?", auch reine Lese-Fragen). Erstell-Verben haben Vorrang,
+    damit z.B. "erstelle eine notiz ueber meine notizen" weiterhin als Erstellen
+    erkannt wird."""
+    normalized = normalize_text(text)
+    if any(verb in normalized for verb in _NOTES_CREATE_VERBS):
+        return False
+    return any(trigger in normalized for trigger in _NOTES_READ_TRIGGERS)
+
+
 def handle_notes_command(memory: Memory, text: str) -> str | None:
     if not NOTES_ENABLED:
         return None
@@ -3025,6 +3088,18 @@ def handle_notes_command(memory: Memory, text: str) -> str | None:
 
     if any(term in normalized for term in ("zugriff", "funktioniert", "status")):
             return "Notizen sind aktiv. Ich kann neue machen und alte füttern."
+
+    if _looks_like_notes_read_request(text):
+        try:
+            notes = list_recent_notes(limit=5)
+        except NotesAccessError as exc:
+            return str(exc)
+        if not notes:
+            return "Ich habe keine Notizen gefunden."
+        items = "; ".join(
+            f"{note['title']} ({note['modified'].strftime('%d.%m.%Y')})" for note in notes
+        )
+        return f"Deine letzten Notizen: {items}."
 
     title = extract_note_title(text)
     body = extract_note_body(text)
@@ -3057,6 +3132,39 @@ def handle_notes_command(memory: Memory, text: str) -> str | None:
         return f"Was kommt in {title} rein?"
 
     return save_note_or_append(title, body, append=append)
+
+
+_TASKS_PRIORITY_LABELS = {"hoch": "hoch", "mittel": "mittel", "niedrig": "niedrig"}
+
+
+def handle_tasks_command(memory: Memory, text: str) -> str | None:
+    """Bisher hatten interne Aufgaben (task_manager.py, getrennt von Apple
+    Reminders) ueberhaupt keinen per Chat erreichbaren Lese-Pfad - eine Frage wie
+    "was habe ich fuer offene Aufgaben" fiel komplett durch die Domaenen-Kette und
+    landete im werkzeuglosen Chat, der dann frei erfundene, nicht mit den echten
+    (leeren oder gefuellten) Aufgaben uebereinstimmende Antworten gab. Rein lesend -
+    Aufgaben werden weiterhin nur ueber die App-Oberflaeche oder explizite
+    Backend-Aufrufe angelegt/geaendert, nicht ueber diesen Chat-Pfad."""
+    if not has_domain(text, "tasks"):
+        return None
+
+    tasks = TaskManager(memory).list_tasks(status="offen") + TaskManager(memory).list_tasks(status="in_arbeit")
+    if not tasks:
+        return "Du hast aktuell keine offenen Aufgaben."
+
+    items = []
+    for task in tasks[:8]:
+        title = str(task.get("title") or "").strip() or "Ohne Titel"
+        priority = _TASKS_PRIORITY_LABELS.get(str(task.get("priority") or ""), "")
+        suffix = f" ({priority})" if priority and priority != "mittel" else ""
+        items.append(f"{title}{suffix}")
+
+    summary = "; ".join(items)
+    remaining = len(tasks) - len(items)
+    if remaining > 0:
+        summary += f"; und {remaining} weitere" if remaining > 1 else "; und 1 weitere"
+
+    return f"Deine offenen Aufgaben: {summary}."
 
 
 def save_note_or_append(title: str, body: str, append: bool = False) -> str:
@@ -5512,6 +5620,13 @@ def main():
                 record_exchange(memory, question, notes_answer)
                 print(f"\nJARVIS: {console_text(notes_answer, 'answer')}")
                 speak(notes_answer, voice=voice)
+                continue
+
+            tasks_answer = handle_tasks_command(memory, question)
+            if tasks_answer is not None:
+                record_exchange(memory, question, tasks_answer)
+                print(f"\nJARVIS: {console_text(tasks_answer, 'answer')}")
+                speak(tasks_answer, voice=voice)
                 continue
 
             calendar_permission = None

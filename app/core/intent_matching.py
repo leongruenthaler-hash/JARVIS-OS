@@ -111,20 +111,33 @@ def fuzzy_word_match(word: str, candidates: tuple[str, ...], *, max_distance: in
 
 def has_domain_fuzzy(text: str, terms: tuple[str, ...], *, max_distance: int = 2) -> bool:
     """Prueft, ob eine (bereits normalisierte) Anfrage zu einer Domaene passt -
-    kombiniert einen schnellen exakten Teilstring-Check (deckt Mehrwort-Begriffe
-    wie "e mail" zuverlaessig ab) mit einem Wort-fuer-Wort-Fuzzy-Vergleich (faengt
+    kombiniert einen schnellen exakten Treffer (deckt Mehrwort-Begriffe wie
+    "e mail" per Teilstring zuverlaessig ab, Einzelwort-Begriffe nur als
+    eigenstaendiges Wort) mit einem Wort-fuer-Wort-Fuzzy-Vergleich (faengt
     Tippfehler/Verhaspler/Spracherkennungs-Fehler bei Einzelwoertern ab)."""
     if not text:
         return False
 
-    # Schneller Pfad: exakter Teilstring-Treffer, wie bisher - deckt Mehrwort-
-    # Begriffe ab, bei denen ein Wort-fuer-Wort-Vergleich nichts finden wuerde.
-    if any(term in text for term in terms):
-        return True
-
     words = text.split()
     if not words:
         return False
+
+    # Schneller Pfad: exakter Treffer. Mehrwort-Begriffe bleiben ein echter
+    # Teilstring-Check (Wortgrenzen spielen innerhalb einer Phrase keine Rolle).
+    # Einzelwort-Begriffe zaehlen dagegen nur noch als EIGENSTAENDIGES Wort, nicht
+    # mehr als Teilstring eines laengeren Wortes - sonst faengt z.B. der Fotos-
+    # Begriff "bild" jede "bildschirm"-Anfrage ab, bevor die Screen-Domaene
+    # ueberhaupt geprueft wird (in der Praxis so aufgefallen: "was siehst du auf
+    # meinem Bildschirm" wurde als Fotos-Anfrage beantwortet).
+    word_set = set(words)
+    for term in terms:
+        if not term:
+            continue
+        if " " in term:
+            if term in text:
+                return True
+        elif term in word_set:
+            return True
 
     # NUR Terme, die selbst schon ein einzelnes Wort sind, werden fuzzy verglichen.
     # Mehrwort-Begriffe (z.B. "bilder von", "erinnere mich", "was siehst du gerade")

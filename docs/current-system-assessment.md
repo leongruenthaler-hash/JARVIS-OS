@@ -451,3 +451,54 @@ Telefonnummer beim Anrufen) wird beim Ketten-Fortsetzen per
 `waiting_on_key`-Umleitung auf `pending_call_contact` mitbehandelt, aber
 nicht gesondert getestet — seltener Randfall innerhalb eines ohnehin schon
 seltenen Mehrschritt-Kontakt-Schritts.
+
+## 19. Drei Bugs aus einem Live-Test auf dem echten Mac behoben (2026-08-09)
+
+Nach den Bausteinen A–E und den Systembenachrichtigungen wurde die laufende
+App auf dem echten Mac (nicht nur mit synthetischen Tests) durchgetestet -
+über `/api/chat` mit echten, sicheren Lese-Anfragen an jede Domäne. Dabei
+fielen drei echte Bugs auf, alle noch am selben Tag behoben:
+
+1. **"Bildschirm"-Anfragen wurden von der Fotos-Domäne abgefangen.**
+   Root Cause: `has_domain_fuzzy()` (`app/core/intent_matching.py`) prüfte
+   Einzelwort-Begriffe bisher per reinem Python-Teilstring-Check
+   (`term in text`) - "bild" ist ein Fotos-Stichwort und zugleich ein
+   Teilstring von "bildschirm", das Wort wurde also nie erreicht, bevor die
+   Fotos-Domäne (die vor der Screen-Domäne geprüft wird) schon zugeschlagen
+   hatte. Im Test hat das tatsächlich eine echte Aktion ausgelöst: "Mach
+   einen Screenshot von meinem Bildschirm" hat 13 echte Fotos in einen neuen
+   Ordner auf dem Schreibtisch kopiert, statt einen Screenshot zu machen
+   (nur kopiert, nicht verschoben - die Fotomediathek blieb unangetastet).
+   **Fix:** Einzelwort-Begriffe zählen jetzt nur noch als eigenständiges Wort
+   (Wortgrenzen-Check über eine Menge der Text-Wörter), nicht mehr als
+   Teilstring eines längeren Wortes. Mehrwort-Begriffe (z. B. "e mail",
+   "bilder von") bleiben unverändert ein echter Teilstring-Check, da dort
+   Wortgrenzen innerhalb der Phrase keine Rolle spielen.
+2. **Notizen konnten nicht gelesen werden.** `handle_notes_command()` hatte
+   überhaupt keinen Lese-Pfad - jede Anfrage ohne erkennbaren Notiz-Titel
+   (auch reine Fragen wie "was steht in meinen Notizen") landete im
+   Erstellen-Flow ("Wie soll die Notiz heißen?"). **Fix:** neue
+   `list_recent_notes()` in `app/notes_client.py` (liest Titel +
+   Änderungsdatum aller Notizen über alle Accounts/Ordner per AppleScript,
+   numerische Datumsfelder statt formatiertem Text - dieselbe Technik wie
+   `calendar_client.py::_build_datetime()`); `handle_notes_command()` erkennt
+   jetzt zuerst eine Lese-Absicht (Trigger-Wörter wie "zeig mir"/"was steht
+   in"/"welche notizen", Erstell-Verben haben Vorrang) und beantwortet sie
+   mit den letzten 5 Notizen statt in den Erstellen-Flow zu fallen.
+3. **Aufgaben (`task_manager.py`) waren per Chat komplett unerreichbar.**
+   "Was habe ich für offene Aufgaben?" fiel durch die gesamte Domänen-Kette
+   und landete im werkzeuglosen Chat, der eine frei erfundene, plausibel
+   klingende, aber falsche Antwort gab (statt "keine Aufgaben" bei
+   tatsächlich leerer Liste). **Fix:** neue neunte Domäne `"tasks"`
+   (`DOMAIN_TERMS`, `_DOMAIN_CLARIFICATION_LABELS`/`_PHRASES`,
+   `multistep_planner.py::_PLANNER_DOMAINS`) mit neuem
+   `handle_tasks_command()` - rein lesend, kein Berechtigungs-Gate nötig
+   (Aufgaben liegen nur in Jarvis' eigenem Speicher, keine macOS-API
+   beteiligt). In beiden Produktionspfaden (`local_server.py`, `jarvis.py::
+   main()`) sowie in `_dispatch_confirmed_domain()` (Stufe-2-Rückfrage)
+   verdrahtet.
+
+15 neue Tests (`tests/test_domain_matching.py` erweitert,
+`tests/test_notes_and_tasks.py` neu) - insgesamt 171 Tests. Alle drei Fixes
+zusätzlich live gegen die echte laufende App auf dem Mac verifiziert (echte
+Notes.app, echte Aufgaben-Speicherung), nicht nur mit synthetischen Tests.
