@@ -1025,6 +1025,78 @@ def should_skip_auto_memory(text: str) -> bool:
     return True
 
 
+_MEMORY_CANDIDATE_QUESTION_STARTS = (
+    "was ",
+    "wer ",
+    "wie ",
+    "wo ",
+    "wann ",
+    "warum ",
+    "wieso ",
+    "welche ",
+    "welcher ",
+    "welches ",
+    "kannst du",
+    "könntest du",
+    "koenntest du",
+    "würdest du",
+    "wuerdest du",
+    "hast du",
+    "bist du",
+    "gibt es",
+    "ist es",
+)
+
+_MEMORY_CANDIDATE_REQUEST_STARTS = (
+    "gib mir",
+    "sag mir",
+    "zeig mir",
+    "erzähl mir",
+    "erzaehl mir",
+    "erklär mir",
+    "erklaer mir",
+)
+
+# Eine Selbstauskunft sollte wie eine Aussage klingen (ein passendes Verb enthalten),
+# nicht nur zufaellig "ich"/"mein" irgendwo im Satz haben - sonst loest z.B.
+# "kannst du mir helfen, ich verstehe das nicht" unnoetig einen LLM-Aufruf aus, obwohl
+# da gar kein dauerhafter Fakt drinsteckt. Live beim News-Baustein gelernt: der
+# eigentliche Hebel gegen Uebertreibung ist ein schaerferer Vorfilter, nicht nur eine
+# Anweisung im Prompt.
+_MEMORY_CANDIDATE_STATEMENT_VERBS = (
+    "bin",
+    "habe",
+    "hab",
+    "mag",
+    "mochte",
+    "möchte",
+    "moechte",
+    "heiße",
+    "heisse",
+    "wohne",
+    "arbeite",
+    "studiere",
+    "fahre",
+    "spiele",
+    "interessiere",
+    "liebe",
+    "hasse",
+    "trinke",
+    "esse",
+    "nutze",
+    "verwende",
+    "bevorzuge",
+    "brauche",
+    "plane",
+    "wünsche",
+    "wuensche",
+    "ist",
+    "sind",
+    "war",
+    "waren",
+)
+
+
 def looks_like_memory_candidate(text: str) -> bool:
     normalized = normalize_text(strip_wake_word_from_text(text))
     if len(normalized) < 12:
@@ -1033,11 +1105,17 @@ def looks_like_memory_candidate(text: str) -> bool:
         return False
     if normalized.startswith(TRANSIENT_STARTS):
         return False
+    if normalized.endswith("?") or normalized.startswith(_MEMORY_CANDIDATE_QUESTION_STARTS):
+        return False
+    if normalized.startswith(_MEMORY_CANDIDATE_REQUEST_STARTS):
+        return False
     if not should_skip_auto_memory(text):
         return True
 
     self_reference_markers = ("ich ", "mein ", "meine ", "meiner ", "meinen ", "meinem ")
-    return any(marker in normalized for marker in self_reference_markers)
+    if not any(marker in normalized for marker in self_reference_markers):
+        return False
+    return any(verb in normalized for verb in _MEMORY_CANDIDATE_STATEMENT_VERBS)
 
 
 def clean_memory_subject(text: str) -> str:
@@ -1230,14 +1308,31 @@ SENSITIVE_FACT_MARKERS = (
 
 
 def _build_memory_extraction_messages(user_text: str, user_name: str) -> list[dict[str, str]]:
+    # Beispiele im Prompt statt nur einer abstrakten Anweisung - dieselbe Lehre wie
+    # beim News-Wichtigkeits-Filter (plans/2026-08-09-jarvis-news-baustein.md): ein
+    # kleines lokales Modell haelt sich an "im Zweifel: false" viel zuverlaessiger,
+    # wenn es konkrete Positiv-/Negativ-Beispiele sieht, statt nur eine Regel zu lesen.
     system = (
         "Du bist ein striktes Extraktions-Werkzeug, kein Assistent. Analysiere NUR die folgende "
         f"Nutzeraussage von {user_name} und entscheide, ob sie einen dauerhaften, persönlichen Fakt "
         f"ÜBER {user_name} SELBST enthält (nicht über andere, namentlich genannte Personen).\n"
         "Speichere NIEMALS: Gesundheits- oder Krankheitsdetails, Finanz- oder Kontodaten, Beträge, "
         "Passwörter, Aussagen primär über eine andere Person, oder einmalige/flüchtige Ereignisse "
-        "und Beschwerden.\n"
-        f"Falls ja, formuliere den Fakt als kurzen, neutralen Satz, der mit '{user_name}' beginnt.\n"
+        "und Beschwerden.\n\n"
+        "Beispiele:\n"
+        '- "Ich trinke morgens immer erst einen Kaffee, bevor ich irgendwas mache" -> '
+        f'{{"has_fact": true, "fact": "{user_name} trinkt morgens als erstes einen Kaffee."}}\n'
+        '- "Ich wohne seit letztem Jahr in Berlin" -> '
+        f'{{"has_fact": true, "fact": "{user_name} wohnt in Berlin."}}\n'
+        '- "Kannst du mir kurz sagen, wie spät es ist?" -> {"has_fact": false, "fact": null} '
+        "(eine Frage, keine Selbstauskunft)\n"
+        '- "Ich habe gerade versucht, die Datei zu öffnen, aber es hat nicht geklappt" -> '
+        '{"has_fact": false, "fact": null} (ein einmaliges, flüchtiges Ereignis, kein dauerhafter '
+        "Fakt)\n"
+        '- "Mein Bruder hat morgen Geburtstag" -> {"has_fact": false, "fact": null} '
+        f"(handelt primär von einer anderen Person, nicht von {user_name} selbst)\n\n"
+        f"Falls die Aussage tatsächlich einen dauerhaften Fakt über {user_name} enthält, formuliere "
+        f"ihn als kurzen, neutralen Satz, der mit '{user_name}' beginnt.\n"
         'Antworte NUR mit kompaktem JSON, ohne weiteren Text: {"has_fact": true, "fact": "..."} '
         'oder {"has_fact": false, "fact": null}. Im Zweifel: has_fact=false.'
     )
@@ -1247,6 +1342,9 @@ def _build_memory_extraction_messages(user_text: str, user_name: str) -> list[di
     ]
 
 
+_JSON_OBJECT_PATTERN = re.compile(r"\{.*\}", re.DOTALL)
+
+
 def _parse_llm_fact_response(raw: str) -> str | None:
     cleaned = str(raw or "").strip()
     cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
@@ -1254,8 +1352,21 @@ def _parse_llm_fact_response(raw: str) -> str | None:
 
     try:
         data = json.loads(cleaned)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Auto-Memory LLM-Antwort ist kein valides JSON: {exc}") from exc
+    except json.JSONDecodeError:
+        # Live beim Testen aufgefallen: das kleine lokale Modell haelt sich trotz
+        # strikter Anweisung ("Antworte NUR mit JSON") nicht immer daran und stellt
+        # z.B. noch einen erklaerenden Satz davor/danach. Gleiche Rettungs-Technik wie
+        # in core/multistep_planner.py::_extract_json_array() - das erste
+        # JSON-Objekt im Text heraussuchen, statt die ganze Antwort sofort zu
+        # verwerfen. Schlaegt AUCH das fehl, bleibt es beim sicheren Fehlschlagen
+        # (kein Fakt wird gespeichert) statt zu raten.
+        match = _JSON_OBJECT_PATTERN.search(cleaned)
+        if not match:
+            raise ValueError("Auto-Memory LLM-Antwort ist kein valides JSON.")
+        try:
+            data = json.loads(match.group(0))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Auto-Memory LLM-Antwort ist kein valides JSON: {exc}") from exc
 
     if not isinstance(data, dict) or "has_fact" not in data:
         raise ValueError("Auto-Memory LLM-Antwort hat nicht die erwartete Form.")

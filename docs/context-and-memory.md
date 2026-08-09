@@ -141,3 +141,51 @@ aktiv - Verhalten bleibt wie zuvor, bis der Nutzer das bewusst umstellt.
   löscht sie bewusst in der Gedächtnis-Ansicht).
 - `related_entities` ist im Schema vorbereitet, aber ungenutzt - kein
   Beziehungsgraph in dieser Phase.
+
+## LLM-gestützte Gedächtnis-Extraktion aktiviert (2026-08-09)
+
+Siehe `plans/2026-08-09-jarvis-gedaechtnis-llm-extraktion.md`. Neben der
+regelbasierten Fakten-Erkennung (`extract_auto_memory_facts()`, feste
+Satzmuster wie "ich bin...") gibt es jetzt einen zweiten, LLM-gestützten Weg
+(`auto_memory_llm_extraction_enabled: true`), der auch beiläufig, nicht
+exakt vorformuliert erzählte Selbstauskünfte erkennt - läuft nur, wenn die
+Regex nichts gefunden hat.
+
+- **Auslöse-Filter geschärft** (`looks_like_memory_candidate()`): vorher
+  reichte praktisch jeder Satz mit "ich"/"mein". Jetzt: keine Fragen
+  (Fragezeichen oder Fragewort-Anfang), keine Bitten ("gib mir"/"sag mir"/
+  ...), und die Selbstauskunft muss ein passendes Aussage-Verb enthalten
+  (bin/habe/wohne/arbeite/mag/...). Reduziert unnötige LLM-Aufrufe deutlich,
+  ohne echte Kandidaten zu verlieren.
+- **Extraktions-Prompt um Beispiele ergänzt** (`_build_memory_extraction_
+  messages()`) - dieselbe Lehre wie beim News-Wichtigkeits-Filter
+  (`plans/2026-08-09-jarvis-news-baustein.md`): ein kleines lokales Modell
+  hält sich an "im Zweifel: false" viel zuverlässiger mit konkreten
+  Positiv-/Negativ-Beispielen als nur mit einer abstrakten Regel.
+- **JSON-Antwort-Parsing robuster gemacht** (`_parse_llm_fact_response()`):
+  live beim Testen aufgefallen, dass das Modell trotz strikter Anweisung
+  gelegentlich noch erklärenden Text vor/nach dem JSON stellt - ein
+  Regex-Fallback sucht jetzt das erste JSON-Objekt im Text heraus, statt die
+  Antwort sofort zu verwerfen (gleiche Technik wie in `core/multistep_
+  planner.py::_extract_json_array()`). Schlägt auch das fehl, bleibt es
+  beim sicheren Fehlschlagen (kein Fakt wird gespeichert), nie beim Raten.
+- **Sicherheitsnetz unverändert:** LLM-erkannte Fakten werden - anders als
+  der Regex-Pfad - immer mit `status: "pending_confirmation"` gespeichert,
+  nie automatisch als bestätigt übernommen. Der Nutzer sieht und bestätigt/
+  lehnt jeden Fund in der Gedächtnis-Ansicht selbst ab.
+- **Bekannte Grenze, beim Testen live beobachtet:** die Extraktion kann den
+  *Inhalt* eines Fakts gelegentlich falsch wiedergeben (Halluzination),
+  auch wenn die Ja/Nein-Entscheidung selbst richtig war (Beispiel: "Ich
+  trinke am liebsten Kaffee ohne Zucker" wurde einmal als "bevorzugt
+  koffeinhaltigen Tee" gespeichert). Genau dafür ist `pending_confirmation`
+  da - kein Fakt gilt, bevor der Nutzer ihn bestätigt hat.
+- **Kosten/Performance:** jeder LLM-Aufruf läuft lokal (respektiert
+  `force_local`/Privater Modus wie jeder andere Aufruf), fügt aber spürbare
+  zusätzliche Wartezeit hinzu, wenn das lokale Modell bereits ausgelastet
+  ist (beim Testen auf diesem Rechner teils mehrere Sekunden pro
+  Extraktions-Versuch, zusätzlich zur eigentlichen Chat-Antwort).
+
+32 neue Tests (`tests/test_memory_llm_extraction.py`, neu) - insgesamt 242.
+Live auf dem echten Mac verifiziert: ein echter, unaufgefordert erzählter
+Satz ("Ich wohne seit letztem Jahr in Berlin") landete korrekt als
+unbestätigter Fakt im echten Gedächtnis.
