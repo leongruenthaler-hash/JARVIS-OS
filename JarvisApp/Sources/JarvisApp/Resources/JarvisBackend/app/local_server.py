@@ -18,6 +18,7 @@ import numpy as np
 
 from audio_stream import StreamingAudioListener, warm_audio_pipeline
 from background_tasks import MailBackgroundWorker
+from news_background_worker import NewsBackgroundWorker
 from calendar_client import events_on_date, list_open_reminders, list_upcoming_calendar_items
 from data_dir import data_root
 from fast_intent_router import FastIntentRouter
@@ -185,6 +186,7 @@ class JarvisLocalServer:
         self._audio_listener_lock = threading.Lock()
         self._tts_speaking = threading.Event()
         self.mail_worker = None
+        self.news_worker = None
         self.photo_worker = None
         self.pending_mail_followup = False
         self._mail_scan_status_path = ROOT / "memory" / "mail_scan_status.json"
@@ -1065,6 +1067,12 @@ class JarvisLocalServer:
             self.mail_worker.start()
         return self.mail_worker
 
+    def _ensure_news_worker(self) -> NewsBackgroundWorker:
+        if self.news_worker is None:
+            self.news_worker = NewsBackgroundWorker(self.config, self.llm)
+            self.news_worker.start()
+        return self.news_worker
+
     def pending_calendar_actions(self) -> dict[str, Any]:
         return {"actions": self._ensure_mail_worker().pending_calendar_actions()}
 
@@ -1125,6 +1133,20 @@ class JarvisLocalServer:
             except Exception:
                 pass
 
+        # Baustein "Wichtige Nachrichten", siehe
+        # plans/2026-08-09-jarvis-news-baustein.md - nur lesen, wenn die
+        # "internet"-Berechtigung bereits erteilt ist, exakt wie bei den anderen
+        # Bloecken oben: Proaktivitaet darf nie der erste stille Ausloeser fuer
+        # einen noch nicht erteilten Zugriff sein. drain_important_news() leert
+        # die Warteliste beim Lesen - jede Meldung wird also genau einmal
+        # weitergereicht, nicht bei jedem Poll erneut.
+        important_news: list[dict[str, Any]] = []
+        if self.permissions.is_allowed("internet"):
+            try:
+                important_news = self._ensure_news_worker().drain_important_news()
+            except Exception:
+                pass
+
         return {
             "config": self.config,
             "pending_calendar_actions": pending_calendar_actions,
@@ -1132,6 +1154,7 @@ class JarvisLocalServer:
             "pending_confirmation_facts": pending_confirmation_facts,
             "upcoming_calendar_events": upcoming_calendar_events,
             "recurring_usage_patterns": recurring_usage_patterns,
+            "important_news": important_news,
         }
 
     def proactivity_events(self) -> dict[str, Any]:

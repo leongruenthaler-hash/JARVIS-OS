@@ -156,5 +156,9 @@
     "proactivity_calendar_event_soon_minutes": 15,
     "proactivity_calendar_lookahead_hours": 6,
     "proactivity_pattern_min_weeks": 3,
-    "proactivity_pattern_lookback_weeks": 4
+    "proactivity_pattern_lookback_weeks": 4,
+    "news_enabled": true,
+    "news_rss_feed_url": "https://correctiv.org/feed/",
+    "news_check_interval_minutes": 240,
+    "news_max_headlines_per_check": 15
 }

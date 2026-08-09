@@ -51,6 +51,7 @@ Ablauf pro Aufruf:
 | `calendar_events_overlap` | relevant | Zwei Termine innerhalb von `proactivity_calendar_lookahead_hours` (Standard 6h) überschneiden sich zeitlich |
 | `mail_matches_upcoming_event` | relevant | Absendername einer neuen Mail passt zum Titel eines anstehenden Termins (Baustein B, "Connect the dots") |
 | `recurring_usage_pattern` | information | Dieselbe Anfrage-Kategorie kam an ≥`proactivity_pattern_min_weeks` (Standard 3) der letzten `proactivity_pattern_lookback_weeks` (Standard 4) Kalenderwochen zum selben Wochentag/derselben Tageszeit vor (Baustein D) |
+| `important_news` | wichtig | Neue, als wichtig eingestufte Meldung(en) von CORRECTIV seit dem letzten Check |
 
 **Nachtrag (2026-08-08):** "Termin beginnt bald" und "zwei Termine
 überschneiden sich" sind jetzt umgesetzt, siehe
@@ -190,10 +191,50 @@ derselben Sprachausgabe, die auch normale Chat-Antworten vorliest
   `low_disk_space`-Ereignis kam beim App-Start an, direkt danach lief eine
   Audiowiedergabe an.
 
-**Zurückgestellt, als eigener Folge-Baustein geplant:** echte Nachrichten/
-News-Anbindung ("sehr wichtige Inhalte" proaktiv ansagen) - braucht eine
-Nachrichtenquelle und eine neue Proactivity-Regel, bewusst nicht Teil dieses
-Plans.
+**Nachtrag (2026-08-09): Baustein "Wichtige Nachrichten" umgesetzt.** Siehe
+`plans/2026-08-09-jarvis-news-baustein.md`. Neue Quelle: CORRECTIV
+(`correctiv.org/feed/`) - gemeinnützig, spendenfinanziert, nicht
+regierungsfinanziert, investigativer Journalismus (Leons ausdrücklicher
+Wunsch). Neuer `NewsBackgroundWorker` (`app/news_background_worker.py`,
+nach dem Vorbild von `MailBackgroundWorker`) prüft alle
+`news_check_interval_minutes` (Standard 4h) auf neue Schlagzeilen.
+
+- **Wichtigkeits-Einstufung passiert im Worker, nicht in der Regel** -
+  `rule_important_news` (`core/proactivity_rules.py`) liest nur die bereits
+  fertig klassifizierte Liste aus `context["important_news"]`, ruft selbst
+  nie ein Sprachmodell auf und bleibt damit wie jede andere Regel eine reine,
+  deterministische Funktion.
+- **Zweistufiger Filter**, live beim Testen so entwickelt: ein reiner
+  Modell-Klassifikator (`classify_headline_importance()`, Vorbild
+  `jarvis.py::classify_domain_via_llm`) stufte anfangs 9-12 von 15
+  Schlagzeilen fälschlich als "wichtig" ein, darunter mehrere Faktenchecks
+  (Richtigstellungen von Gerüchten) und interne Redaktions-Meldungen - trotz
+  expliziter Gegenbeispiele im Prompt hält sich das kleine lokale Modell
+  (phi4-mini) nicht zuverlässig daran. Deshalb zusätzlich ein
+  deterministischer Vorfilter (`_is_excluded_by_category()`): CORRECTIV
+  kennzeichnet Faktenchecks und interne Meldungen eindeutig über den
+  URL-Pfad (`/faktencheck/`, `/in-eigener-sache/`) - diese werden schon vor
+  der Modell-Anfrage aussortiert, nicht erst danach. Ergebnis nach dem Fix:
+  5-6 von 15 Schlagzeilen, alle davon tatsächlich substanzielle Meldungen.
+- **`internet`-Berechtigung** (bereits vorhanden, wird auch für die Websuche
+  genutzt) gated sowohl den Hintergrund-Check selbst als auch das Befüllen
+  von `context["important_news"]` in `_proactivity_context()` - dieselbe
+  "nie der erste stille Auslöser für eine Berechtigung"-Regel wie bei
+  Mail/Kalender/Nutzungsmuster.
+- **Jede Meldung wird genau einmal weitergereicht:**
+  `NewsBackgroundWorker.drain_important_news()` leert die Warteliste beim
+  Lesen - anders als z. B. `low_disk_space` (ein anhaltender Zustand, der
+  absichtlich wiederholt gemeldet werden darf) ist eine einzelne
+  Nachrichtenmeldung ein einmaliges Ereignis.
+- Läuft automatisch mit durch die bereits bestehende Zustellung (Chat,
+  Systembenachrichtigung, gesprochene Ausgabe) - kein zusätzlicher Code an
+  diesen Stellen nötig.
+
+22 neue Tests (`tests/test_news_source.py`, `tests/test_news_background_
+worker.py`, neu; `tests/test_proactivity_rules.py` erweitert) - insgesamt
+210 Tests. Live gegen den echten CORRECTIV-Feed und das echte lokale Modell
+getestet, inklusive des gefundenen und behobenen Über-Klassifizierungs-
+Problems.
 
 ## Wo Hinweise ankommen
 

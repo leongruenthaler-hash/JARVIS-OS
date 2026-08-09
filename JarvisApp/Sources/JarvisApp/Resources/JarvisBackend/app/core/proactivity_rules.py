@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import shutil
 from datetime import datetime
@@ -380,6 +381,42 @@ def rule_recurring_usage_pattern(context: dict[str, Any]) -> list[dict[str, Any]
     return results
 
 
+def rule_important_news(context: dict[str, Any]) -> list[dict[str, Any]]:
+    """Baustein "Wichtige Nachrichten", siehe
+    plans/2026-08-09-jarvis-news-baustein.md. Liest ausschliesslich bereits
+    fertig als wichtig eingestufte Meldungen aus dem Context
+    (news_background_worker.py::drain_important_news()) - diese Regel selbst
+    ruft nie ein Sprachmodell auf, bleibt also wie jede andere Regel eine reine,
+    deterministische Funktion (siehe proactivity_engine.py's Grundprinzip)."""
+    news_items = context.get("important_news") or []
+    if not news_items:
+        return []
+
+    if len(news_items) == 1:
+        item = news_items[0]
+        title = str(item.get("title") or "").strip()
+        summary = str(item.get("summary") or "").strip()
+        message = f"Wichtige Meldung von CORRECTIV: {title}."
+        if summary:
+            message += f" {summary}"
+    else:
+        titles = "; ".join(str(item.get("title") or "").strip() for item in news_items[:3])
+        message = f"{len(news_items)} wichtige Meldungen von CORRECTIV, u. a.: {titles}."
+
+    ids = sorted(str(item.get("id") or "") for item in news_items)
+    dedup_key = "important_news:" + hashlib.sha1(",".join(ids).encode("utf-8")).hexdigest()[:12]
+
+    return [
+        {
+            "priority": "wichtig",
+            "message": message,
+            "reason": f"{len(news_items)} neue, als wichtig eingestufte Meldung(en) von CORRECTIV.",
+            "data": {"count": len(news_items), "titles": [item.get("title") for item in news_items]},
+            "dedup_key": dedup_key,
+        }
+    ]
+
+
 DEFAULT_RULES = (
     ("low_disk_space", rule_low_disk_space),
     ("pending_calendar_actions_waiting", rule_pending_calendar_actions_waiting),
@@ -389,6 +426,7 @@ DEFAULT_RULES = (
     ("calendar_events_overlap", rule_calendar_events_overlap),
     ("mail_matches_upcoming_event", rule_mail_matches_upcoming_event),
     ("recurring_usage_pattern", rule_recurring_usage_pattern),
+    ("important_news", rule_important_news),
 )
 
 

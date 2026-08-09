@@ -15,6 +15,7 @@ from proactivity_rules import (  # noqa: E402
     _extract_sender_name,
     rule_calendar_event_starting_soon,
     rule_calendar_events_overlap,
+    rule_important_news,
     rule_low_disk_space,
     rule_mail_matches_upcoming_event,
     rule_new_unread_mail,
@@ -252,3 +253,37 @@ def test_recurring_usage_pattern_silent_below_threshold():
 
 def test_recurring_usage_pattern_silent_when_no_patterns():
     assert rule_recurring_usage_pattern({"config": {}, "recurring_usage_patterns": []}) == []
+
+
+def test_important_news_silent_when_empty():
+    assert rule_important_news({"important_news": []}) == []
+    assert rule_important_news({}) == []
+
+
+def test_important_news_fires_single_item_with_summary():
+    items = [{"id": "https://correctiv.org/a", "title": "Schlagzeile", "summary": "Kurzfassung."}]
+    result = rule_important_news({"important_news": items})
+    assert len(result) == 1
+    assert result[0]["priority"] == "wichtig"
+    assert "Schlagzeile" in result[0]["message"]
+    assert "Kurzfassung." in result[0]["message"]
+    assert result[0]["dedup_key"].startswith("important_news:")
+
+
+def test_important_news_aggregates_multiple_items():
+    items = [
+        {"id": "https://correctiv.org/a", "title": "Erste"},
+        {"id": "https://correctiv.org/b", "title": "Zweite"},
+    ]
+    result = rule_important_news({"important_news": items})
+    assert len(result) == 1
+    assert "2 wichtige Meldungen" in result[0]["message"]
+    assert "Erste" in result[0]["message"] and "Zweite" in result[0]["message"]
+
+
+def test_important_news_dedup_key_depends_on_ids():
+    items_a = [{"id": "https://correctiv.org/a", "title": "A"}]
+    items_b = [{"id": "https://correctiv.org/b", "title": "B"}]
+    key_a = rule_important_news({"important_news": items_a})[0]["dedup_key"]
+    key_b = rule_important_news({"important_news": items_b})[0]["dedup_key"]
+    assert key_a != key_b
