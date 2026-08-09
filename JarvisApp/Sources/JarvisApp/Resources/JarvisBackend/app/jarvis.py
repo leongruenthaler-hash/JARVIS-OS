@@ -29,6 +29,7 @@ from calendar_client import (
     CalendarAccessError,
     create_calendar_event,
     create_reminder,
+    events_on_date,
     list_open_reminders,
     list_upcoming_calendar_items,
 )
@@ -62,6 +63,7 @@ from mail_client import (
     move_matching_messages_to_trash,
     move_messages_to_trash,
     normalize_document_categories,
+    unread_inbox_count,
 )
 from mail_calendar_actions import _extract_datetime
 from core.action_engine import ACTION_ENGINE, ActionProposal
@@ -69,6 +71,7 @@ from core.context_engine import CONTEXT_ENGINE, active_context_pack
 from core.conversation_manager import ConversationManager
 from core.daily_briefing import build_daily_briefing
 from core.memory_system import JarvisMemorySystem
+from core.task_manager import TaskManager
 from core import (
     voice_mode_instruction,
     voice_mode_forces_compact,
@@ -1752,14 +1755,29 @@ def handle_daily_briefing_command(memory: Memory, text: str) -> str | None:
 
     calendar_items = []
     reminders = []
+    open_tasks = []
+    mail_summary = ""
     try:
-        calendar_items = list_upcoming_calendar_items(limit=3).get("items", [])
+        # "heutige Termine" statt "naechste 3 Termine" - konsistent mit
+        # local_server.py::daily_briefing(), siehe
+        # plans/2026-08-08-jarvis-tagesbriefing-ausbauen.md.
+        calendar_items = events_on_date(list_upcoming_calendar_items(limit=10).get("items", []))
     except Exception:
         calendar_items = []
     try:
         reminders = list_open_reminders(limit=3).get("items", [])
     except Exception:
         reminders = []
+    try:
+        open_tasks = TaskManager(memory).list_tasks(status="offen") + TaskManager(memory).list_tasks(status="in_arbeit")
+    except Exception:
+        open_tasks = []
+    if has_permission("mail"):
+        try:
+            unread = unread_inbox_count()
+            mail_summary = f"{unread} ungelesen" if unread else "keine ungelesenen Mails"
+        except Exception:
+            mail_summary = ""
 
     weather_summary = ""
     system_summary = ""
@@ -1771,7 +1789,8 @@ def handle_daily_briefing_command(memory: Memory, text: str) -> str | None:
     briefing = build_daily_briefing(
         calendar_items=calendar_items,
         reminders=reminders,
-        mail_summary="",
+        tasks=open_tasks,
+        mail_summary=mail_summary,
         weather_summary=weather_summary,
         system_summary=system_summary,
     )
@@ -3751,11 +3770,8 @@ def answer_calendar_query(text: str, normalized: str) -> str:
             # Ende an einem locale-formatierten Datumsvergleich) wird hier noch einmal
             # anhand des echten, numerisch geparsten start_dt gefiltert - robust,
             # unabhaengig vom Systemdatumsformat. Behebt den gemeldeten Bug, dass "was
-            # steht heute an" teils Termine aus dem ganzen Jahr zeigte. Termine ohne
-            # start_dt (Parsing fehlgeschlagen) werden NICHT herausgefiltert, damit ein
-            # einzelner kaputter Termin nicht faelschlich "keine Termine heute" ergibt.
-            today = now.date()
-            items = [item for item in items if item.get("start_dt") is None or item["start_dt"].date() == today]
+            # steht heute an" teils Termine aus dem ganzen Jahr zeigte.
+            items = events_on_date(items)
         if not items:
             return "Für heute sehe ich keine Termine." if only_today else "Ich sehe aktuell keine anstehenden Termine."
 

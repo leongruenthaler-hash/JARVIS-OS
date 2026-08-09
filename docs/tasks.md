@@ -92,10 +92,15 @@ bei mehreren Treffern oder mehreren Telefonnummern gezielt nach). Keine
 
 ## Bewusst nicht umgesetzt (Scope-Grenze Phase D)
 
-- Kalenderzeit-basierte Konflikterkennung ("zwei Termine überschneiden
-  sich", Terminvorschläge mit freien Zeiträumen) - blockiert weiterhin auf
-  derselben AppleScript-Datumsparsing-Einschränkung wie in Phase C
-  dokumentiert (`docs/proactivity.md`).
 - Kein echtes E-Mail-Senden (siehe oben).
 - Keine automatische Aufgaben-Erkennung aus Gesprächen/Mails (siehe oben).
 - Keine Zyklen-Erkennung bei `depends_on`.
+
+**Nachtrag (2026-08-08):** Kalenderzeit-basierte Konflikterkennung ("zwei
+Termine überschneiden sich") ist inzwischen umgesetzt
+(`rule_calendar_events_overlap`, siehe `docs/proactivity.md`) - die
+AppleScript-Datumsparsing-Einschränkung, die das vorher blockierte, wurde in
+Baustein A behoben. Offene Aufgaben (Status `offen`/`in_arbeit`) erscheinen
+seit Baustein C außerdem im Tagesbriefing
+(`app/core/daily_briefing.py::build_daily_briefing()`), automatisch
+erkannte, unbestätigte Vorschläge (`vorgeschlagen`) bewusst nicht.

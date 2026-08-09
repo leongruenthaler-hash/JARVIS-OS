@@ -18,7 +18,7 @@ import numpy as np
 
 from audio_stream import StreamingAudioListener, warm_audio_pipeline
 from background_tasks import MailBackgroundWorker
-from calendar_client import list_open_reminders, list_upcoming_calendar_items
+from calendar_client import events_on_date, list_open_reminders, list_upcoming_calendar_items
 from data_dir import data_root
 from fast_intent_router import FastIntentRouter
 from core.conversation_manager import ConversationManager
@@ -710,7 +710,16 @@ class JarvisLocalServer:
         # silently first-triggers Kalender/Erinnerungen/Mail access.
         if self.permissions.is_allowed("calendar"):
             try:
-                calendar_items = list_upcoming_calendar_items(limit=5).get("items", [])
+                from datetime import datetime
+
+                until = datetime.now().replace(hour=23, minute=59, second=59, microsecond=0)
+                # "heutige Termine", nicht "naechste 5 Termine" - Aufgabe 3 aus
+                # plans/2026-08-08-jarvis-tagesbriefing-ausbauen.md. events_on_date()
+                # filtert zusaetzlich robust anhand start_dt, das AppleScript-until
+                # bleibt nur die grobe Vorfilterung.
+                calendar_items = events_on_date(
+                    list_upcoming_calendar_items(limit=20, until=until).get("items", [])
+                )
             except Exception:
                 calendar_items = []
         else:
@@ -723,6 +732,14 @@ class JarvisLocalServer:
                 reminder_items = []
         else:
             reminder_items = []
+
+        try:
+            # Aufgaben sind rein lokale, interne Daten (kein macOS-Automation-Zugriff
+            # wie Mail/Kalender), deshalb kein eigenes Permission-Gate - "vorgeschlagen"
+            # (noch unbestaetigt) bewusst ausgeschlossen, siehe Plan Design-Entscheidung 1.
+            open_tasks = self.tasks.list_tasks(status="offen") + self.tasks.list_tasks(status="in_arbeit")
+        except Exception:
+            open_tasks = []
 
         mail_summary = self._mail_background_status().get("message", "") if self.permissions.is_allowed("mail") else ""
 
@@ -749,6 +766,7 @@ class JarvisLocalServer:
         briefing = build_daily_briefing(
             calendar_items=calendar_items,
             reminders=reminder_items,
+            tasks=open_tasks,
             mail_summary=mail_summary,
             system_summary=f"Modell: {self.models.active_model}. Provider: {self.models.provider}.",
         )
@@ -758,6 +776,7 @@ class JarvisLocalServer:
             "briefing": briefing,
             "calendar_count": len(calendar_items),
             "reminders_count": len(reminder_items),
+            "tasks_count": len(open_tasks),
             "calendar_allowed": self.permissions.is_allowed("calendar"),
             "reminders_allowed": self.permissions.is_allowed("reminders"),
             "proactive_events": recent_proactive,

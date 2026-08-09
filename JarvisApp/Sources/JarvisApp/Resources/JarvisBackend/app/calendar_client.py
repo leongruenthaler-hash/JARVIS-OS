@@ -179,6 +179,18 @@ def _parse_calendar_items(raw_output: str) -> list[dict[str, object]]:
     return result
 
 
+def events_on_date(items: list[dict[str, object]], on: datetime | None = None) -> list[dict[str, object]]:
+    """Filtert Kalendertermine auf einen bestimmten Tag (Standard: heute), anhand des
+    robusten, numerisch geparsten start_dt statt eines locale-formatierten
+    Datumsvergleichs. Termine ohne start_dt (Parsing fehlgeschlagen) werden bewusst
+    NICHT herausgefiltert, damit ein einzelner kaputter Termin nicht faelschlich
+    "keine Termine heute" ergibt. Gemeinsam genutzt von
+    jarvis.py::answer_calendar_query() und dem Tagesbriefing (Baustein C, siehe
+    plans/2026-08-08-jarvis-tagesbriefing-ausbauen.md)."""
+    target = (on or datetime.now()).date()
+    return [item for item in items if item.get("start_dt") is None or item["start_dt"].date() == target]
+
+
 def list_open_reminders(limit: int = 5) -> dict[str, list[dict[str, str]]]:
     limit = max(1, int(limit))
     script = f"""

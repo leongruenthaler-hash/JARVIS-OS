@@ -332,3 +332,25 @@ Behebung: `docs/proactivity.md`.
 
 6 neue Tests (insgesamt 119). Bewusst nicht umgesetzt: Teilnehmer-basierter
 Abgleich (siehe oben), Reisezeit vor einem Termin.
+
+## 16. Tagesbriefing ausgebaut (2026-08-08)
+
+Baustein C aus `plans/2026-08-08-jarvis-proaktiver-wie-iron-man.md`
+umgesetzt: `app/core/daily_briefing.py::build_daily_briefing()` zeigte
+bisher nur den jeweils ersten Termin/die erste Erinnerung und gar keine
+Aufgaben. Jetzt: bis zu 3 Einträge pro Bereich (Termine/Aufgaben/
+Erinnerungen, mit Leon abgestimmt - das Briefing wird teils vorgelesen,
+mehr wäre beim Vorlesen unangenehm), mit "und N weitere" bei mehr. Neue
+Funktion `calendar_client.py::events_on_date()` filtert Termine robust auf
+"heute" (nutzt `start_dt` aus Baustein A) - ersetzt auch den bisherigen
+Inline-Filter in `answer_calendar_query()` (reine Vereinheitlichung).
+
+Offene Aufgaben (`TaskManager.list_tasks(status="offen"/"in_arbeit")`)
+erscheinen erstmals im Briefing - automatisch vorgeschlagene, unbestätigte
+Aufgaben (`status="vorgeschlagen"`) bewusst ausgeschlossen (Master-Plan-
+Grundsatz: unbestätigte Vorschläge werden nie stillschweigend verbindlich).
+Beide Antwortpfade (App/CLI) konsistent erweitert; der CLI-Pfad
+(`jarvis.py::handle_daily_briefing_command()`) bekommt dabei erstmals auch
+einen echten Mail-Status statt eines fest leeren Werts.
+
+8 neue Tests (insgesamt 127).
