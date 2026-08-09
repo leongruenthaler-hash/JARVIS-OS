@@ -271,8 +271,13 @@ def handle_privacy_command(memory: Memory, text: str) -> str | None:
     dashboard = PrivacyDashboard(CONFIG)
     manager = PermissionManager()
 
-    grant_match = re.search(r"(?:erlaube|aktiviere)\s+(mail|kalender|erinnerungen|kontakte|dateien|mikrofon|kamera|standort|internet|fotos|photos|bildschirm|ki|cloud|speicher|memory)", normalized)
-    revoke_match = re.search(r"(?:deaktiviere|verbiete|entziehe)\s+(mail|kalender|erinnerungen|kontakte|dateien|mikrofon|kamera|standort|internet|fotos|photos|bildschirm|ki|cloud|speicher|memory)", normalized)
+    # \b vor "aktiviere" ist notwendig, nicht nur Stil: ohne Wortgrenze matchte
+    # "aktiviere" auch als Teilstring von "deaktiviere" ("de" + "aktiviere"), also
+    # loeste z.B. "deaktiviere dateien" faelschlich grant_match aus (der VOR
+    # revoke_match geprueft wird) und hat die Berechtigung erlaubt statt
+    # entzogen - in der Praxis so gefunden.
+    grant_match = re.search(r"\b(?:erlaube|aktiviere)\s+(mail|kalender|erinnerungen|kontakte|dateien|mikrofon|kamera|standort|internet|fotos|photos|bildschirm|ki|cloud|speicher|memory)", normalized)
+    revoke_match = re.search(r"\b(?:deaktiviere|verbiete|entziehe)\s+(mail|kalender|erinnerungen|kontakte|dateien|mikrofon|kamera|standort|internet|fotos|photos|bildschirm|ki|cloud|speicher|memory)", normalized)
     mapping = {
         "mikrofon": "microphone",
         "kamera": "camera",

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -10,6 +11,18 @@ from typing import Any
 
 from data_dir import data_root
 from privacy_logger import PrivacyLogger
+
+# PermissionManager() is constructed fresh, function-scoped, at almost every call
+# site (ensure_permission(), handle_privacy_command(), the pending-permission-
+# confirm flow, ...) rather than reusing a single shared instance - the same
+# pattern that caused the Memory/ModelManager dual-instance bugs (see
+# docs/current-system-assessment.md, Abschnitt 19/20). A single module-level lock
+# (not per-instance - the whole point is protecting against MULTIPLE instances)
+# makes every read reload from disk first and every write reload-mutate-save as
+# one atomic step, so a short-lived instance's grant() can never be silently lost
+# or invisible to a longer-lived instance's is_allowed() (local_server.py's
+# self.permissions/self.dashboard) within the same process.
+_LOCK = threading.RLock()
 
 
 PERMISSION_DEFINITIONS: dict[str, str] = {
@@ -117,10 +130,21 @@ class PermissionManager:
                 except OSError:
                     pass
 
+    def _refresh(self) -> None:
+        # Reloads self.data from disk under the shared module-level lock (see
+        # comment at _LOCK) - makes every read reflect whatever the LAST
+        # PermissionManager instance (this one or any other, in this process)
+        # actually wrote, instead of this instance's own possibly-stale snapshot
+        # from whenever IT was constructed.
+        with _LOCK:
+            self.data = self._load()
+
     def is_allowed(self, permission: str) -> bool:
+        self._refresh()
         return bool(self.data.get(permission, {}).get("allowed", False))
 
     def is_requested(self, permission: str) -> bool:
+        self._refresh()
         return bool(self.data.get(permission, {}).get("requested", False))
 
     def explanation(self, permission: str) -> str:
@@ -137,20 +161,24 @@ class PermissionManager:
         self._set(permission, False, source=source)
 
     def mark_explanation_shown(self, permission: str):
-        state = self.data.setdefault(permission, PermissionState().__dict__)
-        state["explanation_shown"] = True
-        state["updated_at"] = datetime.now().isoformat(timespec="seconds")
-        self._save()
+        with _LOCK:
+            self._refresh()
+            state = self.data.setdefault(permission, PermissionState().__dict__)
+            state["explanation_shown"] = True
+            state["updated_at"] = datetime.now().isoformat(timespec="seconds")
+            self._save()
 
     def _set(self, permission: str, allowed: bool, source: str = "unknown"):
-        state = self.data.setdefault(permission, PermissionState().__dict__)
-        old_allowed = bool(state.get("allowed", False))
-        old_requested = bool(state.get("requested", False))
-        state["allowed"] = bool(allowed)
-        state["requested"] = True
-        state["explanation_shown"] = True
-        state["updated_at"] = datetime.now().isoformat(timespec="seconds")
-        self._save()
+        with _LOCK:
+            self._refresh()
+            state = self.data.setdefault(permission, PermissionState().__dict__)
+            old_allowed = bool(state.get("allowed", False))
+            old_requested = bool(state.get("requested", False))
+            state["allowed"] = bool(allowed)
+            state["requested"] = True
+            state["explanation_shown"] = True
+            state["updated_at"] = datetime.now().isoformat(timespec="seconds")
+            self._save()
         self._audit(
             permission,
             old_allowed=old_allowed,
@@ -165,14 +193,16 @@ class PermissionManager:
         this" state back to untouched. Does NOT and CANNOT revoke the actual
         macOS system permission grant (TCC) - that lives entirely outside this
         JSON file and is unaffected."""
-        state = self.data.setdefault(permission, PermissionState().__dict__)
-        old_allowed = bool(state.get("allowed", False))
-        old_requested = bool(state.get("requested", False))
-        state["allowed"] = False
-        state["requested"] = False
-        state["explanation_shown"] = False
-        state["updated_at"] = datetime.now().isoformat(timespec="seconds")
-        self._save()
+        with _LOCK:
+            self._refresh()
+            state = self.data.setdefault(permission, PermissionState().__dict__)
+            old_allowed = bool(state.get("allowed", False))
+            old_requested = bool(state.get("requested", False))
+            state["allowed"] = False
+            state["requested"] = False
+            state["explanation_shown"] = False
+            state["updated_at"] = datetime.now().isoformat(timespec="seconds")
+            self._save()
         self._audit(
             permission,
             old_allowed=old_allowed,
@@ -183,6 +213,7 @@ class PermissionManager:
         )
 
     def export(self) -> dict[str, Any]:
+        self._refresh()
         return {
             name: {
                 "allowed": bool(self.data.get(name, {}).get("allowed", False)),
@@ -194,8 +225,9 @@ class PermissionManager:
         }
 
     def summary(self) -> str:
-        active = [name for name in PERMISSION_DEFINITIONS if self.is_allowed(name)]
-        inactive = [name for name in PERMISSION_DEFINITIONS if not self.is_allowed(name)]
+        self._refresh()
+        active = [name for name in PERMISSION_DEFINITIONS if self.data.get(name, {}).get("allowed", False)]
+        inactive = [name for name in PERMISSION_DEFINITIONS if name not in active]
         return (
             "Aktive Berechtigungen: " + (", ".join(active) if active else "keine") + ". "
             "Deaktiviert: " + (", ".join(inactive) if inactive else "keine") + "."

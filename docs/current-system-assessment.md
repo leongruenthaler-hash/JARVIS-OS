@@ -619,5 +619,55 @@ die nie langlebig gehalten werden und deshalb nie schreibend miteinander
 kollidieren. Der Datenschutz-Status (`/api/privacy/status`,
 `self.permissions.is_allowed(...)`) kann dadurch aber bis zum nächsten
 Server-Neustart einen veralteten Berechtigungsstand zeigen, wenn eine
-Berechtigung zwischenzeitlich anderweitig geändert wurde. Bewusst
-zurückgestellt - Leon entscheidet, ob das behoben werden soll.
+Berechtigung zwischenzeitlich anderweitig geändert wurde. **Inzwischen
+behoben, siehe Abschnitt 21.**
+
+## 21. PermissionManager-Staleness behoben (2026-08-09)
+
+Auf Wunsch nachträglich auch die als niedrige Priorität zurückgestellte
+`PermissionManager`-Stelle aus Abschnitt 20 behoben - dasselbe Cache-Muster
+wie bei `Memory`/`ModelManager`, hier aber als Lese-Staleness statt
+Datenverlust (siehe dort für die genaue Ursache).
+
+**Fix:** `is_allowed()`, `is_requested()`, `export()` und `summary()` laden
+jetzt vor jedem Zugriff über eine neue `_refresh()`-Methode frisch von der
+Platte, statt sich auf den bei Konstruktion einmal geladenen `self.data`-
+Cache zu verlassen. `grant()`/`revoke()`/`mark_explanation_shown()`/
+`reset_to_not_requested()` laden ebenfalls unmittelbar vor dem Ändern neu
+(echtes Read-Modify-Write statt "cached-Modify-Write"). Ein neuer,
+**modulweiter** Lock (`_LOCK`, bewusst nicht pro Instanz - der Punkt ist ja
+gerade der Schutz vor mehreren gleichzeitigen Instanzen im selben Prozess)
+umschließt jeden Lese-Ändere-Speicher-Vorgang, damit zwei kurzlebige
+Instanzen, die im selben lokalen HTTP-Server gleichzeitig verschiedene
+Berechtigungen ändern (z. B. Sprach-Thread + Dashboard-Anfrage), sich nicht
+gegenseitig überschreiben können - dieselbe Race, die bei `Memory` schon
+einen dedizierten Lock bekommen hat.
+
+6 neue Tests (`tests/test_permission_manager_shared_instance.py`, neu) -
+insgesamt 185 Tests: Berechtigung über eine Instanz ändern, sofort über eine
+andere sichtbar (Grant und Revoke), mehrere abwechselnde Änderungen über
+verschiedene Instanzen ohne Datenverlust, `export()`/`summary()` beide
+aktuell, sowie ein direkter "keine Kollision"-Test zwischen `grant()` und
+`mark_explanation_shown()` über zwei verschiedene Instanzen.
+
+## 22. "deaktiviere" hat faelschlich erlaubt statt verboten (2026-08-09)
+
+Beim Live-Verifizieren von Abschnitt 21 gefunden: `handle_privacy_command()`s
+Erlauben-Erkennung (`grant_match = re.search(r"(?:erlaube|aktiviere)\s+...")`)
+hatte keine Wortgrenze vor "aktiviere" - "aktiviere" ist ein Teilstring von
+"deaktiviere" ("de" + "aktiviere"), also matchte z. B. "deaktiviere dateien"
+sowohl `grant_match` als auch `revoke_match`. Da `grant_match` zuerst geprüft
+wird, hat der Befehl "deaktiviere dateien" die Berechtigung tatsächlich
+**erlaubt statt entzogen** - live nachgestellt und bestätigt (Speicherplatz
+war True → blieb True statt False zu werden). Betrifft nur textuelle
+Datenschutz-Befehle, nicht den Schalter im Dashboard (der ruft `grant()`/
+`revoke()` direkt und eindeutig auf, ohne Text-Erkennung).
+
+**Fix:** `\b` vor `(?:erlaube|aktiviere)` bzw. `(?:deaktiviere|verbiete|
+entziehe)` ergänzt - "aktiviere" matcht jetzt nur noch als eigenständiges
+Wort, nicht mehr als Teilstring von "deaktiviere".
+
+4 neue Tests (`tests/test_privacy_command.py`, neu) - insgesamt 189 Tests:
+"deaktiviere X" verbietet jetzt korrekt, "aktiviere X"/"erlaube X" erlauben
+weiterhin korrekt, "verbiete X" verbietet weiterhin korrekt. Live auf dem
+echten Mac verifiziert.
