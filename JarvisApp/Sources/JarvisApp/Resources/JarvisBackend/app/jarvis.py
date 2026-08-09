@@ -72,6 +72,7 @@ from core.conversation_manager import ConversationManager
 from core.daily_briefing import build_daily_briefing
 from core.memory_system import JarvisMemorySystem
 from core.task_manager import TaskManager
+from core.usage_patterns import record_pattern_event
 from core import (
     voice_mode_instruction,
     voice_mode_forces_compact,
@@ -726,6 +727,18 @@ def has_domain(text: str, domain: str) -> bool:
     terms = DOMAIN_TERMS.get(domain, ())
     normalized_terms = tuple(normalize_umlauts(term) for term in terms)
     return has_domain_fuzzy(normalized, normalized_terms)
+
+
+def record_pattern_event_if_matched(text: str) -> None:
+    """Baustein D (siehe plans/2026-08-08-jarvis-verhaltensmuster-erkennen.md):
+    zaehlt fuer jede erkannte Faehigkeit ein Muster-Ereignis (nur Kategorie +
+    grobe Zeit, nie den Text selbst). Aufrufer ist dafuer verantwortlich, das nur
+    bei erteilter "usage_patterns"-Berechtigung aufzurufen - diese Funktion prueft
+    das bewusst nicht selbst, um keine Abhaengigkeit auf den PermissionManager
+    einzufuehren."""
+    for domain in DOMAIN_TERMS:
+        if has_domain(text, domain):
+            record_pattern_event(domain)
 
 
 CALENDAR_QUERY_PHRASES = (
@@ -5273,6 +5286,9 @@ def main():
                 print(f"\nJARVIS: {console_text(pending_domain_answer, 'answer')}")
                 speak(pending_domain_answer, voice=voice)
                 continue
+
+            if has_permission("usage_patterns"):
+                record_pattern_event_if_matched(question)
 
             permission_answer = ensure_privacy_domain_permission(memory, "notes", "Jarvis würde eine Notiz über Apple Notes erstellen oder ändern.") if has_domain(question, "notes") else None
             if permission_answer is not None:

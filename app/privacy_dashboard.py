@@ -10,6 +10,7 @@ from data_dir import data_root
 from permission_manager import PermissionManager
 from privacy_logger import PrivacyLogger
 from model_manager import ModelManager
+from core.usage_patterns import UsagePatternStore
 
 
 class PrivacyDashboard:
@@ -96,3 +97,11 @@ class PrivacyDashboard:
     def clear_logs(self) -> str:
         count = self.logger.clear()
         return f"Technische Logs gelöscht: {count}."
+
+    def clear_usage_patterns(self) -> str:
+        # Baustein D, siehe plans/2026-08-08-jarvis-verhaltensmuster-erkennen.md -
+        # eigene, gezielte Loesch-Moeglichkeit fuer die Verhaltensmuster-Zaehlung,
+        # unabhaengig von delete_all_data() (das ohnehin auch usage_patterns.json
+        # mit loescht, da es einfach jede *.json in base_path erfasst).
+        UsagePatternStore(self.base_path).clear()
+        return "Erkannte Verhaltensmuster wurden gelöscht."

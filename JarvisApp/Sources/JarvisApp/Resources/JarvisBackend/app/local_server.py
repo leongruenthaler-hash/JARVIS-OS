@@ -25,6 +25,7 @@ from core.conversation_manager import ConversationManager
 from core.daily_briefing import build_daily_briefing
 from core.proactivity_engine import PROACTIVITY_ENGINE
 from core.task_manager import TaskManager
+from core.usage_patterns import recurring_patterns
 from core.voice_performance import VOICE_PERFORMANCE_LOG
 from core import (
     VOICE_MODES,
@@ -1110,12 +1111,27 @@ class JarvisLocalServer:
             except Exception:
                 pass
 
+        # Baustein D (Verhaltensmuster erkennen), siehe
+        # plans/2026-08-08-jarvis-verhaltensmuster-erkennen.md - nur lesen, wenn die
+        # eigene, standardmaessig deaktivierte "usage_patterns"-Berechtigung erteilt
+        # ist. Liefert bereits fertig ausgewertete Muster (Kategorie + grobe Zeit),
+        # nie Rohdaten/Text.
+        recurring_usage_patterns: list[dict[str, Any]] = []
+        if self.permissions.is_allowed("usage_patterns"):
+            try:
+                min_weeks = int(self.config.get("proactivity_pattern_min_weeks", 3))
+                lookback_weeks = int(self.config.get("proactivity_pattern_lookback_weeks", 4))
+                recurring_usage_patterns = recurring_patterns(min_weeks=min_weeks, lookback_weeks=lookback_weeks)
+            except Exception:
+                pass
+
         return {
             "config": self.config,
             "pending_calendar_actions": pending_calendar_actions,
             "new_mail_messages": new_mail_messages,
             "pending_confirmation_facts": pending_confirmation_facts,
             "upcoming_calendar_events": upcoming_calendar_events,
+            "recurring_usage_patterns": recurring_usage_patterns,
         }
 
     def proactivity_events(self) -> dict[str, Any]:
@@ -1786,6 +1802,14 @@ class JarvisLocalServer:
                     return str(answer)
 
             if hasattr(core, "has_domain") and hasattr(core, "has_permission"):
+                # Baustein D (Verhaltensmuster erkennen, siehe
+                # plans/2026-08-08-jarvis-verhaltensmuster-erkennen.md) - zaehlt NUR
+                # welche Faehigkeit erkannt wurde und wann (Wochentag/grobe Tageszeit),
+                # NIE den Anfrage-Wortlaut. Nur aktiv, wenn die eigene, standardmaessig
+                # deaktivierte Berechtigung "usage_patterns" erteilt ist.
+                if self.permissions.is_allowed("usage_patterns") and hasattr(core, "record_pattern_event_if_matched"):
+                    core.record_pattern_event_if_matched(question)
+
                 notes_permission = core.ensure_privacy_domain_permission(memory, "notes", "Jarvis würde eine Notiz über Apple Notes erstellen oder ändern.") if core.has_domain(question, "notes") else None
                 if notes_permission is not None:
                     return str(notes_permission)

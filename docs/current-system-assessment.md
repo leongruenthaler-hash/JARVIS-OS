@@ -354,3 +354,30 @@ Beide Antwortpfade (App/CLI) konsistent erweitert; der CLI-Pfad
 einen echten Mail-Status statt eines fest leeren Werts.
 
 8 neue Tests (insgesamt 127).
+
+## 17. Wiederkehrende Muster erkennen (2026-08-08)
+
+Baustein D aus `plans/2026-08-08-jarvis-proaktiver-wie-iron-man.md`
+umgesetzt — der einzige Baustein aus der Sammlung, der bewusst erst nach
+expliziter Datenschutz-Rückfrage an Leon angegangen wurde, da er als
+einziger dauerhaft neue Verhaltensdaten anlegt.
+
+Neues Modul `app/core/usage_patterns.py`: zählt bei erkannter Fähigkeit
+(`has_domain()`-Treffer) ausschließlich Kategorie + Wochentag + grobe
+Tageszeit, nie den Anfrage-Wortlaut — aggregiert als "in welchen
+Kalenderwochen kam das vor", nicht als Einzel-Ereignis-Liste. Folgt damit
+demselben datensparsamen Vorbild wie `core/voice_performance.py`
+(ausschließlich Millisekunden-Zahlen, nie Text/Audio).
+
+Neue, eigene Berechtigung `usage_patterns` — **standardmäßig aus**, muss von
+Leon bewusst aktiviert werden. Neue Proactivity-Regel
+`rule_recurring_usage_pattern` schlägt bei erkanntem Muster (Standard: ≥3
+von 4 Wochen) einmalig eine Automatisierung vor, richtet nie selbst etwas
+ein. Eigene Lösch-Möglichkeit im Privacy Dashboard
+(`clear_usage_patterns()`), zusätzlich zur ohnehin greifenden
+"alles löschen"-Funktion.
+
+11 neue Tests (insgesamt 138). Bewusst nicht umgesetzt: eigene
+Einsichts-Ansicht in der App für bereits erkannte Muster (aktueller Umfang:
+Proactivity-Meldung + Löschbarkeit reichen für den ersten Wurf) — möglicher
+Folgeschritt, falls gewünscht.

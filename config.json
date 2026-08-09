@@ -152,5 +152,7 @@
     "proactivity_pending_facts_min_count": 3,
     "proactivity_new_mail_min_count": 3,
     "proactivity_calendar_event_soon_minutes": 15,
-    "proactivity_calendar_lookahead_hours": 6
+    "proactivity_calendar_lookahead_hours": 6,
+    "proactivity_pattern_min_weeks": 3,
+    "proactivity_pattern_lookback_weeks": 4
 }

@@ -341,6 +341,45 @@ def rule_mail_matches_upcoming_event(context: dict[str, Any]) -> list[dict[str, 
     return results
 
 
+def rule_recurring_usage_pattern(context: dict[str, Any]) -> list[dict[str, Any]]:
+    """Baustein D, siehe plans/2026-08-08-jarvis-verhaltensmuster-erkennen.md.
+    Liest bereits fertig ausgewertete Muster aus dem Context (Kategorie + grobe
+    Zeit, siehe core/usage_patterns.py) - diese Regel selbst sieht nie den
+    Anfrage-Wortlaut, nur was ihr im Context uebergeben wird."""
+    config = context.get("config") or {}
+    patterns = context.get("recurring_usage_patterns") or []
+    if not patterns:
+        return []
+
+    min_weeks = int(config.get("proactivity_pattern_min_weeks", 3))
+    results: list[dict[str, Any]] = []
+    for pattern in patterns:
+        week_count = int(pattern.get("week_count", 0))
+        if week_count < min_weeks:
+            continue
+        domain = str(pattern.get("domain") or "")
+        weekday_name = str(pattern.get("weekday_name") or "")
+        time_bucket = str(pattern.get("time_bucket") or "")
+        results.append(
+            {
+                "priority": "information",
+                "message": (
+                    f"Du fragst seit {week_count} Wochen {weekday_name}s {time_bucket} nach "
+                    f"'{domain}' - soll ich dir das automatisch zeigen?"
+                ),
+                "reason": (
+                    f"Muster '{domain}/{weekday_name}/{time_bucket}' kam in {week_count} der "
+                    "letzten Wochen vor."
+                ),
+                "data": {"domain": domain, "weekday_name": weekday_name, "time_bucket": time_bucket},
+                # Ein dedup_key pro Muster, nicht pro Vorkommen - der Vorschlag kommt
+                # einmalig, danach greift dismiss_forever/snooze wie bei jeder Regel.
+                "dedup_key": f"usage_pattern:{domain}:{weekday_name}:{time_bucket}",
+            }
+        )
+    return results
+
+
 DEFAULT_RULES = (
     ("low_disk_space", rule_low_disk_space),
     ("pending_calendar_actions_waiting", rule_pending_calendar_actions_waiting),
@@ -349,6 +388,7 @@ DEFAULT_RULES = (
     ("calendar_event_starting_soon", rule_calendar_event_starting_soon),
     ("calendar_events_overlap", rule_calendar_events_overlap),
     ("mail_matches_upcoming_event", rule_mail_matches_upcoming_event),
+    ("recurring_usage_pattern", rule_recurring_usage_pattern),
 )
 
 

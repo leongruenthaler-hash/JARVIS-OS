@@ -19,6 +19,7 @@ from proactivity_rules import (  # noqa: E402
     rule_mail_matches_upcoming_event,
     rule_new_unread_mail,
     rule_pending_calendar_actions_waiting,
+    rule_recurring_usage_pattern,
     rule_unconfirmed_memory_facts,
 )
 
@@ -229,3 +230,25 @@ def test_mail_matches_upcoming_event_ignores_generic_sender_and_title_words():
         )
         == []
     )
+
+
+def test_recurring_usage_pattern_fires_at_threshold():
+    patterns = [{"domain": "calendar", "weekday_name": "Montag", "time_bucket": "morgens", "week_count": 3}]
+    result = rule_recurring_usage_pattern(
+        {"config": {"proactivity_pattern_min_weeks": 3}, "recurring_usage_patterns": patterns}
+    )
+    assert len(result) == 1
+    assert result[0]["priority"] == "information"
+    assert "calendar" in result[0]["message"]
+
+
+def test_recurring_usage_pattern_silent_below_threshold():
+    patterns = [{"domain": "calendar", "weekday_name": "Montag", "time_bucket": "morgens", "week_count": 2}]
+    result = rule_recurring_usage_pattern(
+        {"config": {"proactivity_pattern_min_weeks": 3}, "recurring_usage_patterns": patterns}
+    )
+    assert result == []
+
+
+def test_recurring_usage_pattern_silent_when_no_patterns():
+    assert rule_recurring_usage_pattern({"config": {}, "recurring_usage_patterns": []}) == []

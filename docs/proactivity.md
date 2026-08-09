@@ -50,6 +50,7 @@ Ablauf pro Aufruf:
 | `calendar_event_starting_soon` | wichtig | Ein nicht-ganztägiger Termin beginnt innerhalb von `proactivity_calendar_event_soon_minutes` (Standard 15) |
 | `calendar_events_overlap` | relevant | Zwei Termine innerhalb von `proactivity_calendar_lookahead_hours` (Standard 6h) überschneiden sich zeitlich |
 | `mail_matches_upcoming_event` | relevant | Absendername einer neuen Mail passt zum Titel eines anstehenden Termins (Baustein B, "Connect the dots") |
+| `recurring_usage_pattern` | information | Dieselbe Anfrage-Kategorie kam an ≥`proactivity_pattern_min_weeks` (Standard 3) der letzten `proactivity_pattern_lookback_weeks` (Standard 4) Kalenderwochen zum selben Wochentag/derselben Tageszeit vor (Baustein D) |
 
 **Nachtrag (2026-08-08):** "Termin beginnt bald" und "zwei Termine
 überschneiden sich" sind jetzt umgesetzt, siehe
@@ -99,6 +100,35 @@ Absender-Bezeichnungen wie "Info" oder "Support" (automatisierte
 Firmen-Postfächer) matchten zufällig Termine mit ähnlichen Wörtern im Titel
 (z. B. "Info-Abend"). Behoben über eine eigene `_GENERIC_SENDER_WORDS`-
 Ausnahmeliste, analog zur bereits bestehenden `_GENERIC_TITLE_WORDS`-Liste.
+
+**Nachtrag (2026-08-08, Baustein D):** `recurring_usage_pattern` ist der
+einzige proaktive Baustein, der dauerhaft neue Verhaltensdaten anlegt -
+deshalb mit einer eigenen, bewusst datensparsamen Architektur und einer
+eigenen, standardmäßig **deaktivierten** Berechtigung `usage_patterns`
+(siehe `permission_manager.py`), die Leon explizit einschalten muss.
+
+- **Was gespeichert wird:** ausschließlich Kategorie (z. B. "calendar") +
+  Wochentag + grobe Tageszeit (`nachts`/`morgens`/`mittags`/`abends`),
+  **niemals der Anfrage-Wortlaut** - nach demselben Vorbild wie
+  `voice_performance.py` (persistiert ausschließlich Millisekunden-Zahlen).
+  Aggregiert als "in welchen Kalenderwochen kam dieses Muster vor"
+  (`app/core/usage_patterns.py`), nicht als Liste einzelner Ereignisse.
+- **Wann gezählt wird:** direkt bei jedem erfolgreichen `has_domain()`-
+  Treffer in `_answer_with_core()`/`jarvis.py::main()` - nur wenn die
+  `usage_patterns`-Berechtigung erteilt ist, sonst passiert gar nichts.
+- **Aktives Aufräumen:** alte Wochen außerhalb des Aufbewahrungsfensters
+  werden bei jedem Schreibvorgang aktiv entfernt, nicht nur ausgeblendet.
+- **Löschbar:** `PrivacyDashboard.clear_usage_patterns()` (zusätzlich zur
+  ohnehin greifenden `delete_all_data()`, die jede `*.json` in `memory/`
+  erfasst).
+- **Vorschlag, nie Automatisierung:** ein erkanntes Muster löst genau eine
+  Proactivity-Meldung aus ("soll ich dir das automatisch zeigen?"), richtet
+  nie selbst etwas ein - folgt demselben Grundsatz wie
+  `task_manager.py::propose_task()`.
+
+11 neue Tests (8 in `tests/test_usage_patterns.py`, neu; 3 weitere in
+`tests/test_proactivity_rules.py`) - insgesamt 138 Tests. Details:
+`plans/2026-08-08-jarvis-verhaltensmuster-erkennen.md`.
 
 ## Wo Hinweise ankommen
 

@@ -29,6 +29,7 @@ PERMISSION_DEFINITIONS: dict[str, str] = {
     "external_api": "Jarvis sendet Daten an externe APIs nur nach aktiver Zustimmung.",
     "cloud_llm": "Jarvis sendet Prompts an Cloud-KI nur nach aktiver Zustimmung. Sensible Inhalte werden vorher angekündigt.",
     "memory": "Jarvis speichert Langzeit-Erinnerungen und Gesprächsverlauf nur, wenn du diese Speicherung erlaubst.",
+    "usage_patterns": "Jarvis merkt sich nur, WELCHE Art von Anfrage du WANN stellst (z. B. 'Kalender, montags morgens'), nie den Wortlaut, um wiederkehrende Muster zu erkennen und dir passende Automatisierungen vorzuschlagen.",
 }
 
 
