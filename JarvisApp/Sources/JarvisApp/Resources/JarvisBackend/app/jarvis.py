@@ -79,6 +79,7 @@ from core import (
     voice_mode_forces_local_only,
 )
 from core.intent_matching import has_domain_fuzzy, normalize_umlauts
+from core.multistep_planner import plan_multistep
 from memory import Memory
 from model_manager import ModelManager
 from music_client import (
@@ -2522,6 +2523,156 @@ def _dispatch_confirmed_domain(
     return None
 
 
+_MULTISTEP_CONNECTOR_WORDS = (
+    " und dann ",
+    " und ",
+    " danach ",
+    " anschliessend ",
+    " ausserdem ",
+    " sowie ",
+    " zusaetzlich ",
+)
+
+
+def looks_like_multistep_request(text: str) -> bool:
+    """Baustein E (siehe plans/2026-08-09-jarvis-mehrstufige-auftraege.md): bewusst
+    konservativer Ausloeser fuer die Stufe-3-Planung - nur wenn Stufe 1 bereits
+    ZWEI verschiedene Domaenen im selben Satz erkennt UND ein Verbindungswort
+    vorkommt. Lieber einen echten Mehrschritt-Auftrag einmal verpassen (dann laeuft
+    er wie bisher als Einzelschritt weiter) als einen einfachen Satz faelschlich in
+    mehrere Schritte zerlegen."""
+    normalized = normalize_umlauts(normalize_text(text))
+    padded = f" {normalized} "
+    if not any(connector in padded for connector in _MULTISTEP_CONNECTOR_WORDS):
+        return False
+    matched_domains = [domain for domain in DOMAIN_TERMS if has_domain(text, domain)]
+    return len(matched_domains) >= 2
+
+
+def _multistep_abort_suggestion(remaining_steps: list[dict[str, Any]], failed_step: dict[str, Any] | None = None) -> str:
+    remaining_steps = remaining_steps or []
+    if not remaining_steps:
+        return "Sag mir gern, wie ich stattdessen weiterhelfen kann."
+    names = ", ".join(
+        _DOMAIN_CLARIFICATION_PHRASES.get(str(step.get("domain")), str(step.get("domain")))
+        for step in remaining_steps
+    )
+    return (
+        f"Die restlichen Schritte ({names}) habe ich noch nicht angefasst. Sag mir, "
+        "ob ich sie trotzdem einzeln nacheinander machen soll, oder ob ich es anders "
+        "angehen soll."
+    )
+
+
+def execute_multistep_plan(
+    steps: list[dict[str, Any]],
+    memory: Memory,
+    photo_worker: PhotoBackgroundWorker | None = None,
+    done_summaries: list[str] | None = None,
+) -> str:
+    """Baustein E: arbeitet einen vorab geplanten, festen Schritt-Plan streng
+    sequenziell ab - jeder Schritt laeuft ueber denselben Domaenen-Dispatch wie ein
+    normaler Einzelschritt-Auftrag (_dispatch_confirmed_domain), inklusive dessen
+    bestehender Berechtigungs- und Bestaetigungslogik. Braucht ein Schritt eine
+    Bestaetigung (neuer pending_*-Schluessel in den Settings, z.B. Mail loeschen
+    oder eine fehlende Berechtigung), haelt die GESAMTE Kette an und merkt sich die
+    restlichen Schritte in memory["settings"]["pending_multistep_queue"] - erst nach
+    Bestaetigung/Ablehnung geht es weiter (siehe _continue_multistep_chain_if_pending).
+    Bricht ein Schritt mit einem Fehler ab, stoppt die Kette ebenfalls, macht dabei
+    aber konkrete Vorschlaege statt nur zu melden, wie weit sie gekommen ist."""
+    done_summaries = list(done_summaries or [])
+    remaining = list(steps)
+    while remaining:
+        step = remaining.pop(0)
+        domain = str(step.get("domain") or "")
+        teilauftrag = str(step.get("teilauftrag") or "")
+        settings_before = memory.get("settings") or {}
+        pre_keys = set(settings_before.keys())
+
+        try:
+            result = _dispatch_confirmed_domain(domain, teilauftrag, memory, photo_worker=photo_worker)
+        except Exception:
+            result = None
+
+        settings_after = memory.get("settings") or {}
+        new_pending_keys = [
+            key
+            for key in settings_after.keys()
+            if key.startswith("pending_")
+            and key != "pending_multistep_queue"
+            and key not in pre_keys
+            and isinstance(settings_after.get(key), dict)
+        ]
+        if new_pending_keys:
+            waiting_key = new_pending_keys[0]
+            settings_after["pending_multistep_queue"] = {
+                "retry_step": step,
+                "remaining_steps": remaining,
+                "waiting_on_key": waiting_key,
+                "done_summaries": done_summaries,
+            }
+            memory.set("settings", settings_after)
+            summary = " ".join(part for part in done_summaries if part).strip()
+            parts = [part for part in (summary, result) if part]
+            return " ".join(parts) if parts else (result or "")
+
+        if result is None:
+            summary = " ".join(part for part in done_summaries if part).strip()
+            suggestion = _multistep_abort_suggestion(remaining, failed_step=step)
+            failure = f'Bei "{teilauftrag}" konnte ich leider nicht weiterhelfen.'
+            parts = [part for part in (summary, failure, suggestion) if part]
+            return " ".join(parts)
+
+        done_summaries.append(result)
+
+    return " ".join(part for part in done_summaries if part).strip() or "Erledigt."
+
+
+def _continue_multistep_chain_if_pending(
+    memory: Memory,
+    resolved_key: str,
+    result: str | None,
+    *,
+    aborted: bool,
+    photo_worker: PhotoBackgroundWorker | None = None,
+) -> str | None:
+    """Wird nach JEDER Aufloesung eines pending_*-Zustands aufgerufen (Bestaetigung,
+    Ablehnung oder Berechtigungs-Antwort) - macht nichts, wenn gerade keine
+    Mehrschritt-Kette darauf wartet (`result` unveraendert), sonst fuehrt sie die
+    Kette fort oder bricht sie mit Vorschlaegen ab."""
+    settings = memory.get("settings") or {}
+    queue = settings.get("pending_multistep_queue")
+    if not isinstance(queue, dict) or queue.get("waiting_on_key") != resolved_key:
+        return result
+
+    settings.pop("pending_multistep_queue", None)
+    memory.set("settings", settings)
+    done_summaries = list(queue.get("done_summaries") or [])
+    remaining = list(queue.get("remaining_steps") or [])
+    retry_step = queue.get("retry_step")
+
+    if aborted:
+        suggestion = _multistep_abort_suggestion(remaining, failed_step=retry_step)
+        summary = " ".join(part for part in done_summaries if part).strip()
+        parts = [part for part in (summary, result, suggestion) if part]
+        return " ".join(parts)
+
+    if resolved_key == "pending_permission" and isinstance(retry_step, dict):
+        # Die Berechtigung wurde gerade erst erteilt - der Schritt, der sie
+        # ausgeloest hat, wurde noch NICHT ausgefuehrt (nur die Rueckfrage), also
+        # jetzt genau einmal automatisch nachholen statt den Nutzer erneut zu
+        # bitten, die Anfrage zu wiederholen ("stelle deine Anfrage noch einmal")
+        # - das waere mitten in einer bereits bestaetigten Kette verwirrend.
+        remaining = [retry_step] + remaining
+    elif result:
+        # ActionEngine-basierte Bestaetigung (z.B. Mail loeschen): der Schritt
+        # wurde bereits vollstaendig ausgefuehrt, `result` ist sein fertiges
+        # Ergebnis - nur noch mit den restlichen Schritten weitermachen.
+        done_summaries.append(result)
+
+    return execute_multistep_plan(remaining, memory, photo_worker=photo_worker, done_summaries=done_summaries)
+
+
 def handle_pending_domain_clarification_flow(
     memory: Memory,
     text: str,
@@ -2668,12 +2819,20 @@ def handle_pending_action_flow(
                 age_seconds=round(age_seconds, 1) if age_seconds is not None else "unknown",
             )
             if is_confirm or is_cancel:
-                return "Die Berechtigungsanfrage ist inzwischen abgelaufen. Bitte stelle deine Anfrage noch einmal, falls du sie noch erlauben möchtest."
+                return _continue_multistep_chain_if_pending(
+                    memory,
+                    "pending_permission",
+                    "Die Berechtigungsanfrage ist inzwischen abgelaufen. Bitte stelle deine Anfrage noch einmal, falls du sie noch erlauben möchtest.",
+                    aborted=True,
+                    photo_worker=photo_worker,
+                )
             return None
         if is_cancel:
             settings.pop("pending_permission", None)
             memory.set("settings", settings)
-            return "Alles klar, ich erteile diese Berechtigung nicht."
+            return _continue_multistep_chain_if_pending(
+                memory, "pending_permission", "Alles klar, ich erteile diese Berechtigung nicht.", aborted=True, photo_worker=photo_worker
+            )
         if not is_confirm:
             return "Ich warte auf deine Entscheidung. Sag ja zum Erlauben oder nein zum Abbrechen."
         if permission:
@@ -2681,14 +2840,19 @@ def handle_pending_action_flow(
             settings.pop("pending_permission", None)
             memory.set("settings", settings)
             privacy_log("permission", "granted", permission=permission)
-            return f"Erlaubt: {permission}. Bitte stelle deine Anfrage noch einmal, dann führe ich sie kontrolliert aus."
+            granted_message = f"Erlaubt: {permission}. Bitte stelle deine Anfrage noch einmal, dann führe ich sie kontrolliert aus."
+            return _continue_multistep_chain_if_pending(
+                memory, "pending_permission", granted_message, aborted=False, photo_worker=photo_worker
+            )
         settings.pop("pending_permission", None)
         memory.set("settings", settings)
-        return "Die offene Berechtigung war unvollständig. Ich habe sie verworfen."
+        return _continue_multistep_chain_if_pending(
+            memory, "pending_permission", "Die offene Berechtigung war unvollständig. Ich habe sie verworfen.", aborted=True, photo_worker=photo_worker
+        )
 
     pending_desktop_move = settings.get("pending_desktop_move")
     if isinstance(pending_desktop_move, dict):
-        return ACTION_ENGINE.resolve(
+        result = ACTION_ENGINE.resolve(
             memory,
             "pending_desktop_move",
             pending_desktop_move,
@@ -2698,10 +2862,13 @@ def handle_pending_action_flow(
             cancel_message="Alles klar, ich verschiebe nichts.",
             waiting_message="Ich warte noch auf deine Bestätigung. Sag ja zum Verschieben oder abbrechen.",
         )
+        if is_confirm or is_cancel:
+            return _continue_multistep_chain_if_pending(memory, "pending_desktop_move", result, aborted=is_cancel, photo_worker=photo_worker)
+        return result
 
     pending_desktop_move_many = settings.get("pending_desktop_move_many")
     if isinstance(pending_desktop_move_many, dict):
-        return ACTION_ENGINE.resolve(
+        result = ACTION_ENGINE.resolve(
             memory,
             "pending_desktop_move_many",
             pending_desktop_move_many,
@@ -2711,10 +2878,13 @@ def handle_pending_action_flow(
             cancel_message="Alles klar, ich verschiebe nichts.",
             waiting_message="Ich warte noch auf deine Bestätigung. Sag ja zum Verschieben oder abbrechen.",
         )
+        if is_confirm or is_cancel:
+            return _continue_multistep_chain_if_pending(memory, "pending_desktop_move_many", result, aborted=is_cancel, photo_worker=photo_worker)
+        return result
 
     pending_calendar_create = settings.get("pending_calendar_create")
     if isinstance(pending_calendar_create, dict):
-        return ACTION_ENGINE.resolve(
+        result = ACTION_ENGINE.resolve(
             memory,
             "pending_calendar_create",
             pending_calendar_create,
@@ -2724,10 +2894,13 @@ def handle_pending_action_flow(
             cancel_message="Alles klar, ich erstelle nichts.",
             waiting_message="Ich warte noch auf deine Bestätigung. Sag ja zum Erstellen oder abbrechen.",
         )
+        if is_confirm or is_cancel:
+            return _continue_multistep_chain_if_pending(memory, "pending_calendar_create", result, aborted=is_cancel, photo_worker=photo_worker)
+        return result
 
     pending_mail_document_export = settings.get("pending_mail_document_export")
     if isinstance(pending_mail_document_export, dict):
-        return ACTION_ENGINE.resolve(
+        result = ACTION_ENGINE.resolve(
             memory,
             "pending_mail_document_export",
             pending_mail_document_export,
@@ -2737,10 +2910,13 @@ def handle_pending_action_flow(
             cancel_message="Alles klar, ich kopiere nichts.",
             waiting_message="Ich warte auf dein Ja oder Abbrechen.",
         )
+        if is_confirm or is_cancel:
+            return _continue_multistep_chain_if_pending(memory, "pending_mail_document_export", result, aborted=is_cancel, photo_worker=photo_worker)
+        return result
 
     pending_file_action = settings.get("pending_file_action")
     if isinstance(pending_file_action, dict):
-        return ACTION_ENGINE.resolve(
+        result = ACTION_ENGINE.resolve(
             memory,
             "pending_file_action",
             pending_file_action,
@@ -2750,10 +2926,13 @@ def handle_pending_action_flow(
             cancel_message="Alles klar, ich ändere nichts.",
             waiting_message="Ich warte auf dein Ja oder Abbrechen.",
         )
+        if is_confirm or is_cancel:
+            return _continue_multistep_chain_if_pending(memory, "pending_file_action", result, aborted=is_cancel, photo_worker=photo_worker)
+        return result
 
     pending_mail_delete = settings.get("pending_mail_delete")
     if isinstance(pending_mail_delete, dict):
-        return ACTION_ENGINE.resolve(
+        result = ACTION_ENGINE.resolve(
             memory,
             "pending_mail_delete",
             pending_mail_delete,
@@ -2763,10 +2942,13 @@ def handle_pending_action_flow(
             cancel_message="Alles klar, ich verschiebe keine Mails.",
             waiting_message="Ich warte noch auf deine Bestätigung. Sag ja zum Ausführen oder abbrechen.",
         )
+        if is_confirm or is_cancel:
+            return _continue_multistep_chain_if_pending(memory, "pending_mail_delete", result, aborted=is_cancel, photo_worker=photo_worker)
+        return result
 
     pending_call = settings.get("pending_call_contact")
     if isinstance(pending_call, dict):
-        return ACTION_ENGINE.resolve(
+        result = ACTION_ENGINE.resolve(
             memory,
             "pending_call_contact",
             pending_call,
@@ -2776,13 +2958,18 @@ def handle_pending_action_flow(
             cancel_message="Alles klar, ich starte keinen Anruf.",
             waiting_message="Ich warte noch auf deine Bestätigung. Sag ja zum Anrufen oder abbrechen.",
         )
+        if is_confirm or is_cancel:
+            return _continue_multistep_chain_if_pending(memory, "pending_call_contact", result, aborted=is_cancel, photo_worker=photo_worker)
+        return result
 
     pending_call_choice = settings.get("pending_call_choice")
     if isinstance(pending_call_choice, dict):
         if is_cancel:
             settings.pop("pending_call_choice", None)
             memory.set("settings", settings)
-            return "Alles klar, ich starte keinen Anruf."
+            return _continue_multistep_chain_if_pending(
+                memory, "pending_call_choice", "Alles klar, ich starte keinen Anruf.", aborted=True, photo_worker=photo_worker
+            )
 
         hint = extract_phone_hint(text)
         phones = list(pending_call_choice.get("phones") or [])
@@ -2802,6 +2989,16 @@ def handle_pending_action_flow(
 
         settings.pop("pending_call_choice", None)
         memory.set("settings", settings)
+        # Eine Mehrschritt-Kette, die auf die (jetzt aufgeloeste) Rueckfrage nach der
+        # richtigen Nummer wartet, muss ab jetzt auf die NEUE Bestaetigung warten,
+        # die ACTION_ENGINE.propose() unten fuer den eigentlichen Anruf anlegt -
+        # sonst wuerde die Kette nie fortgesetzt, weil ihr gemerkter Schluessel
+        # ("pending_call_choice") gerade verschwunden ist.
+        queue = settings.get("pending_multistep_queue")
+        if isinstance(queue, dict) and queue.get("waiting_on_key") == "pending_call_choice":
+            queue["waiting_on_key"] = "pending_call_contact"
+            settings["pending_multistep_queue"] = queue
+            memory.set("settings", settings)
         return ACTION_ENGINE.propose(
             memory,
             "pending_call_contact",
@@ -5289,6 +5486,20 @@ def main():
 
             if has_permission("usage_patterns"):
                 record_pattern_event_if_matched(question)
+
+            if looks_like_multistep_request(question):
+                multistep_steps = plan_multistep(
+                    llm,
+                    question,
+                    max_steps=int(CONFIG.get("multistep_planner_max_steps", 4)),
+                    max_output_tokens=int(CONFIG.get("multistep_planner_max_output_tokens", 300)),
+                )
+                if multistep_steps:
+                    multistep_answer = execute_multistep_plan(multistep_steps, memory, photo_worker=photo_worker)
+                    record_exchange(memory, question, multistep_answer)
+                    print(f"\nJARVIS: {console_text(multistep_answer, 'answer')}")
+                    speak(multistep_answer, voice=voice)
+                    continue
 
             permission_answer = ensure_privacy_domain_permission(memory, "notes", "Jarvis würde eine Notiz über Apple Notes erstellen oder ändern.") if has_domain(question, "notes") else None
             if permission_answer is not None:

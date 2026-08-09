@@ -1801,6 +1801,25 @@ class JarvisLocalServer:
                     answer = self._finalize_answer(core, question, answer)
                     return str(answer)
 
+            if hasattr(core, "looks_like_multistep_request") and hasattr(core, "plan_multistep") and hasattr(core, "execute_multistep_plan"):
+                # Baustein E (mehrstufige Auftraege, siehe
+                # plans/2026-08-09-jarvis-mehrstufige-auftraege.md) - bewusst als
+                # eigene Stufe VOR der normalen Einzelschritt-Domaenenerkennung, aber
+                # nur aktiv, wenn schon die Stichwort-Erkennung mind. zwei Domaenen
+                # im selben Satz sieht (looks_like_multistep_request). Findet der
+                # Planer keinen gueltigen Plan (None), faellt die Anfrage unveraendert
+                # in den bestehenden Einzelschritt-Weg unten durch - nie raten.
+                if core.looks_like_multistep_request(question):
+                    steps = core.plan_multistep(
+                        self.llm,
+                        question,
+                        max_steps=int(self.config.get("multistep_planner_max_steps", 4)),
+                        max_output_tokens=int(self.config.get("multistep_planner_max_output_tokens", 300)),
+                    )
+                    if steps:
+                        answer = core.execute_multistep_plan(steps, memory, photo_worker=self.photo_worker)
+                        return self._finalize_answer(core, question, answer)
+
             if hasattr(core, "has_domain") and hasattr(core, "has_permission"):
                 # Baustein D (Verhaltensmuster erkennen, siehe
                 # plans/2026-08-08-jarvis-verhaltensmuster-erkennen.md) - zaehlt NUR

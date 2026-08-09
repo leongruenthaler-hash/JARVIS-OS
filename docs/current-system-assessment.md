@@ -272,19 +272,21 @@ entscheiden. Zusätzlich: Antwort-Budgets angehoben
 mitten im Satz abgeschnitten werden. 20 neue Tests (insgesamt 100). Details:
 `plans/2026-08-08-jarvis-intelligenz-verbessern.md`.
 
-Bewusst nicht umgesetzt: volles LLM-Function-Calling statt
-Keyword-Dispatch (größerer, eigener Umbau, siehe Plan-Notizen). Stufe 2
-konnte aus Zeitgründen nicht so gebaut werden, dass sie bei Bestätigung
-direkt in jeden der acht Domänen-Handler durchreicht, ohne deren eigene
-(teils separate) Stichwort-Erkennung erneut zu durchlaufen - stattdessen wird
-die bestätigte Anfrage um das kanonische Domänen-Stichwort ergänzt und dann
-normal durch denselben Handler geschickt, den auch ein direkter
-Stichwort-Treffer auslösen würde. Der CLI-Pfad (`jarvis.py::main()`) erzwingt
-Stufe 1/Stufe 2 jetzt konsistent zum App-Pfad, ist aber laut Bestandsaufnahme
-weiterhin die zwei parallelen, nicht deckungsgleichen Antwortpfade (Abschnitt
-7.2) - dieses strukturelle Problem bleibt bestehen. `model_router.py`s
-`_is_simple()`/`_is_complex()` nutzen bewusst weiterhin keine Fuzzy-Erkennung
-(niedrigere Priorität, siehe Plan).
+Stufe 2 konnte aus Zeitgründen nicht so gebaut werden, dass sie bei
+Bestätigung direkt in jeden der acht Domänen-Handler durchreicht, ohne deren
+eigene (teils separate) Stichwort-Erkennung erneut zu durchlaufen -
+stattdessen wird die bestätigte Anfrage um das kanonische Domänen-Stichwort
+ergänzt und dann normal durch denselben Handler geschickt, den auch ein
+direkter Stichwort-Treffer auslösen würde. Der CLI-Pfad (`jarvis.py::main()`)
+erzwingt Stufe 1/Stufe 2 jetzt konsistent zum App-Pfad, ist aber laut
+Bestandsaufnahme weiterhin die zwei parallelen, nicht deckungsgleichen
+Antwortpfade (Abschnitt 7.2) - dieses strukturelle Problem bleibt bestehen.
+`model_router.py`s `_is_simple()`/`_is_complex()` nutzen bewusst weiterhin
+keine Fuzzy-Erkennung (niedrigere Priorität, siehe Plan).
+
+**Nachtrag (2026-08-09):** "Volles LLM-Function-Calling statt
+Keyword-Dispatch" war hier als bewusst nicht umgesetzt vermerkt - inzwischen
+umgesetzt als eigene Stufe 3, siehe Abschnitt 18.
 
 ## 14. Proaktive Kalender-Nudges (2026-08-08)
 
@@ -381,3 +383,71 @@ ein. Eigene Lösch-Möglichkeit im Privacy Dashboard
 Einsichts-Ansicht in der App für bereits erkannte Muster (aktueller Umfang:
 Proactivity-Meldung + Löschbarkeit reichen für den ersten Wurf) — möglicher
 Folgeschritt, falls gewünscht.
+
+## 18. Mehrstufige Aufträge / Function-Calling (2026-08-09)
+
+Baustein E aus `plans/2026-08-08-jarvis-proaktiver-wie-iron-man.md`
+umgesetzt, siehe `plans/2026-08-09-jarvis-mehrstufige-auftraege.md`. Erste
+neue **Stufe 3** der Absichtserkennung — nach Stufe 1 (Fuzzy-Stichwörter) und
+Stufe 2 (LLM-Klassifikation als Rückfrage-Sicherheitsnetz) kann Jarvis jetzt
+aus einer einzigen Anfrage mehrere Fähigkeiten hintereinander ausführen
+("räum den Posteingang auf und leg mir eine Erinnerung an").
+
+**Bewusst kein iterativer Tool-Loop**, sondern "Plan einmal aufstellen, dann
+streng sequenziell abarbeiten": neues Modul `app/core/multistep_planner.py`
+(`plan_multistep()`) lässt das Modell die Anfrage einmalig in ein JSON-Array
+aus `{domain, teilauftrag}`-Schritten zerlegen (max. 4, per
+`multistep_planner_max_steps` in `config.json`), validiert streng (unbekannte
+Domäne, leerer Teilauftrag, zu viele Schritte, kein valides JSON → `None`,
+Aufrufer fällt dann auf den bestehenden Einzelschritt-Weg zurück, rät nie
+selbst). **Keine neuen Fähigkeiten oder Parameter-Formate** — jeder Schritt
+läuft 1:1 über den schon vorhandenen `_dispatch_confirmed_domain()`
+(`jarvis.py`), denselben Dispatch, den auch ein einzelner Stichwort-Treffer
+auslösen würde.
+
+Bewusst konservativer Auslöser: `looks_like_multistep_request()` greift nur,
+wenn Stufe 1 bereits **zwei** verschiedene Domänen im selben Satz erkennt
+**und** ein Verbindungswort (und/danach/außerdem/anschließend/sowie/
+zusätzlich) vorkommt — lieber einen echten Mehrschritt-Auftrag einmal
+verpassen (läuft dann als Einzelschritt weiter) als einen normalen Satz
+fälschlich zerlegen.
+
+`execute_multistep_plan()` arbeitet die Schritte sequenziell ab. Braucht ein
+Schritt eine Bestätigung (neuer `pending_*`-Schlüssel in den Settings — z. B.
+Mail löschen, oder eine fehlende Berechtigung), hält die **gesamte Kette**
+an: die bereits erledigten Schritte werden zusammengefasst, die Rückfrage des
+blockierenden Schritts angehängt, die restlichen Schritte in
+`memory["settings"]["pending_multistep_queue"]` gemerkt. Erst nach
+ausdrücklicher Bestätigung/Ablehnung geht es weiter
+(`_continue_multistep_chain_if_pending()`, eingehängt in alle bestehenden
+`ACTION_ENGINE.resolve()`-Aufrufstellen sowie den `pending_permission`-Zweig
+von `handle_pending_action_flow()`) — kein bestätigungspflichtiger Einzelschritt
+wird durch die Kette zur Hintertür.
+
+Bricht ein Schritt mit Fehler ab (Handler gibt `None` zurück) **oder** lehnt
+der Nutzer eine Zwischen-Bestätigung ab, **bricht die gesamte Kette ab** (auf
+Leons ausdrückliche Vorgabe) — meldet aber nicht nur, wie weit sie gekommen
+ist, sondern macht einen konkreten Vorschlag, wie es sinnvoll weitergehen
+könnte (z. B. die restlichen Schritte einzeln nacheinander anzubieten),
+ohne selbst etwas davon automatisch auszuführen.
+
+Beide Produktionspfade (`local_server.py::_answer_with_core()` und
+`jarvis.py::main()`) rufen Stufe 3 an derselben Stelle auf: nach der
+Muster-Zählung (Baustein D), vor der bestehenden Stufe-1-Domänenprüfung.
+
+19 neue Tests (`tests/test_multistep_planner.py`, insgesamt 157): Plan-
+Validierung, Auslöser-Erkennung, Ausführungs-Kette (alle Schritte glatt,
+Anhalten bei Bestätigungsbedarf, Abbruch mit Vorschlag) sowie die volle
+Kettenfortsetzung über `handle_pending_action_flow()` (Bestätigung,
+Ablehnung, Berechtigung-erteilt-Fall) — `_dispatch_confirmed_domain()` bzw.
+`PermissionManager`/`ACTION_ENGINE`-Executor jeweils per `monkeypatch`
+ersetzt, damit kein echter Domänen-Handler (AppleScript etc.) läuft.
+
+**Bewusst nicht umgesetzt:** echtes, iteratives LLM-Tool-Calling (Modell
+sieht Zwischenergebnisse, entscheidet selbst über den nächsten Aufruf) —
+schwerer kontrollierbar, höheres Endlosschleifen-Risiko, siehe "Verworfene
+Alternativen" im Plan. Der `pending_call_choice`-Zwischenschritt (mehrdeutige
+Telefonnummer beim Anrufen) wird beim Ketten-Fortsetzen per
+`waiting_on_key`-Umleitung auf `pending_call_contact` mitbehandelt, aber
+nicht gesondert getestet — seltener Randfall innerhalb eines ohnehin schon
+seltenen Mehrschritt-Kontakt-Schritts.

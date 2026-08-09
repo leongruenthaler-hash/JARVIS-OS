@@ -10,6 +10,8 @@
     "openai_timeout": 30,
     "openai_max_output_tokens": 280,
     "mail_summary_max_output_tokens": 180,
+    "multistep_planner_max_steps": 4,
+    "multistep_planner_max_output_tokens": 300,
     "whisper_model": "turbo",
     "stt_engine": "whisper_4bit",
     "apple_speech_locale": "de-DE",
