@@ -69,8 +69,29 @@ DEADLINE_TERMS = (
     "bis zum",
     "spätestens",
     "spaetestens",
-    "erinnerung",
 )
+
+# Automatisierte Massen-/Social-Media-Digests (z.B. LinkedIn-Aktivitaets-Updates)
+# enthalten oft beliebigen fremden Post-Inhalt, der zufaellig ein EVENT_TERMS/
+# INVOICE_TERMS/DEADLINE_TERMS-Wort trifft (live gefunden: ein LinkedIn-Post ueber
+# "der Boarding Call gilt noch" loeste faelschlich einen Kalender-Vorschlag aus,
+# obwohl die Mail selbst gar keine Einladung an Leon war). Deterministischer
+# Absender-Vorfilter VOR der Stichwort-Erkennung, gleiche Technik wie der
+# CORRECTIV-Kategorie-Vorfilter beim News-Baustein.
+_BULK_SENDER_MARKERS = (
+    "noreply",
+    "no-reply",
+    "donotreply",
+    "notifications-noreply",
+    "notifications@",
+    "newsletter@",
+    "mailer-daemon",
+)
+
+
+def _looks_like_bulk_or_notification(message: MailMessage) -> bool:
+    sender = _normalize(message.sender or "")
+    return any(marker in sender for marker in _BULK_SENDER_MARKERS)
 
 
 def create_calendar_actions_from_messages(
@@ -156,6 +177,9 @@ def execute_planned_calendar_action(action: dict[str, Any], config: dict[str, An
 
 
 def plan_calendar_action(message: MailMessage, config: dict[str, Any]) -> dict[str, Any] | None:
+    if _looks_like_bulk_or_notification(message):
+        return None
+
     text = _combined_text(message)
     normalized = _normalize(text)
 

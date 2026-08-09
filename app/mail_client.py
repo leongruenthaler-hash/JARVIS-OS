@@ -144,6 +144,13 @@ def list_inbox_messages(
     mailbox_name: str | None = None,
     include_preview: bool = False,
 ) -> list[MailMessage]:
+    # _run_applescript()'s 8s default (mirrored by _run_applescript's own default,
+    # see below) is tuned for the metadata-only case. Fetching "content of messageRef"
+    # per message (include_preview=True, used by the mail-to-calendar background scan)
+    # is far slower - live-testing MailBackgroundWorker with up to 20 messages timed
+    # out at 8s+12s retry even with Mail.app already open. Scale the budget with
+    # max_messages instead of hardcoding a single bigger constant, capped so a
+    # misconfigured max_messages can't hang indefinitely.
     configured_account = _escape_applescript_text(account_name or "")
     configured_mailbox = _escape_applescript_text(mailbox_name or "")
     include_preview_value = "true" if include_preview else "false"
@@ -284,7 +291,11 @@ def list_inbox_messages(
     return outputText
     """
 
-    raw_output = _run_applescript(script)
+    if include_preview:
+        script_timeout = min(60, max(15, 3 + int(max_messages) * 2))
+    else:
+        script_timeout = 8
+    raw_output = _run_applescript(script, timeout=script_timeout)
     return _parse_messages(raw_output)
 
 

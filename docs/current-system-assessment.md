@@ -710,3 +710,65 @@ erfolgreich, live auf dem echten Mac mit exakt Leons ursprünglichem Satz
 verifiziert: die Aussage wird jetzt normal beantwortet und landet korrekt
 als `pending_confirmation`-Fakt im Gedächtnis, statt eine falsche Rückfrage
 auszulösen.
+
+## 24. Mail-Hintergrund-Check und Kalender-aus-Mail aktiviert (2026-08-09)
+
+Zwei bereits vollständig gebaute, aber per Konfiguration abgeschaltete
+Bausteine wurden auf Leons Wunsch scharf geschaltet: `background_mail_enabled`
+(morgendlicher Mail-Check durch `MailBackgroundWorker`,
+`app/background_tasks.py`) und `auto_calendar_from_mail_enabled` (Termine/
+Fristen aus Mails erkennen und vorschlagen, `app/mail_calendar_actions.py`).
+Siehe `plans/2026-08-09-jarvis-mail-hintergrund-aktivieren.md`.
+
+**Vor der Aktivierung geprüft:** das "erst vorschlagen, dann bestätigen"-
+Prinzip war bereits korrekt umgesetzt (`create_calendar_actions_from_messages`
+schreibt nie direkt in den Kalender, nur `execute_planned_calendar_action`
+nach ausdrücklicher Bestätigung über `resolve_pending_calendar_action`) -
+das wurde nicht angetastet, nur mit 15 neuen Tests
+(`tests/test_mail_calendar_actions.py`) erstmals abgesichert. Der Worker
+selbst hatte ebenfalls keine Tests - 13 neue Tests
+(`tests/test_background_mail_worker.py`) decken Zeitfenster-Logik, "neu vs.
+bekannt"-Erkennung über den Mail-ID-Cache und den Fehlerfall bei nicht
+erreichbarem Mail.app ab.
+
+**Zwei echte Bugs beim Live-Test gefunden und behoben, bevor final
+übernommen wurde** (gleiches Muster wie beim News-Baustein - erst live
+testen, dann härten):
+
+1. **Zu kurzer AppleScript-Timeout.** `list_inbox_messages()` rief
+   `_run_applescript()` immer mit dessen 8-Sekunden-Default auf, unabhängig
+   davon, ob `include_preview=True` den vollen Mail-Inhalt für bis zu 20 (bzw.
+   80 nachts) Nachrichten abruft - deutlich langsamer als reine Metadaten. Der
+   erste echte Scan lief selbst mit bereits geöffnetem Mail.app in den
+   Timeout (8s + 12s Retry). **Fix:** der Timeout skaliert jetzt mit
+   `max_messages`, wenn `include_preview` aktiv ist (`3 + 2 × max_messages`
+   Sekunden, gedeckelt bei 60s) - 3 neue Tests
+   (`tests/test_mail_client_timeout.py`).
+2. **Fremder Post-Inhalt in Social-Media-Digests löste falsche Kalender-
+   Vorschläge aus.** Ein LinkedIn-Aktivitäts-Update enthielt in einem
+   fremden, zitierten Post die Wörter "der Boarding Call gilt noch" - `call`
+   traf `EVENT_TERMS`, ein im selben Digest enthaltenes Datum lieferte den
+   Zeitstempel, und Jarvis schlug daraus fälschlich eine Kalender-Erinnerung
+   vor. **Fix:** ein deterministischer Absender-Vorfilter
+   (`_looks_like_bulk_or_notification`, prüft auf `noreply`/`no-reply`/
+   `donotreply`/`notifications@`/`newsletter@`/`mailer-daemon`-Muster im
+   Absender) läuft jetzt VOR der Stichwort-Erkennung - gleiche Technik wie
+   der CORRECTIV-Kategorie-Vorfilter beim News-Baustein. Zusätzlich wurde
+   `"erinnerung"` aus `DEADLINE_TERMS` entfernt (zu generisches Wort, das in
+   praktisch jedem Newsletter-Footer vorkommen kann, ohne dass die Mail
+   selbst eine echte Frist ist).
+
+**Bewusste Entscheidung:** zunächst nur der morgendliche Scan ist aktiv, der
+separate nächtliche Scan (`enable_overnight_scan()`, bis zu 80 Nachrichten)
+bleibt vorerst aus - kleinerer erster Schritt, bewährt sich erst im Alltag.
+
+Live auf dem echten Mac gegen die echte Inbox verifiziert: ein echter Scan
+erkannte 9 neue Mails, davon zunächst 3 Kalender-Vorschläge - nach dem
+Absender-Vorfilter-Fix noch 1 (ein Webinar-Marketing-Mail mit echtem Datum/
+Uhrzeit, bewusst als Vorschlag stehen gelassen statt selbst zu bestätigen
+oder zu verwerfen - genau dafür ist das Bestätigen-Dashboard da). Die zwei
+durch den vorherigen Bug fälschlich erzeugten Vorschläge (LinkedIn-Digest,
+eine automatische Anthropic-Bestätigungsmail) wurden manuell über
+`/api/mail/calendar-actions/resolve` verworfen, bevor Leon sie zu Gesicht
+bekommen hätte. 31 neue Tests insgesamt (15 + 13 + 3), Testsuite komplett
+grün, Xcode-Build erfolgreich.
