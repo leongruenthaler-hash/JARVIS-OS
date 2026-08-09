@@ -8,8 +8,28 @@ from memory import Memory
 
 
 class JarvisMemorySystem:
-    def __init__(self, base_path: Path | None = None):
-        self.memory = Memory(base_path)
+    def __init__(self, base_path_or_memory: Path | Memory | None = None):
+        # Nimmt entweder einen Pfad (baut sich eine eigene, neue Memory-Instanz - fuer
+        # Aufrufer ohne bereits existierende Instanz, z.B. beim Server-Start) ODER eine
+        # schon bestehende Memory-Instanz entgegen (dann wird DIESE weiterverwendet,
+        # keine neue gebaut). Der zweite Fall ist wichtig: Memory laedt seinen Zustand
+        # nur einmal bei __init__ in den Prozessspeicher und schreibt bei set()/save()
+        # zwar auf die Platte, liest aber nie automatisch wieder davon - zwei getrennte
+        # Memory-Objekte auf demselben Pfad laufen dadurch garantiert auseinander. Bisher
+        # baute sich JarvisMemorySystem IMMER eine neue, kurzlebige Memory-Instanz aus
+        # memory.base_path, auch wenn der Aufrufer schon eine lebendige Instanz hatte
+        # (z.B. lokal_server.py's langlebiges self.memory) - neu gespeicherte Fakten
+        # waren dadurch fuer diese langlebige Instanz (und damit fuer /api/memory/facts,
+        # die Gedaechtnis-Ansicht in der App) unsichtbar, bis der Server neu gestartet
+        # wurde. Schlimmer: ein anschliessender memory.trim_facts()-Aufruf auf der
+        # ORIGINALEN, jetzt veralteten Instanz hat die Datei danach sogar mit dem alten,
+        # leeren Stand ueberschrieben - der gerade gespeicherte Fakt ging komplett
+        # verloren, nicht nur unsichtbar. In der Praxis so gefunden: "Gedaechtnis" zeigte
+        # dauerhaft nichts an, obwohl auto_update_memory() "gespeichert" gemeldet hat.
+        if isinstance(base_path_or_memory, Memory):
+            self.memory = base_path_or_memory
+        else:
+            self.memory = Memory(base_path_or_memory)
 
     def remember_user_fact(
         self,

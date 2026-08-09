@@ -1286,8 +1286,8 @@ def _looks_self_referential(fact: str, user_name: str) -> bool:
     )
 
 
-def _run_llm_memory_extraction(user_text: str, base_path: Path, user_name: str, force_local: bool = False) -> None:
-    logger = PrivacyLogger(base_path / "logs")
+def _run_llm_memory_extraction(user_text: str, memory: Memory, user_name: str, force_local: bool = False) -> None:
+    logger = PrivacyLogger(memory.base_path / "logs")
     try:
         llm = LLMClient(CONFIG)
         route = llm.plan([], user_text=user_text, force_local=force_local)
@@ -1309,7 +1309,7 @@ def _run_llm_memory_extraction(user_text: str, base_path: Path, user_name: str, 
         logger.log("auto_memory_llm", "filtered", success=True, reason="third_party")
         return
 
-    memory_system = JarvisMemorySystem(base_path)
+    memory_system = JarvisMemorySystem(memory)
     category, sensitivity = classify_memory_category(fact)
     is_sensitive = not _passes_sensitive_content_filter(fact)
     if is_sensitive:
@@ -1347,7 +1347,7 @@ def auto_update_memory(memory: Memory, user_text: str, assistant_text: str = "")
 
     normalized = normalize_text(strip_wake_word_from_text(user_text))
     notes: list[str] = []
-    memory_system = JarvisMemorySystem(memory.base_path)
+    memory_system = JarvisMemorySystem(memory)
 
     forget_match = re.match(
         r"^(?:vergiss|lösche|loesche|streich|entferne)\s+(?:bitte\s+)?(?:dass\s+)?(.+)$",
@@ -1387,7 +1387,7 @@ def auto_update_memory(memory: Memory, user_text: str, assistant_text: str = "")
         voice_mode = str((memory.get("settings") or {}).get("voice_mode") or "")
         threading.Thread(
             target=_run_llm_memory_extraction,
-            args=(user_text, memory.base_path, configured_user_name(), voice_mode_forces_local_only(voice_mode)),
+            args=(user_text, memory, configured_user_name(), voice_mode_forces_local_only(voice_mode)),
             daemon=True,
         ).start()
 
@@ -2281,7 +2281,7 @@ def pending_action_matches_text(settings: dict, normalized_text: str) -> bool:
 def handle_memory_command(memory: Memory, text: str) -> str | None:
     normalized = text.strip()
     lowered = normalized.lower()
-    memory_system = JarvisMemorySystem(memory.base_path)
+    memory_system = JarvisMemorySystem(memory)
 
     if lowered in {"was weißt du über mich", "was weisst du über mich", "was hast du dir gemerkt"}:
         fact_summary = memory_system.facts_summary()
@@ -4974,7 +4974,7 @@ def handle_screen_command(text: str, memory: Memory | None = None) -> str | None
         content = normalize_memory_fact(fact_subject)
         if content:
             category, sensitivity = classify_memory_category(content)
-            memory_system = JarvisMemorySystem(memory.base_path)
+            memory_system = JarvisMemorySystem(memory)
             memory_system.maybe_remember(
                 content,
                 category=category,

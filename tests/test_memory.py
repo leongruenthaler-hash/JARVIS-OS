@@ -163,3 +163,63 @@ def test_upsert_fact_updates_existing_without_losing_id(memory):
     assert result == "updated"
     assert memory.all_facts()[0]["id"] == original_id
     assert len(memory.all_facts()) == 1
+
+
+# --- JarvisMemorySystem: Dual-Instance-Bug (2026-08-09) ---------------------
+#
+# JarvisMemorySystem(memory.base_path) hat frueher IMMER eine neue, eigene
+# Memory-Instanz gebaut, selbst wenn der Aufrufer schon eine lebendige Instanz
+# hatte. Memory laedt seinen Zustand nur einmal bei __init__ in den
+# Prozessspeicher - zwei getrennte Instanzen auf demselben Pfad laufen dadurch
+# auseinander: neu gespeicherte Fakten waren fuer die Instanz des Aufrufers
+# unsichtbar (lokal_server.py's langlebiges self.memory, das auch
+# /api/memory/facts bedient), bis der Prozess neu gestartet wurde. Ein
+# anschliessendes memory.trim_facts() auf der veralteten Instanz hat die Datei
+# danach sogar mit dem alten, leeren Stand ueberschrieben - echter Datenverlust,
+# nicht nur Unsichtbarkeit. Live auf dem echten Mac so gefunden: "Gedaechtnis"
+# zeigte dauerhaft nichts an.
+
+
+def test_jarvis_memory_system_accepts_existing_memory_instance(memory):
+    from core.memory_system import JarvisMemorySystem
+
+    memory_system = JarvisMemorySystem(memory)
+
+    assert memory_system.memory is memory
+
+
+def test_jarvis_memory_system_writes_are_visible_on_the_passed_in_instance(memory):
+    from core.memory_system import JarvisMemorySystem
+
+    memory_system = JarvisMemorySystem(memory)
+    result = memory_system.maybe_remember("Leon mag kurze Antworten.", category="Vorlieben", source="auto")
+
+    assert result == "created"
+    # Kernpunkt des Bugfixes: derselbe `memory`-Fixture-Aufrufer, NICHT eine
+    # versteckte zweite Instanz, sieht den Fakt sofort.
+    assert any(f["content"] == "Leon mag kurze Antworten" for f in memory.all_facts())
+
+
+def test_auto_update_memory_fact_survives_trim_facts_call(monkeypatch, memory):
+    import jarvis
+
+    monkeypatch.setattr(jarvis, "AUTO_MEMORY_ENABLED", True)
+    monkeypatch.setattr(jarvis, "has_permission", lambda permission: True)
+
+    notes = jarvis.auto_update_memory(memory, "Ich mag es, wenn du kurze Antworten gibst.")
+
+    assert notes  # "gespeichert unter ..."
+    # Regressionsfall: trim_facts() lief bisher auf einer veralteten Kopie und hat
+    # die Datei mit dem alten (leeren) Stand ueberschrieben - der gerade
+    # gespeicherte Fakt verschwand wieder, sofort nach dem Speichern.
+    facts = memory.all_facts(include_expired=True, include_rejected=True)
+    assert len(facts) == 1
+    assert "mag" in facts[0]["content"]
+
+
+def test_jarvis_memory_system_still_accepts_a_bare_path(tmp_path):
+    from core.memory_system import JarvisMemorySystem
+
+    memory_system = JarvisMemorySystem(tmp_path)
+
+    assert memory_system.memory.base_path == tmp_path

@@ -502,3 +502,54 @@ fielen drei echte Bugs auf, alle noch am selben Tag behoben:
 `tests/test_notes_and_tasks.py` neu) - insgesamt 171 Tests. Alle drei Fixes
 zusätzlich live gegen die echte laufende App auf dem Mac verifiziert (echte
 Notes.app, echte Aufgaben-Speicherung), nicht nur mit synthetischen Tests.
+
+## 20. Bug 4: Gedächtnis-Fakten unsichtbar/verloren (2026-08-09)
+
+Direkt im Anschluss an Bausteine 19 fiel beim gezielten Nachfragen ("ich kann
+im Gedächtnis nichts sehen") ein vierter, deutlich schwerwiegenderer Bug auf:
+automatisch erfasste Erinnerungen (`auto_update_memory()`) tauchten **nie**
+in `/api/memory/facts` (der Gedächtnis-Ansicht der App) auf, obwohl die
+Funktion selbst "gespeichert" meldete.
+
+**Root Cause:** `JarvisMemorySystem.__init__()` (`app/core/memory_system.py`)
+hat bisher bei **jedem** Aufruf eine komplett neue, eigene `Memory`-Instanz
+aus `memory.base_path` gebaut - auch wenn der Aufrufer (z. B.
+`local_server.py`s langlebiges `self.memory`, das seit Server-Start läuft)
+schon eine lebendige Instanz besaß. `Memory` lädt seinen Zustand nur einmal
+bei `__init__` in den Prozessspeicher; `set()`/`save()` schreiben zwar auf
+die Platte, aber nichts liest danach automatisch wieder davon. Zwei getrennte
+`Memory`-Objekte auf demselben Pfad laufen dadurch garantiert auseinander -
+ein Fakt, der über die kurzlebige, wegwerfbare Instanz gespeichert wurde, war
+für die langlebige Server-Instanz (und damit für jede Chat-Antwort und die
+Gedächtnis-Ansicht) einfach unsichtbar, bis der Prozess neu gestartet wurde.
+
+**Noch schlimmer:** `auto_update_memory()` rief danach `memory.trim_facts()`
+auf der **originalen, jetzt veralteten** Instanz auf - das hat die Datei mit
+dem alten (leeren) Stand überschrieben und den gerade erst gespeicherten
+Fakt sofort wieder gelöscht, nicht nur versteckt. In der Praxis: ein frisch
+gespeicherter Testfakt war noch im selben Funktionsaufruf wieder weg.
+
+Betroffen waren alle vier Aufrufstellen von `JarvisMemorySystem(...)` in
+`jarvis.py`: `auto_update_memory()` (regelbasierte Auto-Erfassung),
+`handle_memory_command()` ("was weißt du über mich"), die
+Bildschirm-Vision-Auto-Erinnerung sowie `_run_llm_memory_extraction()`
+(Stufe-2-LLM-Extraktion, aktuell per `auto_memory_llm_extraction_enabled:
+false` deaktiviert, aber vom selben Bug betroffen gewesen).
+
+**Fix:** `JarvisMemorySystem` akzeptiert jetzt wahlweise einen Pfad (baut
+sich wie bisher eine neue Instanz, für Aufrufer ohne bereits bestehende) ODER
+eine schon bestehende `Memory`-Instanz (wird dann direkt weiterverwendet,
+keine zweite gebaut). Alle vier Aufrufstellen übergeben jetzt die schon
+vorhandene `memory`-Instanz statt `memory.base_path` - dieselbe Instanz, mit
+der der Aufrufer danach auch liest, bleibt beim Schreiben synchron.
+
+5 neue Tests (`tests/test_memory.py` erweitert) - insgesamt 175 Tests, u. a.
+ein direkter Regressionstest für das `trim_facts()`-Überschreiben. Live auf
+dem echten Mac verifiziert: derselbe Testsatz, der vorher spurlos
+verschwand, ist jetzt sofort über dieselbe Memory-Instanz sichtbar.
+
+**Bekannter, unvermeidbarer Nebeneffekt des Testens:** Ein Testfakt ("Leon
+mag es") wurde beim Verifizieren tatsächlich in der echten Gedächtnis-Ansicht
+gespeichert (aus dem Testsatz "Ich mag es, wenn du kurze Antworten gibst.").
+Über die Gedächtnis-Ansicht in der App lösch- oder ablehnbar wie jede andere
+Erinnerung - wurde bewusst nicht automatisch entfernt.
