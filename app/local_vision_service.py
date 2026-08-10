@@ -230,7 +230,13 @@ class LocalVisionService:
         return str(data.get("response") or "").strip()
 
     def _parse_response(self, text: str) -> dict[str, Any]:
-        json_text = text.strip()
+        # Live getestet (2026-08-10): gemma3:4b umschliesst seine JSON-Antwort bei
+        # manchen Fotos mit Markdown-Codezaeunen (```json { ... } ```), obwohl der
+        # Prompt "kompaktes JSON" verlangt. Ohne das Entfernen der Zaeune landet der
+        # rohe, unformatierte Text im Fallback-Zweig unten direkt in "description".
+        # Gleiche Rettungs-Technik wie jarvis.py::_parse_llm_fact_response().
+        json_text = re.sub(r"^```(?:json)?\s*", "", text.strip(), flags=re.IGNORECASE)
+        json_text = re.sub(r"\s*```$", "", json_text).strip()
         match = re.search(r"\{.*\}", json_text, flags=re.DOTALL)
         if match:
             json_text = match.group(0)

@@ -1054,3 +1054,26 @@ separat als Aufgabe vorgemerkt.
 
 301 Tests weiterhin gruen (der Fix betrifft nur die Kompilier-Kommandozeile,
 keine neue testbare Logik). Xcode-Build erfolgreich.
+
+## 31. Markdown-Codezaeune im Vision-Parser behoben (2026-08-10)
+
+Der in Abschnitt 30 zurueckgestellte Punkt: `local_vision_service.py::_parse_response()`
+scheiterte bei einem Teil der Fotos, weil gemma3:4b seine JSON-Antwort
+manchmal in Markdown-Codezaeune packt (` ```json { ... } ``` `). Der Parser
+versuchte bisher direkt `json.loads()` auf den rohen Text (nach `\{.*\}`-
+Extraktion) - schlug das fehl, landete der komplette unformatierte Rohtext
+inklusive Zaeunen im Fallback-Zweig direkt in `description`/`objects`
+(sichtbar in `photos_index.json`, z.B. `description = '```json {
+"description": "Ein digitales Dashboard..." ...'`).
+
+**Fix:** vor dem Parsen werden fuehrende/abschliessende Codezaeune
+(` ```json ` oder ` ``` `) per Regex entfernt - gleiche Technik wie bereits
+in `jarvis.py::_parse_llm_fact_response()` fuer die Gedaechtnis-Extraktion.
+Schlaegt das Parsen trotzdem fehl, bleibt der bestehende Rohtext-Fallback
+unveraendert (kein Absturz, nur eine schwaechere Beschreibung).
+
+Neue Tests in `tests/test_local_vision_service.py` (6 Faelle, inkl.
+Regressionstest mit dem exakten Dashboard-Beispiel aus Abschnitt 30).
+Volle Suite unter `tests/` weiterhin gruen (307 Tests). Fix zusaetzlich nach
+`JarvisApp/Sources/JarvisApp/Resources/JarvisBackend/app/local_vision_service.py`
+kopiert (App-Bundle-Kopie).
