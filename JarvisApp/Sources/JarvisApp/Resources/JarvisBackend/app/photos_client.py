@@ -21,6 +21,27 @@ from typing import Any
 PHOTOS_HELPER_BUNDLE_ID = "com.leon.jarvis.photoshelper"
 
 
+def _macos_sdk_path() -> str:
+    """Ermittelt den SDK-Pfad, der tatsaechlich zum aktiven Xcode-Compiler passt
+    (nicht der von "xcrun --show-sdk-path" ohne "-sdk macosx", das auf diesem Mac
+    faelschlich die CommandLineTools-SDK liefert - siehe _ensure_helper()). Best
+    effort: bei Fehlern leerer String, dann laesst swiftc die SDK-Wahl wie zuvor
+    automatisch treffen, statt den Foto-Helfer-Kompilierlauf ganz scheitern zu
+    lassen."""
+    try:
+        result = subprocess.run(
+            ["xcrun", "--sdk", "macosx", "--show-sdk-path"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return ""
+
+
 class PhotosAccessError(RuntimeError):
     pass
 
@@ -723,6 +744,23 @@ class PhotoIndex:
             str(self.helper_source),
             "-o",
             str(self.helper_binary),
+            # Ohne explizites Ziel kompiliert swiftc gegen die aktuell installierte
+            # (teils Beta-)SDK-Version und schreibt deren Mindestversion fest ins
+            # Binary - auf Leons Mac (macOS 27.0) fuehrte das dazu, dass der Helfer
+            # macOS 28.0 verlangte und LaunchServices ihn komplett verweigerte
+            # (Fehler -10825, "requires conditional 28.0, run on 27.0"), lange bevor
+            # es ueberhaupt zu einer Fotos-Berechtigungsfrage kam. -target allein
+            # reicht nicht: ohne explizites -sdk greift auf diesem Mac faelschlich
+            # die (aeltere, nicht zum Compiler passende) CommandLineTools-SDK statt
+            # der zu Xcode gehoerenden - deshalb beides fest zusammen angeben, damit
+            # immer dieselbe, zum aktiven Compiler passende SDK verwendet wird.
+            "-target",
+            "arm64-apple-macosx14.0",
+        ]
+        sdk_path = _macos_sdk_path()
+        if sdk_path:
+            command += ["-sdk", sdk_path]
+        command += [
             "-Xlinker",
             "-sectcreate",
             "-Xlinker",

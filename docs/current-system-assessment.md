@@ -1001,3 +1001,56 @@ AppleScript (deutlich schnellerer Zugriff, aber ein eigenes, größeres
 Projekt analog zum bestehenden Photos-Helfer - eigener Plan nötig). Beides
 bewusst nicht selbstständig entschieden, da beides Leons Kalenderdaten-
 Darstellung bzw. den App-Umfang verändert.
+
+## 30. Echter Blocker für Foto-Vision gefunden und behoben (2026-08-10)
+
+Fortsetzung von Abschnitt 28. Der macOS-Fotozugriff blieb "denied", obwohl
+"Jarvis Photos Helper" nicht mal in Systemeinstellungen > Datenschutz &
+Sicherheit > Fotos gelistet war (von Leon bestätigt) - kein normaler
+Berechtigungs-Fall, sondern ein Start-Problem.
+
+**Root Cause gefunden über `log show` (Systemprotokoll):**
+```
+LAUNCH: Application being launched requires conditional 28.0, but is being
+run on an earlier version of the operating system 27.0
+```
+`app/photos_client.py::_ensure_helper()` kompilierte den Foto-Helfer bisher
+ohne explizites `-target` - `xcrun swiftc` griff dabei automatisch zur
+installierten (teils Beta-)SDK-Version und schrieb deren Mindestversion
+fest ins Binary. Auf Leons Mac (macOS 27.0) verlangte der so gebaute
+Helfer macOS 28.0 - LaunchServices verweigerte den Start komplett
+(Fehler -10825), lange bevor es ueberhaupt zu einer Fotos-Berechtigungs-
+frage kommen konnte. `tccutil reset` konnte das nicht beheben ("No such
+bundle identifier"), weil macOS nie eine Anfrage registrierte.
+
+**Fix:** `-target arm64-apple-macosx14.0` fest gesetzt (deutlich unter
+Leons aktueller und kommender macOS-Versionen). Ein reines `-target` ohne
+`-sdk` fuehrte allerdings zu einem zweiten Problem (falsche, nicht zum
+aktiven Compiler passende SDK-Automatik auf diesem Mac - CommandLineTools-
+SDK statt Xcode-SDK, Swift-Versions-Mismatch beim Kompilieren) - deshalb
+zusaetzlich `-sdk` explizit auf den korrekten, ueber `xcrun --sdk macosx
+--show-sdk-path` ermittelten Pfad gesetzt (neue Hilfsfunktion
+`_macos_sdk_path()`, best effort mit leerem Fallback).
+
+**Live end-to-end verifiziert, mit echten Daten:** nach dem Fix zeigte
+`permission_status()` erstmals "notDetermined" statt "denied", der echte
+macOS-Dialog erschien und wurde von Leon bestätigt, Status danach dauerhaft
+"authorized". Danach vollstaendiger Kreislauf live durchlaufen:
+Hintergrundscan indizierte 3574 echte Fotos + 136 Videos aus Leons
+Mediathek (vorher: nie moeglich), anschliessende lokale Vision-Analyse
+(gemma3:4b ueber Ollama, laeuft als multimodales Modell - kein llava
+noetig) erzeugte echte, inhaltliche deutsche Beschreibungen ("Ein
+digitales Dashboard mit verschiedenen Informationen...", "Ein Screenshot
+einer Smart-Home-Oberfläche..."). Der automatische naechtliche Zyklus aus
+Abschnitt 28 ist damit erstmals vollstaendig nutzbar, nicht nur auf dem
+Papier fertig.
+
+**Separat gefunden, nicht behoben (an Leon delegiert):** bei einem Teil der
+Fotos liefert das lokale Modell die JSON-Antwort in Markdown-Codezaeunen,
+die der Parser in `local_vision_service.py` nicht abfaengt - der rohe
+JSON-Text landet dann unformatiert in der Beschreibung statt sauber
+extrahiert zu werden. Betrifft nur einzelne Antworten, kein Blocker,
+separat als Aufgabe vorgemerkt.
+
+301 Tests weiterhin gruen (der Fix betrifft nur die Kompilier-Kommandozeile,
+keine neue testbare Logik). Xcode-Build erfolgreich.
