@@ -888,6 +888,22 @@ final class LocalServerController: ObservableObject {
         try await apiClient.transcribeVoice(audioPath: audioPath, sampleRate: sampleRate)
     }
 
+    func voiceProfileStatus() async throws -> VoiceProfileStatus {
+        try await apiClient.voiceProfileStatus()
+    }
+
+    func enrollVoiceProfile(audioPaths: [String]) async throws -> VoiceProfileEnrollResponse {
+        try await apiClient.enrollVoiceProfile(audioPaths: audioPaths)
+    }
+
+    func verifyVoiceProfile(audioPath: String) async throws -> VoiceProfileVerifyResponse {
+        try await apiClient.verifyVoiceProfile(audioPath: audioPath)
+    }
+
+    func resetVoiceProfile() async throws {
+        try await apiClient.resetVoiceProfile()
+    }
+
     func prewarmVoicePipeline() async {
         do {
             _ = try await apiClient.prewarmVoicePipeline()

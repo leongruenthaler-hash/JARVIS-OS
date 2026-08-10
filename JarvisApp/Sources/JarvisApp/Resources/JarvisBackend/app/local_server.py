@@ -44,6 +44,7 @@ from model_manager import ModelManager, ollama_base_url
 from model_router import ModelRouter
 from music_client import now_playing as music_now_playing
 from photos_client import PhotoBackgroundWorker, PhotoIndex
+from voice_profile import VoiceProfileError, VoiceProfileStore, DEFAULT_SPEAKER_THRESHOLD
 from permission_manager import PermissionManager
 from privacy_dashboard import PrivacyDashboard
 from privacy_logger import PrivacyLogger
@@ -188,6 +189,7 @@ class JarvisLocalServer:
         self.mail_worker = None
         self.news_worker = None
         self.photo_worker = None
+        self.voice_profile = VoiceProfileStore()
         self.pending_mail_followup = False
         self._mail_scan_status_path = ROOT / "memory" / "mail_scan_status.json"
         self._file_scan_status_path = ROOT / "memory" / "file_scan_status.json"
@@ -1478,6 +1480,35 @@ class JarvisLocalServer:
         }
 
 
+    def enroll_voice_profile(self, audio_paths: list[str]) -> dict[str, Any]:
+        """Einlernen der eigenen Stimme ueber die Einstellungen (nicht per
+        Sprachbefehl - Leons ausdruecklicher Wunsch), siehe
+        plans/2026-08-10-jarvis-sprecher-verifikation-weckwort.md. Nimmt mehrere
+        kurze, bereits lokal aufgenommene WAV-Dateipfade entgegen (dieselbe
+        AudioCaptureService-Aufnahme, die auch der Immer-Zuhoer-Modus nutzt)."""
+        try:
+            return self.voice_profile.enroll(audio_paths)
+        except VoiceProfileError as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def verify_voice_profile(self, audio_path: str) -> dict[str, Any]:
+        """Prueft, ob eine kurze Aufnahme zu Leons eingelerntem Stimmprofil passt -
+        aufgerufen vom Immer-Zuhoer-Modus direkt nach einem Weckwort-Treffer, BEVOR
+        das Gespraech beginnt. Ohne eingelerntes Profil liefert
+        VoiceProfileStore.verify() immer match=True - das Feature blockiert nie
+        versehentlich jemanden, der es nicht aktiv eingerichtet hat."""
+        threshold = float(self.config.get("speaker_verification_threshold", DEFAULT_SPEAKER_THRESHOLD))
+        try:
+            return self.voice_profile.verify(audio_path, threshold=threshold)
+        except VoiceProfileError as exc:
+            # Ein Verifikations-Fehler (z.B. kaputte Aufnahme) darf Leon nicht
+            # aussperren - im Zweifel durchlassen statt eine echte Anfrage von ihm
+            # selbst stillschweigend zu blockieren.
+            return {"match": True, "score": None, "reason": "error", "error": str(exc)}
+
+    def reset_voice_profile(self) -> dict[str, Any]:
+        return {"ok": self.voice_profile.reset()}
+
     def transcribe_voice(self, audio_path: str, sample_rate: float | None = None) -> dict[str, Any]:
         path = Path(str(audio_path or "")).expanduser()
         if not path.is_absolute():
@@ -2052,6 +2083,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, check_secure_storage())
             elif path == "/api/photos/permission-status":
                 self._json(200, SERVER.photo_permission_status())
+            elif path == "/api/voice/profile/status":
+                self._json(200, {"enrolled": SERVER.voice_profile.has_profile()})
             elif path == "/api/photos/vision-status":
                 self._json(200, SERVER.local_photo_vision_status())
             elif path == "/api/calendar/overview":
@@ -2108,6 +2141,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, SERVER.set_voice_speaking(bool(payload.get("speaking"))))
             elif path == "/api/voice/transcribe":
                 self._json(200, SERVER.transcribe_voice(str(payload.get("audio_path") or ""), payload.get("sample_rate")))
+            elif path == "/api/voice/enroll":
+                self._json(200, SERVER.enroll_voice_profile(list(payload.get("audio_paths") or [])))
+            elif path == "/api/voice/verify":
+                self._json(200, SERVER.verify_voice_profile(str(payload.get("audio_path") or "")))
+            elif path == "/api/voice/profile/reset":
+                self._json(200, SERVER.reset_voice_profile())
             elif path == "/api/models":
                 self._json(200, SERVER.set_model(payload))
             elif path == "/api/models/pull":

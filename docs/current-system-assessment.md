@@ -1077,3 +1077,68 @@ Regressionstest mit dem exakten Dashboard-Beispiel aus Abschnitt 30).
 Volle Suite unter `tests/` weiterhin gruen (307 Tests). Fix zusaetzlich nach
 `JarvisApp/Sources/JarvisApp/Resources/JarvisBackend/app/local_vision_service.py`
 kopiert (App-Bundle-Kopie).
+
+## 32. Sprecher-Verifikation beim Weckwort (2026-08-10)
+
+Siehe `plans/2026-08-10-jarvis-sprecher-verifikation-weckwort.md`. Leons
+Wunsch: Jarvis soll wie Siri pruefen, ob wirklich er spricht - nur beim
+Weckwort ("Jarvis"), nicht bei jedem einzelnen Satz danach. Einlernen
+laeuft ueber einen neuen Punkt in den Einstellungen, nicht per Sprachbefehl.
+
+**Recherche-Korrektur unterwegs:** der erste Rechercheansatz zielte auf die
+Python-CLI (`app/jarvis.py::main()`), die tatsaechlich relevante Stelle ist
+aber der Immer-Zuhoer-Modus der App - dort hat `WakeWordListener.swift`
+einen eigenen, komplett separaten Weckwort-Mechanismus (rein lokal ueber
+Apples `SFSpeechRecognizer`), unabhaengig von der Python-Logik.
+
+**Umsetzung:**
+- Neues Modul `app/voice_profile.py::VoiceProfileStore` - lokales
+  Sprecher-Embedding ueber Resemblyzer (256-dim, kompakt, laeuft auf CPU,
+  keine Cloud-Anfrage). Ohne eingelerntes Profil liefert `verify()` immer
+  `match=True` - blockiert nie versehentlich jemanden, der das Feature
+  nicht aktiv eingerichtet hat.
+- Drei neue Server-Endpunkte: `/api/voice/enroll` (mehrere kurze
+  WAV-Dateipfade → gemitteltes Profil), `/api/voice/verify` (ein Clip →
+  Kosinus-Vergleich mit dem Profil), `/api/voice/profile/status` +
+  `/api/voice/profile/reset`.
+- `WakeWordListener`s `runAlwaysListenLoop()` (`AppState.swift`) erweitert:
+  nach einem Weckwort-Treffer wird bei aktivierter Verifikation zusaetzlich
+  `/api/voice/verify` mit demselben, bereits aufgenommenen Audio-Clip
+  aufgerufen, BEVOR die Datei geloescht wird. Treffer -> Gespraech startet
+  wie bisher. Kein Treffer -> kurze Rueckmeldung ("Das klingt nicht nach
+  Ihnen, Sir.") statt Aktivierung (Leons Entscheidung: lieber eine kurze
+  Rueckmeldung als stille Ablehnung, damit er einen Fehlausschluss sofort
+  bemerkt).
+- Neuer Abschnitt in `SettingsView.swift` (neben dem bestehenden
+  "Immer-Zuhoer"-Schalter): Button "Meine Stimme einlernen" (nimmt 4 kurze
+  Saetze nacheinander auf), Schalter "Beim Weckwort aktivieren" (nur
+  bedienbar, wenn ein Profil eingelernt ist), Button zum Loeschen des
+  Profils.
+- Schwellenwert grosszuegig (0.6) per Leons Entscheidung - lieber ihn nie
+  faelschlich ablehnen als eine sehr aehnliche fremde Stimme zuverlaessig
+  ausschliessen. Keine Notfall-/Familienumgehung, ebenfalls Leons
+  Entscheidung.
+- Neue Abhaengigkeit `resemblyzer` (plus Unterabhaengigkeiten librosa/
+  scipy/webrtcvad/scikit-learn) zu `requirements.txt` hinzugefuegt, in der
+  Produktiv-venv installiert.
+
+8 neue Tests (`tests/test_voice_profile.py`) - Einlernen/Vergleich/Reset,
+`_embed()` gemockt fuer deterministische, schnelle Tests statt das echte
+Modell in jedem Testlauf aufzurufen. 315 Tests insgesamt, alle gruen.
+Xcode-Build erfolgreich.
+
+**Live-Verifikation:** volle Kette mit echten, unterscheidbaren
+synthetischen Stimmen getestet (macOS `say` mit zwei verschiedenen
+Stimmen). Eingelernt mit Stimme A, Probe mit derselben Stimme: Treffer
+(Score 0.93). Probe mit einer klar anderen Stimme: korrekt abgelehnt
+(Score 0.54, unter dem Schwellenwert). Reset-Endpunkt und "kein Profil ->
+immer Treffer"-Verhalten ebenfalls bestaetigt. Regressionscheck
+(allgemeiner Chat) unauffaellig.
+
+**Einschraenkung:** die Server-/API-Schicht wurde vollstaendig end-to-end
+mit echtem Audio verifiziert; die tatsaechliche Klick-Interaktion mit dem
+neuen Einstellungen-Bereich (Button/Schalter in der laufenden macOS-App)
+wurde nicht durchgeklickt, da dafuer kein GUI-Automatisierungswerkzeug fuer
+native macOS-Fenster zur Verfuegung steht - nur per Code-Review geprueft.
+Leon sollte den neuen Abschnitt in den Einstellungen einmal kurz selbst
+ansehen.

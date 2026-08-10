@@ -7,3 +7,4 @@ edge-tts
 miniaudio
 torch
 keyring
+resemblyzer

@@ -75,6 +75,12 @@ final class AppState: ObservableObject {
     @Published var fastVoiceMode = UserDefaults.standard.object(forKey: "JarvisFastVoiceMode") as? Bool ?? true
     @Published var selectedVoice = UserDefaults.standard.string(forKey: "JarvisEdgeVoice") ?? JarvisVoiceOption.killian.rawValue
     @Published var alwaysListenEnabled = UserDefaults.standard.object(forKey: "JarvisAlwaysListenEnabled") as? Bool ?? false
+    // Sprecher-Verifikation beim Weckwort, siehe
+    // plans/2026-08-10-jarvis-sprecher-verifikation-weckwort.md - nur wirksam,
+    // solange auch ein Stimmprofil eingelernt ist (voiceProfileEnrolled).
+    @Published var speakerVerificationEnabled = UserDefaults.standard.object(forKey: "JarvisSpeakerVerificationEnabled") as? Bool ?? false
+    @Published private(set) var voiceProfileEnrolled = false
+    @Published private(set) var isEnrollingVoiceProfile = false
     @Published var lastError: String?
     /// Progress message during first-run setup (Command Line Tools / venv / pip install).
     /// Kept separate from `lastError` on purpose - it's shown with neutral styling, not as
@@ -125,6 +131,7 @@ final class AppState: ObservableObject {
             await saveFastVoiceModeToCore()
         }
         await refreshVoiceMode()
+        await refreshVoiceProfileStatus()
         autoListenEnabled = true
         keepListeningAfterGreeting = true
         await presentStartupGreetingIfNeeded()
@@ -553,15 +560,41 @@ final class AppState: ObservableObject {
                     logVoiceEvent("wake word check failed: \(error.localizedDescription)")
                     transcript = ""
                 }
-                try? FileManager.default.removeItem(at: capture.fileURL)
 
                 if WakeWordListener.containsWakeWord(transcript) {
                     logVoiceEvent("wake word matched: \(transcript)")
-                    var conversationShouldEnd = await listenOnce(retryCount: 0, allowWhileSpeaking: false, isAlwaysListenTurn: true)
-                    while !conversationShouldEnd && alwaysListenEnabled && !Task.isCancelled {
-                        conversationShouldEnd = await listenOnce(retryCount: 0, allowWhileSpeaking: false, isAlwaysListenTurn: true)
+
+                    // Sprecher-Verifikation NUR beim Weckwort, nicht pro Satz danach - Leons
+                    // ausdruecklicher Wunsch, siehe
+                    // plans/2026-08-10-jarvis-sprecher-verifikation-weckwort.md. Die WAV-Datei
+                    // wird erst NACH dieser Pruefung geloescht (anders als vorher), da sie hier
+                    // noch gebraucht wird.
+                    var speakerMatches = true
+                    if speakerVerificationEnabled && voiceProfileEnrolled {
+                        do {
+                            let verification = try await serverController.verifyVoiceProfile(audioPath: capture.fileURL.path)
+                            speakerMatches = verification.match
+                            logVoiceEvent("speaker verification: match=\(verification.match) score=\(verification.score.map { String($0) } ?? "nil")")
+                        } catch {
+                            // Ein fehlgeschlagener Verifikations-Aufruf darf Leon nicht aussperren -
+                            // im Zweifel durchlassen statt eine echte Anfrage von ihm stillschweigend
+                            // zu blockieren.
+                            logVoiceEvent("speaker verification failed, allowing through: \(error.localizedDescription)")
+                        }
+                    }
+                    try? FileManager.default.removeItem(at: capture.fileURL)
+
+                    if speakerMatches {
+                        var conversationShouldEnd = await listenOnce(retryCount: 0, allowWhileSpeaking: false, isAlwaysListenTurn: true)
+                        while !conversationShouldEnd && alwaysListenEnabled && !Task.isCancelled {
+                            conversationShouldEnd = await listenOnce(retryCount: 0, allowWhileSpeaking: false, isAlwaysListenTurn: true)
+                        }
+                    } else {
+                        await speakWakeWordRejection()
+                        setVoiceState(.alwaysListenStandby, reason: "speaker_not_recognized")
                     }
                 } else {
+                    try? FileManager.default.removeItem(at: capture.fileURL)
                     setVoiceState(.alwaysListenStandby, reason: "no_wake_word")
                 }
             } catch AudioCaptureService.CaptureError.noSpeechDetected, AudioCaptureService.CaptureError.cancelled {
@@ -1920,6 +1953,98 @@ final class AppState: ObservableObject {
 
     private func prewarmVoicePipeline() async {
         await serverController.prewarmVoicePipeline()
+    }
+
+    // MARK: - Sprecher-Verifikation (siehe plans/2026-08-10-jarvis-sprecher-
+    // verifikation-weckwort.md) - Einlernen laeuft ueber einen eigenen Punkt in den
+    // Einstellungen (Leons ausdruecklicher Wunsch, analog zu Siris Einrichtung),
+    // nicht per Sprachbefehl.
+
+    func refreshVoiceProfileStatus() async {
+        do {
+            let status = try await serverController.voiceProfileStatus()
+            voiceProfileEnrolled = status.enrolled
+        } catch {
+            // Best-effort - ein fehlgeschlagener Status-Check darf die Einstellungen
+            // nicht blockieren, der Nutzer sieht dann einfach weiter "nicht eingelernt".
+        }
+    }
+
+    /// Nimmt `sampleCount` kurze Saetze nacheinander auf und schickt sie zum Einlernen
+    /// an den lokalen Server. `onPrompt` wird vor jeder Aufnahme aufgerufen, damit die
+    /// Einstellungen-Ansicht anzeigen kann, welcher Satz gerade dran ist.
+    func enrollVoiceProfile(
+        sampleCount: Int = 4,
+        onPrompt: @MainActor (_ index: Int, _ total: Int) -> Void = { _, _ in }
+    ) async {
+        guard !isEnrollingVoiceProfile else { return }
+        isEnrollingVoiceProfile = true
+        defer { isEnrollingVoiceProfile = false }
+
+        var recordedFileURLs: [URL] = []
+        defer {
+            for url in recordedFileURLs {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+
+        do {
+            guard await audioCaptureService.requestPermissionIfNeeded() else {
+                lastError = "Mikrofonzugriff fehlt. Ohne Mikrofon kann ich Ihre Stimme nicht einlernen."
+                return
+            }
+
+            for index in 0..<sampleCount {
+                onPrompt(index, sampleCount)
+                let capture = try await audioCaptureService.recordUtterance(
+                    maxDuration: 6.0,
+                    silenceLimit: 0.9,
+                    minSpeechDuration: 0.6,
+                    maxWaitForSpeech: 15.0,
+                    sampleRate: 16_000,
+                    threshold: 0.010
+                )
+                recordedFileURLs.append(capture.fileURL)
+            }
+
+            let response = try await serverController.enrollVoiceProfile(
+                audioPaths: recordedFileURLs.map { $0.path }
+            )
+            if response.ok {
+                voiceProfileEnrolled = true
+            } else {
+                lastError = response.error ?? "Das Einlernen der Stimme ist fehlgeschlagen."
+            }
+        } catch {
+            lastError = "Das Einlernen der Stimme ist fehlgeschlagen: \(error.localizedDescription)"
+        }
+    }
+
+    /// Kurze Rueckmeldung statt Stille bei abgelehnter Stimme - Leons Entscheidung
+    /// (siehe Plan): damit er sofort merkt, falls seine eigene Stimme mal faelschlich
+    /// abgelehnt wird, statt dass Jarvis unerklaerlich einfach nicht reagiert.
+    private func speakWakeWordRejection() async {
+        do {
+            isJarvisSpeaking = true
+            await serverController.setVoiceSpeakingState(true)
+            try await ttsService.speak("Das klingt nicht nach Ihnen, Sir.") { _ in }
+        } catch {
+            // Best-effort - wenn die Sprachausgabe selbst fehlschlaegt, bleibt Jarvis
+            // einfach im Standby, statt den Immer-Zuhoer-Loop abzubrechen.
+        }
+        isJarvisSpeaking = false
+        await serverController.setVoiceSpeakingState(false)
+    }
+
+    func resetVoiceProfile() async {
+        do {
+            try await serverController.resetVoiceProfile()
+            voiceProfileEnrolled = false
+            speakerVerificationEnabled = false
+            UserDefaults.standard.set(false, forKey: "JarvisSpeakerVerificationEnabled")
+        } catch {
+            lastError = "Das Stimmprofil konnte nicht zurückgesetzt werden."
+        }
     }
 
     private func resumeContinuousVoiceMode(reason: String) {

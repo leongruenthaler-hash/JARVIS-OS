@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var apiKey = ""
     @State private var weatherCityDraft = ""
     @State private var usageGoalDraft = ""
+    @State private var voiceEnrollmentPrompt = ""
 
     var body: some View {
         ScrollView {
@@ -173,6 +174,59 @@ struct SettingsView: View {
                 .onChange(of: appState.alwaysListenEnabled) { _, _ in
                     Task { await appState.applyAlwaysListenChange() }
                 }
+
+                Divider().opacity(0.4)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Sprecher-Verifikation")
+                        .font(.headline)
+                    Text("Prüft beim Weckwort, ob wirklich Ihre Stimme spricht - wie bei Siri. Erkennt Jarvis eine andere Stimme, meldet er sich kurz zurück statt zu aktivieren. Läuft komplett lokal, keine Cloud-Anfrage.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if appState.isEnrollingVoiceProfile {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                            Text(voiceEnrollmentPrompt)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        HStack(spacing: 10) {
+                            Button {
+                                Task { await runVoiceEnrollment() }
+                            } label: {
+                                Label(
+                                    appState.voiceProfileEnrolled ? "Stimme neu einlernen" : "Meine Stimme einlernen",
+                                    systemImage: "waveform"
+                                )
+                            }
+                            if appState.voiceProfileEnrolled {
+                                Button(role: .destructive) {
+                                    Task { await appState.resetVoiceProfile() }
+                                } label: {
+                                    Label("Stimmprofil löschen", systemImage: "trash")
+                                }
+                            }
+                        }
+                    }
+
+                    Toggle(isOn: $appState.speakerVerificationEnabled) {
+                        Text("Beim Weckwort aktivieren")
+                            .font(.callout)
+                    }
+                    .disabled(!appState.voiceProfileEnrolled)
+                    .onChange(of: appState.speakerVerificationEnabled) { _, newValue in
+                        UserDefaults.standard.set(newValue, forKey: "JarvisSpeakerVerificationEnabled")
+                    }
+                    if !appState.voiceProfileEnrolled {
+                        Text("Erst Stimme einlernen, um diesen Schalter zu aktivieren.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .task { await appState.refreshVoiceProfileStatus() }
 
                 Divider().opacity(0.4)
 
@@ -505,6 +559,14 @@ struct SettingsView: View {
         let trimmed = usageGoalDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let value = Double(trimmed), value > 0 else { return }
         appState.updateDailyUsageGoal(value)
+    }
+
+    private func runVoiceEnrollment() async {
+        voiceEnrollmentPrompt = "Vorbereitung ..."
+        await appState.enrollVoiceProfile { index, total in
+            voiceEnrollmentPrompt = "Sag ein paar Worte, Satz \(index + 1) von \(total) ..."
+        }
+        voiceEnrollmentPrompt = ""
     }
 
     private func voiceModeLabel(_ mode: String) -> String {

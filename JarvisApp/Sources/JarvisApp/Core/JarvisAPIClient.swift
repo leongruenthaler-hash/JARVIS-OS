@@ -97,6 +97,35 @@ struct JarvisAPIClient {
         let _: Response = try await post("/api/voice/cancel-listening", body: EmptyBody())
     }
 
+    /// Sprecher-Verifikation beim Weckwort, siehe
+    /// plans/2026-08-10-jarvis-sprecher-verifikation-weckwort.md. Einlernen und
+    /// Pruefen laufen beide lokal auf dem bereits laufenden Python-Server -
+    /// Audiodaten verlassen nie das Geraet.
+    func voiceProfileStatus() async throws -> VoiceProfileStatus {
+        try await get("/api/voice/profile/status")
+    }
+
+    func enrollVoiceProfile(audioPaths: [String]) async throws -> VoiceProfileEnrollResponse {
+        struct Request: Encodable {
+            let audioPaths: [String]
+            enum CodingKeys: String, CodingKey { case audioPaths = "audio_paths" }
+        }
+        return try await post("/api/voice/enroll", body: Request(audioPaths: audioPaths), timeoutInterval: 60)
+    }
+
+    func verifyVoiceProfile(audioPath: String) async throws -> VoiceProfileVerifyResponse {
+        struct Request: Encodable {
+            let audioPath: String
+            enum CodingKeys: String, CodingKey { case audioPath = "audio_path" }
+        }
+        return try await post("/api/voice/verify", body: Request(audioPath: audioPath), timeoutInterval: 20)
+    }
+
+    func resetVoiceProfile() async throws {
+        struct Response: Decodable { let ok: Bool }
+        let _: Response = try await post("/api/voice/profile/reset", body: EmptyBody())
+    }
+
     func setVoiceSpeakingState(_ isSpeaking: Bool) async throws {
         struct Request: Encodable { let speaking: Bool }
         struct Response: Decodable { let ok: Bool }
@@ -694,4 +723,26 @@ struct VoiceTranscriptionResponse: Decodable {
         case model
         case error
     }
+}
+
+struct VoiceProfileStatus: Decodable {
+    let enrolled: Bool
+}
+
+struct VoiceProfileEnrollResponse: Decodable {
+    let ok: Bool
+    let sampleCount: Int?
+    let error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case sampleCount = "sample_count"
+        case error
+    }
+}
+
+struct VoiceProfileVerifyResponse: Decodable {
+    let match: Bool
+    let score: Double?
+    let reason: String?
 }
