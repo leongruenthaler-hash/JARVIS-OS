@@ -1905,7 +1905,13 @@ def handle_preference_command(memory: Memory, text: str) -> str | None:
 
 def handle_daily_briefing_command(memory: Memory, text: str) -> str | None:
     normalized = normalize_text(text)
-    if "tagesbriefing" not in normalized and "morgenübersicht" not in normalized and "morgenuebersicht" not in normalized and "abendbriefing" not in normalized:
+    # "briefing" deckt als Teilstring auch "morgen briefing"/"abend briefing"
+    # (als zwei separate Woerter gesprochen/getippt) sowie "tagesbriefing"/
+    # "abendbriefing" ab - vorher wurden nur die exakten Komposita erkannt,
+    # sodass z.B. "starte das morgen briefing" durchrutschte und stattdessen
+    # beim allgemeinen Chat landete, der dann mangels echter Daten frei
+    # erfundene Inhalte produzierte (siehe Screenshot-Bugreport von Leon).
+    if "briefing" not in normalized and "morgenübersicht" not in normalized and "morgenuebersicht" not in normalized:
         return None
 
     calendar_items = []
@@ -5579,7 +5585,7 @@ def answer_message(
     Websuche, finaler LLM-Aufruf); jeder Aufrufer bleibt nur noch fuer eigene I/O
     zustaendig (CLI: print/speak/record_exchange; Server: HTTP-Response/Streaming/
     _finalize_answer) sowie fuer aufrufer-spezifische Vorab-Kurzbefehle (CLI:
-    route_fast_intent/Tagesbriefing; Server: Dashboard-Statusfragen), die bewusst
+    route_fast_intent; Server: Dashboard-Statusfragen), die bewusst
     NICHT Teil dieser Funktion sind, weil sie nur fuer den jeweiligen Aufrufer Sinn
     ergeben. `config` wird explizit uebergeben statt das Modul-globale CONFIG zu
     nutzen, weil local_server.py sein eigenes, unabhaengig geladenes Config-Dict
@@ -5596,6 +5602,17 @@ def answer_message(
 
     if is_end_command(question):
         return _result("Alles klar. Ich bin wieder still, bis du Jarvis sagst.")
+
+    # Tagesbriefing bewusst VOR der direct_handlers-Kette (wie main() das vor
+    # der Zusammenfuehrung bereits als eigenen Vorab-Check tat) statt als
+    # regulaerer Domaenen-Handler weiter unten - Briefings sollen auch dann
+    # sofort greifen, wenn zufaellig eine pending_note/pending_action-Anfrage
+    # offen ist. Bisher lief dieser Check nur in main() (CLI), NICHT im
+    # Server-/App-Pfad - deshalb erfand die App bei "Morgen Briefing" frei
+    # Inhalte, statt echte Kalender-/Aufgaben-/Mail-Daten zu nutzen.
+    briefing_answer = handle_daily_briefing_command(memory, question)
+    if briefing_answer is not None:
+        return _result(briefing_answer)
 
     # record_mode steuert bewusst pro Handler, ob/wie record_exchange() aufgerufen
     # wird - das ist die einzige Stelle, an der main() und _answer_with_core() vor
@@ -5968,12 +5985,6 @@ def main():
             if fast_intent_answer is not None:
                 print(f"\nJARVIS: {console_text(fast_intent_answer, 'answer')}")
                 speak(fast_intent_answer, voice=voice)
-                continue
-
-            briefing_answer = handle_daily_briefing_command(memory, question)
-            if briefing_answer is not None:
-                print(f"\nJARVIS: {console_text(briefing_answer, 'answer')}")
-                speak(briefing_answer, voice=voice)
                 continue
 
             answer_started = time.perf_counter()

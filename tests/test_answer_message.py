@@ -200,6 +200,38 @@ def test_falls_through_to_chat_when_nothing_matches(memory, workers):
     assert result.model == "phi4-mini"
 
 
+# --- Tagesbriefing: muss auch im Server-/App-Pfad greifen, nicht nur CLI -------
+# (Bugreport 2026-08-10: "starte das morgen Briefing" im App-Chat fiel bisher
+# durch die gesamte Kette durch und landete beim allgemeinen Chat, der ohne
+# echte Kalender-/Aufgaben-/Mail-Daten frei erfundene Inhalte produzierte.)
+
+
+def test_briefing_request_uses_real_data_not_general_chat(memory, workers):
+    llm = _FakeLLM(answer="Frei erfundene Antwort")
+    with patch.object(jarvis, "handle_daily_briefing_command", return_value="Echtes Briefing mit echten Daten") as fake_briefing:
+        result = jarvis.answer_message("starte doch bitte mal das morgen Briefing", memory, llm, {}, workers=workers)
+
+    fake_briefing.assert_called_once()
+    assert result.text == "Echtes Briefing mit echten Daten"
+    assert llm.ask_calls == []
+
+
+def test_briefing_trigger_matches_words_separated_by_space(memory):
+    # handle_daily_briefing_command selbst pruefen (nicht gemockt): "morgen
+    # briefing" als zwei separate Woerter muss erkannt werden, nicht nur die
+    # exakten Komposita "tagesbriefing"/"morgenuebersicht"/"abendbriefing".
+    with patch.object(jarvis, "list_upcoming_calendar_items", return_value={"items": []}), \
+         patch.object(jarvis, "list_open_reminders", return_value={"items": []}), \
+         patch.object(jarvis, "has_permission", return_value=False):
+        result = jarvis.handle_daily_briefing_command(memory, "starte doch bitte mal das morgen Briefing")
+
+    assert result is not None
+
+
+def test_briefing_trigger_none_for_unrelated_text(memory):
+    assert jarvis.handle_daily_briefing_command(memory, "wie wird das Wetter") is None
+
+
 def test_streaming_uses_ask_stream_and_forwards_chunks(memory, workers):
     llm = _FakeLLM(answer="Gestreamte Antwort")
     chunks = []

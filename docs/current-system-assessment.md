@@ -823,3 +823,41 @@ echten Mac gegen den Server-Pfad verifiziert: allgemeiner Chat, Kalender,
 Notizen, Mail-Übersicht und Modellwechsel laufen alle korrekt über die neue
 gemeinsame Funktion; Gesprächsverlauf bestätigt die neue,
 zurückhaltendere Aufzeichnung für Hausmeister-Kommandos.
+
+## 26. Tagesbriefing im App-Chat frei erfunden statt echter Daten (2026-08-10)
+
+**Bugreport:** Leon tippte im App-Chat "starte doch bitte mal das morgen
+Briefing" und bekam ein Tagesbriefing mit erfundenen Sitzungsteilnehmern
+("Frau Schmidt", "Herr Müller") und einem völlig themenfremden, bizarren
+Satz über eine Katze - ohne jeden Bezug zu echten Kalender-/Aufgaben-/
+Mail-Daten.
+
+**Ursache, zwei kombinierte Lücken:**
+- `handle_daily_briefing_command()` erkannte nur die exakten Komposita
+  "tagesbriefing"/"morgenübersicht"/"abendbriefing" als Auslöser - "morgen
+  Briefing" als zwei separate Wörter fiel durch, egal welcher Aufrufer.
+- Selbst mit passendem Auslöser lief `handle_daily_briefing_command()`
+  bisher **nur** als CLI-eigener Vorab-Check in `main()`, VOR dem Aufruf von
+  `answer_message()` - im App-/Server-Pfad (`_answer_with_core()`) gab es
+  dafür gar keine Entsprechung im Chat-Text-Pfad (nur einen separaten
+  Dashboard-Button-Endpunkt `/api/daily-briefing`). Jede Briefing-Anfrage im
+  App-Chat lief deshalb immer bis zum allgemeinen, werkzeuglosen LLM-Aufruf
+  durch, der ohne echte Daten frei improvisierte.
+
+**Fix:**
+- Auslöser-Erkennung auf den Teilstring "briefing" verallgemeinert (deckt
+  "tagesbriefing", "abendbriefing", "morgen briefing", "briefing bitte" etc.
+  gleichermaßen ab).
+- `handle_daily_briefing_command()` als erster Check innerhalb von
+  `answer_message()` selbst verankert (vor der `direct_handlers`-Kette,
+  analog zu `main()`s bisheriger Priorität) - dadurch identisch für CLI und
+  App/Server, kein separater Vorab-Check in `main()` mehr nötig, der jetzt
+  entfernt wurde.
+
+3 neue Tests (`tests/test_answer_message.py`): Briefing-Anfrage nutzt echte
+Daten statt allgemeinem Chat, Wort-getrennter Auslöser wird erkannt,
+unrelated Text löst weiterhin nichts aus. 291 Tests insgesamt, alle grün.
+Xcode-Build erfolgreich. Live auf dem echten Mac über den App-/Server-Pfad
+mit Leons genauer Originalformulierung verifiziert: liefert jetzt ein
+echtes Briefing mit echten Erinnerungen/Mail-Zahl statt erfundenem Inhalt;
+normaler Chat funktioniert unverändert weiter.
