@@ -43,7 +43,7 @@ from memory import Memory
 from model_manager import ModelManager, ollama_base_url
 from model_router import ModelRouter
 from music_client import now_playing as music_now_playing
-from photos_client import PhotoIndex
+from photos_client import PhotoBackgroundWorker, PhotoIndex
 from permission_manager import PermissionManager
 from privacy_dashboard import PrivacyDashboard
 from privacy_logger import PrivacyLogger
@@ -1073,6 +1073,12 @@ class JarvisLocalServer:
             self.news_worker.start()
         return self.news_worker
 
+    def _ensure_photo_worker(self) -> PhotoBackgroundWorker:
+        if self.photo_worker is None:
+            self.photo_worker = PhotoBackgroundWorker(self.config)
+            self.photo_worker.start()
+        return self.photo_worker
+
     def pending_calendar_actions(self) -> dict[str, Any]:
         return {"actions": self._ensure_mail_worker().pending_calendar_actions()}
 
@@ -1144,6 +1150,18 @@ class JarvisLocalServer:
         if self.permissions.is_allowed("internet"):
             try:
                 important_news = self._ensure_news_worker().drain_important_news()
+            except Exception:
+                pass
+
+        # Nur den Worker starten (nächtlicher Fotoscan + lokale Vision-Analyse,
+        # siehe plans/2026-08-10-jarvis-foto-vision-lokal-aktivieren.md) - anders
+        # als Mail/News liefert Fotos aktuell nichts in den Proaktivitäts-Feed,
+        # dieselbe "beim ersten erlaubten Poll starten"-Stelle wird hier nur als
+        # Startpunkt mitgenutzt, exakt wie bei den Blöcken oben nur lesend, wenn
+        # die Berechtigung bereits erteilt ist.
+        if self.permissions.is_allowed("photos"):
+            try:
+                self._ensure_photo_worker()
             except Exception:
                 pass
 

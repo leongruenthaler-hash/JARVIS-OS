@@ -916,3 +916,54 @@ Prompt-Worte allein reichen bei diesem Modell erfahrungsgemäß nicht. Ein
 weiterer Test (`test_build_summary_flattens_category_lines_into_one_paragraph`)
 deckt das ab. 295 Tests insgesamt, alle grün. Erneut live verifiziert: die
 Antwort ist jetzt ein einziger Fließtext-Absatz ohne Zeilenumbrüche.
+
+## 28. Lokale Foto-Vision aktiviert (2026-08-10)
+
+Siehe `plans/2026-08-10-jarvis-foto-vision-lokal-aktivieren.md`. Der Code
+für nächtlichen Fotoscan + lokale Bildbeschreibung (`llava` über Ollama)
+existierte bereits vollständig, wurde aber nie automatisch gestartet -
+anders als bei Mail und News fehlte die Verdrahtung in `local_server.py`.
+
+**Umsetzung:**
+- `PhotoBackgroundWorker._run_loop()` in `app/photos_client.py` in eine
+  testbare `_tick(now)`-Methode extrahiert (analog `_time_reached`/
+  `_scan_safely`); `_tick()` löst nach dem nächtlichen Metadaten-Scan jetzt
+  zusätzlich `_vision_safely()` aus, das die lokale Bildbeschreibung über
+  `LocalVisionService`/`llava` anstößt - vorher lief nur der Scan, die
+  Beschreibungen entstanden nie automatisch.
+- Neuer Konfigurationswert `local_photo_vision_background_enabled`
+  (Default: an), damit der nächtliche Vision-Lauf bei Bedarf separat
+  abschaltbar bleibt, ohne den Scan selbst zu deaktivieren.
+- `_ensure_photo_worker()` in `local_server.py` ergänzt (analog
+  `_ensure_mail_worker()`/`_ensure_news_worker()`) und in
+  `_proactivity_context()` verdrahtet - der Worker startet jetzt beim
+  ersten erlaubten Poll, sobald die "photos"-Berechtigung erteilt ist,
+  genau wie bei Mail/News.
+- `photos_background_enabled: true` in beiden `config.json` (Repo-Vorlage +
+  Produktiv-Config) gesetzt. OpenAI-Cloud-Vision bleibt bewusst aus - Leon
+  hat sich explizit für den rein lokalen Weg entschieden.
+
+6 neue Tests (`tests/test_photo_background_worker.py`, vorher komplett
+ungetestet): Scan+Vision laufen im selben Zyklus, beides jeweils nur einmal
+pro Tag, Vision-Lauf abschaltbar über den neuen Config-Wert, robustes
+Verhalten bei fehlendem/unerreichbarem lokalem Vision-Modell. 301 Tests
+insgesamt, alle grün. Xcode-Build erfolgreich.
+
+**Live-Verifikation, mit Einschränkung:** der macOS-Fotozugriff (System-
+Berechtigung, getrennt von Jarvis' eigenem Berechtigungssystem) war auf
+Leons Mac noch nie erteilt - die Ende-zu-Ende-Kette (Anfrage → Scan →
+Vision-Beschreibung → inhaltliche Suche) konnte deshalb nicht mit echten
+Fotos verifiziert werden, das braucht Leons manuelle Freigabe in den
+Systemeinstellungen. Verifiziert wurde stattdessen: der Worker startet
+automatisch (Jarvis' eigene "photos"-Berechtigung war bereits erteilt), ein
+manuell ausgelöster Scan läuft durch und behandelt die fehlende macOS-
+Freigabe sauber ohne Absturz (kein Code-Fehler, reine macOS-Berechtigung).
+Anderer Regressionscheck (allgemeiner Chat) unauffällig.
+
+**Separat aufgefallen, nicht Teil dieser Änderung:** die Kalender-Domäne
+antwortete beim Live-Test mit einem AppleScript-Timeout ("Kalender hat zu
+lange nicht geantwortet") - reproduziert unabhängig von der App direkt über
+`calendar_client.py`, also kein durch diese Änderung eingeführtes Problem
+(hier wurde nichts an Kalender-Code angefasst). Vermutlich ein aktueller,
+eigenständiger Zustand auf Leons Mac (z. B. Calendar.app haengt/synchronisiert).
+Noch nicht untersucht, Leon informiert.

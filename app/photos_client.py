@@ -962,6 +962,7 @@ class PhotoBackgroundWorker:
         self.config = config
         self.enabled = bool(config.get("photos_background_enabled", True))
         self.scan_time = str(config.get("photos_background_scan_time", "03:15"))
+        self.vision_background_enabled = bool(config.get("local_photo_vision_background_enabled", True))
         self.index = PhotoIndex(config, base_path=base_path)
         self.stop_event = threading.Event()
         self.thread: threading.Thread | None = None
@@ -1102,16 +1103,44 @@ class PhotoBackgroundWorker:
 
     def _run_loop(self):
         while not self.stop_event.is_set():
-            now = datetime.now()
+            self._tick(datetime.now())
+            self.stop_event.wait(60)
+
+    def _tick(self, now: datetime):
+        cache = self.index._load_cache()
+        today = now.date().isoformat()
+        if self._time_reached(now, self.scan_time) and cache.get("last_background_scan_date") != today:
+            self._scan_safely()
             cache = self.index._load_cache()
-            today = now.date().isoformat()
-            if self._time_reached(now, self.scan_time) and cache.get("last_background_scan_date") != today:
-                self._scan_safely()
+            cache["last_background_scan_date"] = today
+            self.index._save_cache(cache)
+
+            # Vision-Lauf bewusst direkt nach dem Scan derselben Nacht, nicht als
+            # eigener Zeitpunkt - siehe
+            # plans/2026-08-10-jarvis-foto-vision-lokal-aktivieren.md. Vorher blieb
+            # die lokale Bildbeschreibung ausschliesslich manuellen Sprachbefehlen
+            # vorbehalten, obwohl der naechtliche Scan laengst lief (sobald er ueber
+            # _ensure_photo_worker() ueberhaupt gestartet wurde) - der Fotoindex hatte
+            # zwar Eintraege, aber nie automatisch erzeugte Bildbeschreibungen.
+            if self.vision_background_enabled:
+                self._vision_safely()
                 cache = self.index._load_cache()
-                cache["last_background_scan_date"] = today
+                cache["last_background_vision_date"] = today
                 self.index._save_cache(cache)
 
-            self.stop_event.wait(60)
+    def _vision_safely(self):
+        try:
+            status = self.index.local_vision_status()
+            if not bool(status.get("available")):
+                print(f"Fotos-Hintergrund-Vision uebersprungen: {status.get('message')}")
+                return
+
+            analyzed, failed = self.index.analyze_with_local_vision()
+            print(f"Fotos-Hintergrund-Vision fertig: {analyzed} analysiert, {failed} fehlgeschlagen.")
+        except PhotosAccessError as exc:
+            print(f"Fotos-Hintergrund-Vision uebersprungen: {exc}")
+        except Exception as exc:
+            print("Fotos-Hintergrund-Vision Fehler:", type(exc).__name__)
 
     def _scan_safely(self):
         cache = self.index._load_cache()
