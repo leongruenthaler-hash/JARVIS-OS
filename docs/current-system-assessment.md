@@ -967,3 +967,37 @@ lange nicht geantwortet") - reproduziert unabhängig von der App direkt über
 (hier wurde nichts an Kalender-Code angefasst). Vermutlich ein aktueller,
 eigenständiger Zustand auf Leons Mac (z. B. Calendar.app haengt/synchronisiert).
 Noch nicht untersucht, Leon informiert.
+
+## 29. Kalender-Timeout untersucht: keine Störung, echte Geschwindigkeitsgrenze (2026-08-10)
+
+Nachuntersuchung von Abschnitt 28. Direkt (ohne die App) reproduziert:
+`list_upcoming_calendar_items()` brauchte je nach Systemlast zwischen 9 und
+20+ Sekunden - bei einem festen 20s-Timeout kippte das regelmäßig in einen
+Fehler, obwohl Calendar.app nicht hängt, sondern nur langsam antwortet.
+
+**Ursache:** Leons Konto hat 6 Kalender mit zusammen 342 Terminen (u. a.
+"Deutsche Feiertage" und "Geburtstage" mit wiederkehrenden Einträgen über
+mehrere Jahre). Das AppleScript liest dabei JEDEN Termin einzeln (Startdatum
+zuerst, dann bei Treffern weitere Felder) - Calendar.apps AppleScript-Bridge
+ist inhärent langsam pro Zugriff (siehe bereits bestehender Code-Kommentar
+zu einem früher versuchten, aber wegen Zuverlässigkeitsproblemen wieder
+verworfenen "whose"-Filter). Getestet: ein Sammelzugriff über
+`properties of eventRef` statt einzelner Feldzugriffe brachte keine
+messbare Verbesserung (9.9s vs. 9.6s) - der Engpass ist der Zugriff pro
+Termin selbst, nicht die Anzahl gelesener Felder.
+
+**Fix:** Timeout in `calendar_client.py::_run_applescript()` von 20s auf 35s
+angehoben - reale Sicherheitsmarge basierend auf gemessenen Laufzeiten.
+Live verifiziert: 3 von 4 Anfragen liefen sofort durch (die eine
+verzögerte lag an System-Last direkt nach einem App-Neustart), Regressions-
+check (allgemeiner Chat) unauffällig. 301 Tests weiterhin grün.
+
+**Nicht behoben, bewusst nicht angefasst:** die zugrunde liegende Langsamkeit
+selbst bleibt bestehen - eine echte Beschleunigung bräuchte entweder (a)
+weniger Kalender abzufragen (Leons `calendar_name`-Einstellung ist aktuell
+leer = alle Kalender inkl. Feiertage/Geburtstage; einschränken würde aber
+auch weniger anzeigen) oder (b) einen nativen EventKit-Helfer statt
+AppleScript (deutlich schnellerer Zugriff, aber ein eigenes, größeres
+Projekt analog zum bestehenden Photos-Helfer - eigener Plan nötig). Beides
+bewusst nicht selbstständig entschieden, da beides Leons Kalenderdaten-
+Darstellung bzw. den App-Umfang verändert.

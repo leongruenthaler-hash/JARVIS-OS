@@ -301,7 +301,16 @@ def _run_applescript(script: str, app_name: str):
             ["osascript", "-e", script],
             capture_output=True,
             text=True,
-            timeout=20,
+            # 20s war zu knapp bemessen: list_upcoming_calendar_items() liest jedes
+            # Event ueber einen eigenen, spuerbar langsamen AppleScript-Zugriff (kein
+            # Sammelzugriff moeglich, siehe Kommentar dort) und iteriert dabei durch
+            # ALLE Events aller Kalender, nicht nur zukuenftige - bei mehreren hundert
+            # Terminen (Feiertage/Geburtstage ueber Jahre) lag die reale Dauer bereits
+            # bei 13-20s, was den alten Grenzwert regelmaessig knapp verfehlte und zu
+            # einem Timeout-Fehler fuehrte, obwohl Calendar.app nur langsam war, nicht
+            # haengengeblieben. 35s als reale Sicherheitsmarge, gemessen an echten
+            # Laufzeiten (siehe Bugreport von Leon, 2026-08-10).
+            timeout=35,
         )
     except subprocess.TimeoutExpired:
         raise CalendarAccessError(
