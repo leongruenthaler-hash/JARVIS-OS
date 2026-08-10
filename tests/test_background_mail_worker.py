@@ -16,6 +16,15 @@ def _msg(message_id, sender="a@b.de", subject="Hallo", preview=""):
     return MailMessage(message_id=message_id, sender=sender, subject=subject, received="irrelevant", preview=preview)
 
 
+class _FakeLLM:
+    """Liefert eine feste Zusammenfassung statt eines echten Modellaufrufs -
+    _build_summary() ruft das ueber summarize_mail_digest_via_llm() auf, siehe
+    plans/2026-08-10-jarvis-mail-update-menschlich.md."""
+
+    def ask(self, messages, max_output_tokens=None, user_text=None, route=None, force_local=False):
+        return "Menschliche Zusammenfassung."
+
+
 @pytest.fixture
 def worker(tmp_path):
     config = {
@@ -24,7 +33,7 @@ def worker(tmp_path):
         "background_mail_max_messages": 20,
         "auto_calendar_from_mail_enabled": True,
     }
-    w = MailBackgroundWorker(config, base_path=tmp_path)
+    w = MailBackgroundWorker(config, _FakeLLM(), base_path=tmp_path)
     w.permissions.grant("mail")
     return w
 
@@ -80,7 +89,7 @@ def test_scan_safely_swallows_mail_access_error(worker):
 
 def test_known_message_ids_respect_configured_limit(tmp_path):
     config = {"background_mail_known_id_limit": 2}
-    w = MailBackgroundWorker(config, base_path=tmp_path)
+    w = MailBackgroundWorker(config, _FakeLLM(), base_path=tmp_path)
     w.permissions.grant("mail")
     with patch("background_tasks.list_inbox_messages", return_value=[_msg("m1"), _msg("m2"), _msg("m3")]):
         w._scan(reason="manual", max_messages=20)
@@ -153,7 +162,7 @@ def test_resolve_pending_calendar_action_unknown_key_returns_not_found(worker):
 
 def test_scan_without_auto_calendar_enabled_creates_no_proposals(tmp_path):
     config = {"auto_calendar_from_mail_enabled": False}
-    w = MailBackgroundWorker(config, base_path=tmp_path)
+    w = MailBackgroundWorker(config, _FakeLLM(), base_path=tmp_path)
     w.permissions.grant("mail")
     with patch("background_tasks.list_inbox_messages", return_value=[_msg("m1")]):
         w._scan(reason="manual", max_messages=20)
@@ -163,3 +172,58 @@ def test_scan_without_auto_calendar_enabled_creates_no_proposals(tmp_path):
         w._scan(reason="manual", max_messages=20)
 
     assert w.pending_calendar_actions() == []
+
+
+# --- _build_summary: menschliche LLM-Zusammenfassung statt "Absender: Betreff" ----
+# (Bugreport 2026-08-10: "Mail-Update" las rohe Absender-Adressen und Betreffzeilen
+# vor, ohne inhaltliches Verstaendnis. Siehe
+# plans/2026-08-10-jarvis-mail-update-menschlich.md.)
+
+
+def test_build_summary_uses_llm_for_human_summary(worker):
+    summary = worker._build_summary([_msg("m1", sender="Indeed <donotreply@jobalert.indeed.com>", subject="Job")], [])
+
+    assert "Menschliche Zusammenfassung." in summary
+    assert "donotreply@jobalert.indeed.com" not in summary
+
+
+def test_build_summary_flattens_category_lines_into_one_paragraph(tmp_path):
+    # Regression fuer 2026-08-10: das kleine lokale Modell haelt sich trotz
+    # Prompt-Anweisung nicht zuverlaessig an "ein Fliesstext-Absatz" und
+    # produziert stattdessen Zeilen wie "Wichtig: ...\nPrivat: ..." -
+    # summarize_mail_digest_via_llm() muss das hart nachbearbeiten.
+    class _ListyLLM:
+        def ask(self, *args, **kwargs):
+            return "Wichtig: eine Rechnung.\nPrivat: eine Empfehlung von Pinterest."
+
+    config = {"auto_calendar_from_mail_enabled": False}
+    w = MailBackgroundWorker(config, _ListyLLM(), base_path=tmp_path)
+    w.permissions.grant("mail")
+
+    summary = w._build_summary([_msg("m1")], [])
+
+    assert "\n" not in summary
+
+
+def test_build_summary_falls_back_to_mechanical_summary_when_llm_fails(tmp_path):
+    class _BrokenLLM:
+        def ask(self, *args, **kwargs):
+            raise RuntimeError("Modell nicht erreichbar")
+
+    config = {"auto_calendar_from_mail_enabled": False}
+    w = MailBackgroundWorker(config, _BrokenLLM(), base_path=tmp_path)
+    w.permissions.grant("mail")
+
+    summary = w._build_summary([_msg("m1", sender="a@b.de", subject="Testbetreff")], [])
+
+    assert "Wichtigste Übersicht" in summary
+    assert "a@b.de" in summary
+    assert "Testbetreff" in summary
+
+
+def test_build_summary_appends_calendar_proposal_deterministically(worker):
+    calendar_actions = [{"title": "Meeting am Montag"}]
+    summary = worker._build_summary([_msg("m1")], [], calendar_actions=calendar_actions)
+
+    assert "Meeting am Montag" in summary
+    assert "noch nicht angelegt" in summary

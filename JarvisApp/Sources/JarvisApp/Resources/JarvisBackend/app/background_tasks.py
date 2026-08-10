@@ -9,14 +9,16 @@ from pathlib import Path
 from typing import Any
 
 from data_dir import data_root
+from llm_client import LLMClient
 from mail_calendar_actions import create_calendar_actions_from_messages
 from mail_client import MailAccessError, MailMessage, list_inbox_messages
 from permission_manager import PermissionManager
 
 
 class MailBackgroundWorker:
-    def __init__(self, config: dict[str, Any], base_path: Path | None = None):
+    def __init__(self, config: dict[str, Any], llm: LLMClient, base_path: Path | None = None):
         self.config = config
+        self.llm = llm
         self.permissions = PermissionManager(base_path)
         self.enabled = bool(config.get("background_mail_enabled", True))
         self.morning_time = str(config.get("background_mail_morning_time", "07:00"))
@@ -285,10 +287,30 @@ class MailBackgroundWorker:
             if new_messages
             else f"Ich habe {len(messages)} Mail(s) im Posteingang vorbereitet."
         )
-        snippets = "; ".join(
-            f"{message.sender or 'Unbekannt'}: {message.subject}"
-            for message in focus[:5]
-        )
+
+        # Menschliche, thematisch gebuendelte Zusammenfassung ueber dieselbe
+        # LLM-Funktion, die auch handle_mail_command() (Chat-Anfragen) nutzt -
+        # siehe plans/2026-08-10-jarvis-mail-update-menschlich.md. Vorher wurde
+        # hier nur "Absender: Betreff" je Mail aneinandergereiht (inkl. voller
+        # E-Mail-Adressen), ohne jedes inhaltliche Verstaendnis. Lokaler Import,
+        # um den Zirkelbezug zu jarvis.py zu vermeiden (jarvis.py importiert
+        # bereits MailBackgroundWorker aus diesem Modul).
+        summary_text = None
+        try:
+            from jarvis import build_mail_summary_digest, summarize_mail_digest_via_llm
+
+            digest = build_mail_summary_digest(focus[:5])
+            summary_text = summarize_mail_digest_via_llm(self.llm, digest, len(focus[:5]))
+        except Exception as exc:
+            print(f"Mail-Zusammenfassung ueber LLM fehlgeschlagen, falle auf mechanische Variante zurueck: {type(exc).__name__}")
+
+        if summary_text is None:
+            snippets = "; ".join(
+                f"{message.sender or 'Unbekannt'}: {message.subject}"
+                for message in focus[:5]
+            )
+            summary_text = f"Wichtigste Übersicht: {snippets}."
+
         calendar_text = ""
         if calendar_actions:
             titles = "; ".join(action["title"] for action in calendar_actions[:3])
@@ -298,7 +320,7 @@ class MailBackgroundWorker:
                 f"erkannt, aber noch nicht angelegt: {titles}. Bestätige sie im Dashboard, bevor ich sie anlege."
             )
 
-        return f"{intro} Wichtigste Übersicht: {snippets}.{calendar_text}"
+        return f"{intro} {summary_text}{calendar_text}"
 
     def _message_to_dict(self, message: MailMessage) -> dict[str, str]:
         return {

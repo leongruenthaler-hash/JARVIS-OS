@@ -2317,6 +2317,80 @@ def build_mail_summary_digest(
     return "\n".join(digest_lines)
 
 
+def summarize_mail_digest_via_llm(
+    llm: LLMClient,
+    digest: str,
+    message_count: int,
+    time_hint: str = "",
+) -> str | None:
+    """Wandelt einen rohen Mail-Digest (build_mail_summary_digest()) in eine
+    kurze, thematisch gebündelte, menschlich klingende Zusammenfassung um -
+    gemeinsam genutzt von handle_mail_command() (Chat-Anfragen) und
+    MailBackgroundWorker._build_summary() (Hintergrundscan/"Mail-Update"),
+    siehe plans/2026-08-10-jarvis-mail-update-menschlich.md. Vorher hatte
+    MailBackgroundWorker eine eigene, rein mechanische Zusammenfassung
+    ("Absender: Betreff" aneinandergereiht, inkl. voller E-Mail-Adressen) -
+    dieselbe Qualität wie hier soll jetzt an beiden Stellen gelten.
+    Gibt None zurueck, wenn die LLM-Antwort leer/unbrauchbar war, damit der
+    Aufrufer auf eine mechanische Zusammenfassung zurueckfallen kann, statt
+    ganz ohne Mail-Update dazustehen."""
+    prompt = [
+        {
+            "role": "system",
+            "content": (
+                f"Du bist Jarvis, {configured_user_name()}s persönlicher Assistent. "
+                "Fasse Apple-Mail-Übersichten auf Deutsch natürlich, knapp und in normaler gesprochener Sprache zusammen. "
+                "Antworte so, als würdest du Leon kurz am Schreibtisch informieren, nicht als würdest du jede Zeile vorlesen. "
+                "Wichtig: niemals die Mails einzeln als Liste herunterbeten, keine Zeile-für-Zeile-Wiedergabe, "
+                "keine langen Aufzählungen, keine Tabellen und kein Markdown. "
+                "Gruppiere ähnliche Mails immer nach Thema und nenne nur die Kernaussagen. "
+                "Erwähne Absender, Betreff oder Datum nur, wenn es wirklich hilft. "
+                "Die Antwort ist IMMER ein einziger zusammenhängender Fließtext-Absatz ohne Zeilenumbrüche, "
+                "am besten in 2 bis 3 Sätzen. Beginne niemals eine Zeile mit einem Kategorie-Namen gefolgt von "
+                "Doppelpunkt (also NICHT 'Wichtig: ...' oder 'Newsletter: ...' als eigene Zeile) - wenn du eine "
+                "Kategorie erwähnst, dann nur beiläufig innerhalb eines normalen Satzes. "
+                "Wenn mehrere ähnliche Mails dabei sind, fasse sie in einem Satz zusammen. "
+                "Dir liegen teils nur Absender, Betreff und ein kurzer Auszug vor; formuliere daraus eine verständliche Lageeinschätzung, "
+                "ohne zu behaupten, du hättest den vollständigen Text gelesen. "
+                "Löschen oder Verschieben nur als Vorschlag, niemals als bereits ausgeführte Aktion. "
+                "Mach das kurz, menschlich und mit dem üblichen trockenen Jarvis-Ton.\n\n"
+                "Beispiel für den erwarteten Stil (Format, nicht Inhalt übernehmen): "
+                "\"Drei Themen: eine Rechnung von deinem Stromanbieter über 64 Euro, fällig Ende des Monats, "
+                "außerdem zwei Newsletter, die du vermutlich überspringen kannst, und eine Terminanfrage von "
+                "Julia für nächste Woche, auf die du noch antworten solltest.\""
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Ich habe {message_count} Mail(s) gelesen. "
+                f"{time_hint} "
+                "Bitte gib mir eine natürliche Zusammenfassung nach Themen, als einen einzigen Fließtext-Absatz "
+                "ohne Zeilenumbrüche und ohne Kategorie-Label am Zeilenanfang. "
+                "Nicht jede Mail einzeln, sondern die Kernthemen und was daran wichtig ist. "
+                "Wenn es mehrere ähnliche Nachrichten gibt, fasse sie gemeinsam zusammen:\n\n"
+                f"{digest}"
+            ),
+        },
+    ]
+
+    answer = llm.ask(
+        prompt,
+        max_output_tokens=MAIL_SUMMARY_MAX_OUTPUT_TOKENS,
+        user_text="mail zusammenfassen und thematisch bündeln",
+    )
+    if not answer.strip():
+        return None
+    cleaned = clean_mail_answer(answer)
+    # Determinister Rueckhalt gegen das kleine lokale Modell, das die Anweisung
+    # "einziger Fliesstext-Absatz" trotz Prompt/Beispiel nicht zuverlaessig
+    # befolgt und stattdessen Kategorie-Zeilen ("Wichtig: ...", "Privat: ...")
+    # produziert - genau dasselbe Muster wie bei anderen Bausteinen diese
+    # Sitzung (Domaenen-Klassifikation, Gedaechtnis-Extraktion): Prompt-Worte
+    # allein reichen bei diesem Modell nicht, es braucht eine harte Nachbearbeitung.
+    return re.sub(r"\s*\n+\s*", " ", cleaned).strip()
+
+
 def should_ignore_transcript(text: str, audio_stats: dict[str, float]) -> bool:
     normalized = normalize_text(text)
 
@@ -4032,47 +4106,10 @@ def handle_mail_command(
 
     mail_briefing = build_mail_summary_digest(messages, account_name=target_account, mailbox_name=target_mailbox)
 
-    prompt = [
-        {
-            "role": "system",
-            "content": (
-                f"Du bist Jarvis, {configured_user_name()}s persönlicher Assistent. "
-                "Fasse Apple-Mail-Übersichten auf Deutsch natürlich, knapp und in normaler gesprochener Sprache zusammen. "
-                "Antworte so, als würdest du Leon kurz am Schreibtisch informieren, nicht als würdest du jede Zeile vorlesen. "
-                "Wichtig: niemals die Mails einzeln als Liste herunterbeten, keine Zeile-für-Zeile-Wiedergabe, "
-                "keine langen Aufzählungen, keine Tabellen und kein Markdown. "
-                "Gruppiere ähnliche Mails immer nach Thema und nenne nur die Kernaussagen. "
-                "Erwähne Absender, Betreff oder Datum nur, wenn es wirklich hilft. "
-                "Die Antwort soll wie eine kurze menschliche Zusammenfassung klingen, am besten in 2 bis 3 flüssigen Sätzen. "
-                "Wenn mehrere ähnliche Mails dabei sind, fasse sie in einem Satz zusammen. "
-                "Dir liegen teils nur Absender, Betreff und ein kurzer Auszug vor; formuliere daraus eine verständliche Lageeinschätzung, "
-                "ohne zu behaupten, du hättest den vollständigen Text gelesen. "
-                "Schlage bei Bedarf höchstens eine Kategorie vor, zum Beispiel: Wichtig, Rechnung/Finanzen, Termin, Privat, Arbeit, Newsletter, Werbung oder Unklar. "
-                "Löschen oder Verschieben nur als Vorschlag, niemals als bereits ausgeführte Aktion. "
-                f"Mach das kurz, menschlich und mit dem üblichen trockenen Jarvis-Ton."
-            ),
-        },
-        {
-            "role": "user",
-            "content": (
-                f"Ich habe {len(messages)} Mail(s) gelesen. "
-                f"{time_hint} "
-                "Bitte gib mir eine natürliche Zusammenfassung nach Themen. "
-                "Nicht jede Mail einzeln, sondern die Kernthemen und was daran wichtig ist. "
-                "Wenn es mehrere ähnliche Nachrichten gibt, fasse sie gemeinsam zusammen:\n\n"
-                f"{mail_briefing}"
-            ),
-        },
-    ]
-
-    answer = llm.ask(
-        prompt,
-        max_output_tokens=MAIL_SUMMARY_MAX_OUTPUT_TOKENS,
-        user_text="mail zusammenfassen und thematisch bündeln",
-    )
-    if not answer.strip():
+    summary = summarize_mail_digest_via_llm(llm, mail_briefing, len(messages), time_hint=time_hint)
+    if summary is None:
         return "Ich habe Mails gefunden, aber daraus gerade keine saubere Zusammenfassung bauen können."
-    return clean_mail_answer(answer)
+    return summary
 
 
 def check_mail_status() -> str:
@@ -5756,7 +5793,7 @@ def answer_message(
         return _result(mail_document_export_answer, mail_followup=False)
 
     if workers.mail_worker is None and has_domain(question, "mail") and has_permission("mail"):
-        workers.mail_worker = MailBackgroundWorker(config)
+        workers.mail_worker = MailBackgroundWorker(config, llm)
         workers.mail_worker.start()
     background_mail_answer = handle_background_mail_command(question, workers.mail_worker)
     if background_mail_answer is not None:
@@ -5869,7 +5906,7 @@ def main():
             return
 
     workers = AnswerWorkers(
-        mail_worker=MailBackgroundWorker(CONFIG) if has_permission("mail") else None,
+        mail_worker=MailBackgroundWorker(CONFIG, llm) if has_permission("mail") else None,
         photo_worker=PhotoBackgroundWorker(CONFIG) if has_permission("photos") else None,
     )
     if workers.mail_worker is not None:

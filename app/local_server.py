@@ -1063,7 +1063,7 @@ class JarvisLocalServer:
 
     def _ensure_mail_worker(self) -> MailBackgroundWorker:
         if self.mail_worker is None:
-            self.mail_worker = MailBackgroundWorker(self.config)
+            self.mail_worker = MailBackgroundWorker(self.config, self.llm)
             self.mail_worker.start()
         return self.mail_worker
 

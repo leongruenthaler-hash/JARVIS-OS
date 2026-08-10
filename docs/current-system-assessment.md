@@ -861,3 +861,58 @@ Xcode-Build erfolgreich. Live auf dem echten Mac über den App-/Server-Pfad
 mit Leons genauer Originalformulierung verifiziert: liefert jetzt ein
 echtes Briefing mit echten Erinnerungen/Mail-Zahl statt erfundenem Inhalt;
 normaler Chat funktioniert unverändert weiter.
+
+## 27. Mail-Update roh statt menschlich zusammengefasst (2026-08-10)
+
+**Bugreport:** Leon bat um "ein kurzes Mail-Update" und bekam eine
+Aneinanderreihung roher Absender-Adressen und Betreffzeilen vorgelesen
+(inklusive kompletter `<donotreply@...>`-Header), ohne inhaltliche
+Einordnung oder Gewichtung - eine automatisierte Sicherheitsbenachrichtigung
+erschien gleichrangig neben einer echten Stellenanzeige.
+
+**Ursache:** Zwei unabhängige Mail-Zusammenfassungs-Pfade existierten
+bereits. `handle_mail_command()` nutzte einen sorgfältig formulierten
+LLM-Prompt für eine natürliche, thematisch gebündelte Zusammenfassung.
+`MailBackgroundWorker._build_summary()` - der tatsächliche Pfad hinter
+"Mail-Update"/Hintergrundscan - war dagegen rein mechanisch:
+`f"{sender}: {subject}"` je Mail aneinandergereiht, kein LLM, kein
+inhaltliches Verständnis.
+
+**Fix:**
+- Gemeinsame Funktion `jarvis.py::summarize_mail_digest_via_llm()`
+  extrahiert aus dem bestehenden, bereits guten Prompt von
+  `handle_mail_command()` - jetzt von beiden Pfaden genutzt (DRY, ein
+  einheitlicher Jarvis-Ton statt zwei unterschiedlicher).
+- `MailBackgroundWorker` bekommt eine `llm`-Referenz im Konstruktor
+  (analog `NewsBackgroundWorker`), an allen drei Erzeugungsstellen
+  nachgezogen (`jarvis.py` x2, `local_server.py`).
+- `_build_summary()` nutzt jetzt `build_mail_summary_digest()` +
+  `summarize_mail_digest_via_llm()`; fällt bei leerer/fehlgeschlagener
+  LLM-Antwort automatisch auf die alte mechanische Zusammenfassung zurück
+  (kein hartes Scheitern, falls das lokale Modell gerade nicht antwortet).
+- Kalender-/Erinnerungs-Vorschläge bleiben bewusst deterministisch
+  angehängt, nicht vom LLM umformuliert - Sicherheitsprinzip: konkrete,
+  noch unbestätigte Vorschläge dürfen nicht verzerrt werden.
+
+6 neue/angepasste Tests (`tests/test_background_mail_worker.py`): LLM-
+Zusammenfassung wird genutzt und enthält keine rohen E-Mail-Adressen mehr,
+Fallback auf mechanische Zusammenfassung bei fehlgeschlagenem LLM-Aufruf,
+Kalender-Vorschläge bleiben deterministisch angehängt. 294 Tests insgesamt,
+alle grün. Xcode-Build erfolgreich. Live auf dem echten Mac mit Leons
+genauer Originalanfrage verifiziert: thematisch gebündelte, menschliche
+Zusammenfassung mit Wichtigkeits-Einordnung statt roher Kopfzeilen; Kalender-
+Domäne als Regressionscheck unverändert funktionsfähig.
+
+**Nachschärfung noch am selben Tag:** Leon bemerkte direkt beim Live-Test,
+dass die neue LLM-Zusammenfassung zwar keine rohen Adressen mehr enthielt,
+aber wieder als Liste herauskam ("Wichtig: ...\nPrivat: ...") - dasselbe
+Grundmuster wie andere Bausteine diese Sitzung: das kleine lokale Modell
+(gemma3:4b) haelt sich ohne sehr konkretes Beispiel nicht zuverlaessig an
+Formatvorgaben im Prompt. Fix: Prompt um ein konkretes Fliesstext-Beispiel
+und eine explizite "keine Kategorie-Zeile am Zeilenanfang"-Regel ergaenzt,
+PLUS ein deterministischer Rueckhalt in `summarize_mail_digest_via_llm()`,
+der alle verbleibenden Zeilenumbrueche hart zu Leerzeichen zusammenzieht -
+Prompt-Worte allein reichen bei diesem Modell erfahrungsgemäß nicht. Ein
+weiterer Test (`test_build_summary_flattens_category_lines_into_one_paragraph`)
+deckt das ab. 295 Tests insgesamt, alle grün. Erneut live verifiziert: die
+Antwort ist jetzt ein einziger Fließtext-Absatz ohne Zeilenumbrüche.
