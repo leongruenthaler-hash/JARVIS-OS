@@ -683,6 +683,20 @@ DOMAIN_TERMS = {
         "schau auf meinen bildschirm",
         "guck dir meinen bildschirm",
     ),
+    # Bewusst enge, mehrwortige Ausloese-Saetze statt einer allgemeinen
+    # "Kamera"-Domaene (siehe plans/2026-08-11-jarvis-kamera-feedback.md) -
+    # ein einzelnes Wort wie "foto" wuerde sich sofort mit der Fotos-Domaene
+    # ueberschneiden, aehnliches Kollisionsrisiko wie der bereits behobene
+    # Bildschirm/Fotos-Bug dieser Sitzung.
+    "camera": (
+        "wie sehe ich aus",
+        "wie sehe ich heute aus",
+        "wie ist mein outfit",
+        "wie sieht mein outfit aus",
+        "mach ein foto von mir",
+        "nimm ein foto von mir auf",
+        "schau dir mein outfit an",
+    ),
     "files": (
         "datei",
         "dateien",
@@ -5172,6 +5186,49 @@ def handle_screen_command(text: str, memory: Memory | None = None) -> str | None
     return summary
 
 
+def handle_camera_command(text: str) -> str | None:
+    """Kamera-Feedback auf Zuruf (siehe
+    plans/2026-08-11-jarvis-kamera-feedback.md): ein einzelnes Kamerabild,
+    lokal per Ollama-Vision-Modell zu Erscheinungsbild/Outfit analysiert,
+    danach IMMER geloescht (auch bei einem Analyse-Fehler, siehe finally) -
+    anders als bei Screenshots wird hier bewusst NICHT automatisch etwas ins
+    Gedaechtnis vorgemerkt, ein Kamerabild ist unmittelbarer/persoenlicher als
+    ein Bildschirmfoto. Nur enge, mehrwortige Ausloese-Saetze (siehe
+    DOMAIN_TERMS["camera"]), damit sich das nicht mit der Fotos-Domaene
+    ueberschneidet."""
+    if not has_domain(text, "camera"):
+        return None
+
+    from camera_client import CameraAccessError, CameraClient, discard_photo
+    from local_vision_service import LocalVisionError, LocalVisionService
+
+    vision_service = LocalVisionService(CONFIG)
+    status = vision_service.status()
+    if not status.available:
+        return status.message
+
+    camera = CameraClient()
+    try:
+        photo_path = camera.capture_photo()
+    except CameraAccessError as exc:
+        return str(exc)
+
+    try:
+        result = vision_service.describe_camera_photo(photo_path)
+    except LocalVisionError as exc:
+        return f"Ich konnte das Foto nicht analysieren: {exc}"
+    except Exception as exc:
+        print("Kamera-Vision Fehler:", type(exc).__name__)
+        return "Ich konnte das Foto gerade nicht analysieren."
+    finally:
+        discard_photo(photo_path)
+
+    description = result.get("description") or ""
+    if not description:
+        return "Ich habe ein Foto aufgenommen, konnte aber nichts Eindeutiges erkennen."
+    return description
+
+
 def is_execution_promise(text: str) -> bool:
     normalized = normalize_text(text)
     promise_terms = (
@@ -5783,6 +5840,14 @@ def answer_message(
     if screen_answer is not None:
         record_exchange(memory, question, screen_answer)
         return _result(screen_answer, mail_followup=False)
+
+    camera_permission = ensure_privacy_domain_permission(memory, "camera", "Jarvis würde ein einzelnes Kamerabild aufnehmen, lokal analysieren und danach sofort löschen.") if has_domain(question, "camera") else None
+    if camera_permission is not None:
+        return _result(camera_permission)
+    camera_answer = handle_camera_command(question) if has_permission("camera") else None
+    if camera_answer is not None:
+        record_exchange(memory, question, camera_answer)
+        return _result(camera_answer, mail_followup=False)
 
     mail_export_permission = ensure_privacy_domain_permission(memory, "mail", "Jarvis würde Mail-Übersichten lesen und passende Anhänge oder Notizen auf den Schreibtisch kopieren.") if has_domain(question, "mail") else None
     if mail_export_permission is not None:

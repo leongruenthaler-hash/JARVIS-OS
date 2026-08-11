@@ -134,6 +134,36 @@ class LocalVisionService:
         parsed["model"] = status.model
         return parsed
 
+    def describe_camera_photo(self, image_url: str | Path) -> dict[str, Any]:
+        """Wie describe_image(), aber mit einem auf Erscheinungsbild/Outfit
+        zugeschnittenen Prompt statt allgemeinem Bildinhalt - fuer
+        handle_camera_command() (siehe plans/2026-08-11-jarvis-kamera-feedback.md).
+        Nutzt bewusst dasselbe Antwort-Schema wie describe_image()
+        (_parse_response() erwartet feste Schluessel) statt eigene Felder zu
+        erfinden - die eigentliche Outfit-Einschaetzung steckt komplett in
+        "description" als ein zusammenhaengender, gesprochener Satz. Das Bild
+        wird von jarvis.py nach dem Aufruf sofort geloescht, hier nur gelesen."""
+        image_path = Path(image_url)
+        status = self.status()
+        if not status.available:
+            raise LocalVisionError(status.message)
+        if not image_path.exists() or image_path.stat().st_size <= 0:
+            raise LocalVisionError(f"Kamerabild fehlt lokal: {image_path}")
+
+        prompt = (
+            "Analysiere dieses Kamerabild lokal fuer Jarvis - Leon moechte eine kurze, ehrliche, "
+            "freundliche Einschaetzung zu seinem Erscheinungsbild/Outfit hoeren, wie ein guter "
+            "Freund sie geben wuerde. Keine Personennamen raten, keine Gesichter identifizieren, "
+            "keine Aussagen ueber Koerper/Aussehen jenseits von Kleidung/Stil/Farben. "
+            "Antworte auf Deutsch als kompaktes JSON mit dem Schluessel description: "
+            "ein bis zwei fluessige, gesprochene Saetze - was du siehst (Kleidung, Farben, Stil) "
+            "plus eine kurze, konstruktive Einschaetzung. Keine Aufzaehlung, kein Aufsatz."
+        )
+        response_text = self._ollama_generate(status.model, prompt, image_path)
+        parsed = self._parse_response(response_text)
+        parsed["model"] = status.model
+        return parsed
+
     @staticmethod
     def _parse_screen_app(text: str) -> str:
         match = re.search(r'"app"\s*:\s*"([^"]*)"', text)

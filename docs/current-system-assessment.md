@@ -1192,3 +1192,66 @@ Live mit drei verschiedenen allgemeinen Chat-Anfragen verifiziert (u. a.
 dieselbe Frage, die zuvor den unstimmigen Spruch ausgeloest hatte) - alle
 drei Antworten kohaerent, weiterhin mit trockenem Unterton, kein
 unsinniger Spruch mehr.
+
+## 35. Kamera-Feedback auf Zuruf (2026-08-11)
+
+Siehe `plans/2026-08-11-jarvis-kamera-feedback.md`. Leons Idee: die
+Kamera-Berechtigung existierte bereits als leerer Platzhalter in den
+Einstellungen, ohne dass irgendwo Code sie nutzte. Neuer Baustein: auf
+enge Zuruf-Saetze ("wie sehe ich aus", "wie ist mein outfit", ...) nimmt
+Jarvis ein einzelnes Kamerabild auf, beschreibt es lokal ueber `llava` mit
+einem auf Erscheinungsbild/Outfit zugeschnittenen Prompt, und loescht das
+Bild danach IMMER wieder (auch bei einem Analyse-Fehler) - kein Speichern,
+Leons ausdrueckliche Vorgabe.
+
+**Umsetzung:**
+- `app/camera_helper.swift` - neuer, zur Laufzeit kompilierter Swift-CLI-
+  Helfer (AVFoundation), analog zum bestehenden Foto-/Spracherkennungs-
+  Helfer-Muster (`photos_helper.swift`/`apple_speech.swift`). Eigenes
+  `.app`-Bundle mit `NSCameraUsageDescription`, da Kamera-Zugriff dieselbe
+  strikte TCC-Kategorie wie Fotos ist.
+- `app/camera_client.py::CameraClient` - kompiliert/verwaltet den Helfer
+  (identisches Compile-/Signier-/LaunchServices-Fallback-Muster wie
+  `photos_client.py::PhotoIndex`, inkl. der dort bereits geloesten SDK/
+  Ziel-Falle), `capture_photo()`/`discard_photo()`.
+- `LocalVisionService.describe_camera_photo()` - neue Prompt-Variante,
+  nutzt bewusst dasselbe feste Antwort-Schema wie `describe_image()`
+  (`_parse_response()` erwartet feste Schluessel) statt eigene Felder zu
+  erfinden - die Outfit-Einschaetzung steckt komplett in "description" als
+  ein bis zwei gesprochene Saetze.
+- `handle_camera_command()` in `jarvis.py`, eingebunden in `answer_message()`
+  (CLI und App identisch) - Foto-Loeschung im `finally`-Block, auch bei
+  Analyse-Fehler. Bewusst KEIN automatisches Vormerken im Gedaechtnis
+  (anders als beim Bildschirm-Baustein) - ein Kamerabild ist unmittelbarer/
+  persoenlicher.
+- Kamera-Berechtigung existierte bereits vollstaendig in
+  `permission_manager.py::PERMISSION_DEFINITIONS` - keine Aenderung dort
+  noetig, nur tatsaechlich genutzt.
+- Neue, enge, mehrwortige Ausloese-Saetze in `DOMAIN_TERMS["camera"]`
+  statt einer allgemeinen Kamera-Domaene (Leons Entscheidung) - verhindert
+  eine Kollision mit der Fotos-Domaene, analog zum bereits behobenen
+  Bildschirm/Fotos-Bug dieser Sitzung. Bewusst NICHT in die Stufe-2-
+  Klarstellungs-Vokabular aufgenommen, damit die Kamera nie ueber die
+  fuzzy LLM-Klassifikation ausgeloest werden kann.
+
+6 neue Tests (`tests/test_camera_command.py`, CameraClient/LocalVisionService
+gemockt): kein Treffer bei unpassendem Text, kein Treffer bei generischem
+"Foto"-Wort (Kollisionsschutz), Kamera-Zugriffsfehler wird durchgereicht,
+Foto wird auch bei Analyse-Fehler garantiert geloescht, erfolgreicher Ablauf.
+321 Tests insgesamt, alle gruen. Xcode-Build erfolgreich.
+
+**Live-Bug gefunden und behoben:** die erste Version hing beim echten
+Kameratest komplett (Timeout nach ueber 20s), obwohl die macOS-Berechtigung
+korrekt erteilt war (bestaetigt in Systemeinstellungen). Ursache: das
+CLI-Tool wartete per `Thread.sleep()`/`DispatchSemaphore.wait()` blockierend
+auf das Foto-Callback von `AVCapturePhotoOutput` - auf diesem Mac wird
+dieses Callback aber erst zugestellt, wenn der Haupt-Run-Loop tatsaechlich
+laeuft, was ein reines Blockieren verhindert. Fix: `RunLoop.current.run(until:)`
+statt `Thread.sleep`/`DispatchSemaphore.wait()` fuer sowohl die Kamera-
+Anlaufzeit als auch das Warten auf das Capture-Ergebnis.
+
+Live verifiziert: echtes Kamerabild aufgenommen (6.5s), lokal analysiert,
+gesprochene Antwort erhalten, Bild danach nachweislich nicht mehr auf der
+Platte. Regressionscheck: eine normale Fotos-Anfrage loest weiterhin
+korrekt die Fotos-Domaene aus, keine Kollision; allgemeiner Chat
+unauffaellig.

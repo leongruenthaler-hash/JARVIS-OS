@@ -17,9 +17,11 @@ local_server.token
 # Runtime/user data (personal conversation history, indexes, permissions)
 memory/
 
-# Compiled/codesigned Photos-Helfer (data_root()-Dev-Fallback landet im Repo-Root,
-# wenn photos_client.py ausserhalb der gebauten App laeuft - siehe app/data_dir.py)
+# Compiled/codesigned Photos-/Kamera-Helfer (data_root()-Dev-Fallback landet im
+# Repo-Root, wenn photos_client.py/camera_client.py ausserhalb der gebauten App
+# laeuft - siehe app/data_dir.py)
 PhotosHelper/
+CameraHelper/
 
 # Editor / tooling caches
 .cache/
