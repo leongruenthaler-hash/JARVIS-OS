@@ -1499,7 +1499,9 @@ class JarvisLocalServer:
         versehentlich jemanden, der es nicht aktiv eingerichtet hat."""
         threshold = float(self.config.get("speaker_verification_threshold", DEFAULT_SPEAKER_THRESHOLD))
         try:
-            return self.voice_profile.verify(audio_path, threshold=threshold)
+            result = self.voice_profile.verify(audio_path, threshold=threshold)
+            print(f"Sprecher-Verifikation: score={result.get('score')} threshold={threshold} match={result.get('match')}", flush=True)
+            return result
         except VoiceProfileError as exc:
             # Ein Verifikations-Fehler (z.B. kaputte Aufnahme) darf Leon nicht
             # aussperren - im Zweifel durchlassen statt eine echte Anfrage von ihm

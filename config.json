@@ -63,7 +63,7 @@
     "partial_transcript_max_audio_seconds": 6.0,
     "audio_gain_target": 0.12,
     "speaker_verification_enabled": false,
-    "speaker_verification_threshold": 0.6,
+    "speaker_verification_threshold": 0.75,
     "recent_context_messages": 6,
     "auto_memory_enabled": true,
     "auto_memory_max_facts": 120,

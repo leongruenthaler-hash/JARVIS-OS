@@ -1142,3 +1142,53 @@ wurde nicht durchgeklickt, da dafuer kein GUI-Automatisierungswerkzeug fuer
 native macOS-Fenster zur Verfuegung steht - nur per Code-Review geprueft.
 Leon sollte den neuen Abschnitt in den Einstellungen einmal kurz selbst
 ansehen.
+
+## 33. Sprecher-Verifikation nachgeschaerft: Schwellenwert 0.6 zu locker (2026-08-10)
+
+Leons Live-Test direkt nach Abschnitt 32: eine bewusst verstellte (deutlich
+hoehere) Stimme wurde beim ersten Versuch korrekt abgelehnt, bei weiteren
+Versuchen aber nicht mehr - obwohl er weiter mit der verstellten Stimme
+sprach.
+
+**Diagnose:** Live-Logging der Swift-Seite (`print`/`logVoiceEvent`) liess
+sich bei einer per Doppelklick gestarteten, nicht an Xcode angehaengten App
+nicht zuverlaessig einfangen (`log stream --predicate 'process ==
+"JarvisApp"'` lieferte keine Treffer) - Diagnose musste ueber Code-Analyse
+statt Live-Beobachtung laufen. Wahrscheinlichste Ursache: der Weckwort-Clip
+enthaelt meist nur das eine Wort "Jarvis" (`audioCaptureService.recordUtterance`
+mit `maxDuration: 3.0`, in der Praxis oft deutlich unter 1s Sprache) - bei so
+kurzen Clips streut die Kosinus-Aehnlichkeit zwischen Resemblyzer-Embeddings
+staerker, insbesondere bei einer bewusst verstellten Stimme. Der ursprüngliche,
+grosszuegige Schwellenwert 0.6 (Leons erste Entscheidung) lag zu nah an der
+natuerlichen Streuung.
+
+**Fix:** `DEFAULT_SPEAKER_THRESHOLD` in `app/voice_profile.py` von 0.6 auf
+0.75 angehoben (Leons Entscheidung nach kurzer Ruecksprache), plus
+`speaker_verification_threshold: 0.75` explizit in beiden `config.json`
+gesetzt (Produktiv-Config hatte den Schluessel durch einen zwischenzeitlichen
+Config-Resave verloren - jetzt wieder explizit vorhanden statt sich allein
+auf den Code-Fallback zu verlassen).
+
+## 34. Personality-Prompt: Humor zu zwanghaft, produzierte unsinnige Sprueche (2026-08-10)
+
+Nebenbefund aus demselben Live-Test: eine allgemeine Chat-Antwort ueber
+OpenAI (gpt-5.4-nano, von Leon selbst aktiviert) endete mit "Wiederholungen
+sind nicht Ihr Hobby, bei mir waere es immerhin einsam" - grammatisch/
+inhaltlich unstimmig. Ursache: `app/core/personality_manager.py` wies das
+Modell an, "in so gut wie jede Antwort" einen trockenen/sarkastischen
+Seitenhieb einzustreuen - als zwingende Vorgabe, nicht als Option. Bei
+kurzen Modellen mit wenig Tokens-Spielraum (`openai_max_output_tokens: 90`)
+fuehrt das gelegentlich zu erzwungenen, nicht ganz stimmigen Formulierungen.
+
+**Fix (Leons Entscheidung: abschwaechen, nicht ganz entfernen):** Anweisung
+in beiden Prompt-Varianten (`build_jarvis_system_prompt`/
+`build_compact_jarvis_system_prompt`) von "in so gut wie jede Antwort" auf
+"nur wenn dir wirklich eine kurze, klar verstaendliche Bemerkung einfaellt -
+lieber seltener, dafuer treffend" geaendert. Trockener Humor bleibt fester
+Persoenlichkeitszug, aber nicht mehr erzwungen.
+
+315 Tests weiterhin gruen (keine Tests haengen am exakten Prompt-Wortlaut).
+Live mit drei verschiedenen allgemeinen Chat-Anfragen verifiziert (u. a.
+dieselbe Frage, die zuvor den unstimmigen Spruch ausgeloest hatte) - alle
+drei Antworten kohaerent, weiterhin mit trockenem Unterton, kein
+unsinniger Spruch mehr.

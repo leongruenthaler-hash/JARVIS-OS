@@ -12,13 +12,14 @@ from data_dir import data_root
 
 VOICE_PROFILE_FILENAME = "voice_profile.json"
 
-# Grosszuegiger Startwert (Leons Entscheidung, siehe
-# plans/2026-08-10-jarvis-sprecher-verifikation-weckwort.md): lieber Leon nie
-# faelschlich ablehnen, als eine sehr aehnliche fremde Stimme zuverlaessig
-# ausschliessen. Kosinus-Aehnlichkeit zwischen Resemblyzer-Embeddings derselben
-# Person liegt typischerweise deutlich darueber, verschiedener Personen meist
-# darunter.
-DEFAULT_SPEAKER_THRESHOLD = 0.60
+# Urspruenglich grosszuegig auf 0.6 gesetzt (Leons Entscheidung, siehe
+# plans/2026-08-10-jarvis-sprecher-verifikation-weckwort.md), nach Leons Live-Test
+# auf 0.75 angehoben: der Weckwort-Clip enthaelt oft nur das eine Wort "Jarvis"
+# (unter 1s Sprache) - bei so kurzen Clips streut die Aehnlichkeit staerker, eine
+# bewusst verstellte (deutlich hoehere) Stimme wurde bei 0.6 nicht zuverlaessig
+# abgelehnt. 0.75 als straffere Marge, auf Kosten eines etwas hoeheren Risikos,
+# Leons eigene Stimme gelegentlich faelschlich abzulehnen.
+DEFAULT_SPEAKER_THRESHOLD = 0.75
 
 
 class VoiceProfileError(RuntimeError):
