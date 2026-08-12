@@ -2098,6 +2098,44 @@ def handle_local_command(text: str) -> str | None:
     return None
 
 
+_NAME_PERMISSION_PHRASES = (
+    "nenn mich bei meinem namen",
+    "nenn mich beim namen",
+    "du darfst mich",
+    "sprich mich mit meinem namen an",
+    "sag ruhig meinen namen",
+)
+
+
+def wants_first_name_permission(text: str) -> bool:
+    """Erkennt eine ausdrueckliche Erlaubnis, den Vornamen zu benutzen -
+    Gegenstueck zu strip_first_name_address()'s Default-Verhalten (Name
+    niemals verwenden), siehe plans/2026-08-11-jarvis-kamera-feedback.md-
+    Nachschaerfung / Leons Vorgabe 2026-08-12."""
+    normalized = normalize_text(text)
+    return any(phrase in normalized for phrase in _NAME_PERMISSION_PHRASES)
+
+
+def strip_first_name_address(answer: str, creator_name: str) -> str:
+    """Deterministischer Rueckhalt gegen das Prompt-Verbot, den Vornamen zu
+    benutzen - Leons Vorgabe: Jarvis soll ihn nie beim Vornamen ansprechen,
+    ausser er sagt das ausdruecklich. Live beobachtet (2026-08-12): das
+    kleinere lokale Modell (phi4-mini) ignorierte die reine Prompt-Anweisung
+    trotz konkretem Beispiel gelegentlich - gleiches Muster wie bei anderen
+    Bausteinen diese Sitzung (Domaenen-Klassifikation, Mail-Formatierung):
+    Prompt-Worte allein reichen nicht, es braucht eine harte Nachbearbeitung.
+    Entfernt nur den typischen Anrede-Fall (", Name!"/", Name."/", Name,"),
+    nicht jedes Vorkommen des Namens irgendwo im Text - sonst koennte eine
+    legitime, andere Erwaehnung des Namens (z.B. in einem zitierten
+    Gedaechtnis-Fakt) beschaedigt werden."""
+    if not creator_name:
+        return answer
+    pattern = re.compile(rf",\s*{re.escape(creator_name)}\s*([!.,]|$)", flags=re.IGNORECASE)
+    cleaned = pattern.sub(lambda m: m.group(1) if m.group(1) in {"!", "."} else "", answer)
+    cleaned = re.sub(rf"^{re.escape(creator_name)}\s*[,:]\s*", "", cleaned, flags=re.IGNORECASE)
+    return re.sub(r"[ \t]{2,}", " ", cleaned).strip()
+
+
 def clean_ai_answer(answer: str) -> str:
     answer = clean_spoken_answer(answer)
     lowered = answer.lower()
@@ -2402,7 +2440,8 @@ def summarize_mail_digest_via_llm(
     # produziert - genau dasselbe Muster wie bei anderen Bausteinen diese
     # Sitzung (Domaenen-Klassifikation, Gedaechtnis-Extraktion): Prompt-Worte
     # allein reichen bei diesem Modell nicht, es braucht eine harte Nachbearbeitung.
-    return re.sub(r"\s*\n+\s*", " ", cleaned).strip()
+    flattened = re.sub(r"\s*\n+\s*", " ", cleaned).strip()
+    return strip_first_name_address(flattened, configured_user_name())
 
 
 def humanize_camera_feedback_via_llm(llm: LLMClient, raw_description: str) -> str | None:
@@ -2443,7 +2482,7 @@ def humanize_camera_feedback_via_llm(llm: LLMClient, raw_description: str) -> st
     answer = answer.strip()
     if not answer:
         return None
-    return clean_ai_answer(answer)
+    return strip_first_name_address(clean_ai_answer(answer), configured_user_name())
 
 
 def should_ignore_transcript(text: str, audio_stats: dict[str, float]) -> bool:
@@ -5992,6 +6031,8 @@ def answer_message(
     else:
         answer = llm.ask(messages, max_output_tokens=route.max_output_tokens, user_text=question, route=route, force_local=force_local)
     answer = clean_ai_answer(answer)
+    if not wants_first_name_permission(question):
+        answer = strip_first_name_address(answer, configured_user_name())
     promised = execute_promised_action_if_possible(llm, question, answer)
     if promised is not None:
         answer = promised

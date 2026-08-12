@@ -68,8 +68,17 @@ class LLMClient:
             route.max_output_tokens = int(max_output_tokens)
         effective_provider = "ollama" if force_local else self.provider
         if effective_provider == "ollama":
-            return self._ask_ollama(messages, route=route, stream=True, on_chunk=on_chunk)
-        if effective_provider == "openai":
+            # Live beobachtet (2026-08-12): Ollamas Streaming-Endpunkt liefert fuer
+            # phi4-mini gelegentlich HTTP 200 mit komplett leerem Body (0 Bytes,
+            # keine NDJSON-Zeilen ueberhaupt) - reproduzierbar sowohl direkt gegen
+            # /api/chat als auch ueber diesen Client, obwohl derselbe Prompt ueber
+            # den nicht-gestreamten Weg (ask()) einwandfrei funktioniert. Ein reiner
+            # Ollama-/Modell-Bug, kein Fehler in unserem Parsing - aber Leon darf nie
+            # eine stille Leerantwort bekommen, nur weil Streaming diesmal ausfiel.
+            answer = self._ask_ollama(messages, route=route, stream=True, on_chunk=on_chunk)
+            if answer.strip():
+                return answer
+        elif effective_provider == "openai":
             try:
                 return self._ask_openai_stream(messages, max_output_tokens=max_output_tokens, route=route, on_chunk=on_chunk)
             except Exception:

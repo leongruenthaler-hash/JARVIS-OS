@@ -1284,3 +1284,100 @@ stehen. Ihr Outfit strahlt eine gewisse Entspanntheit aus, die durchaus
 sympathisch wirkt - aber bitte nicht übertreiben, sonst fallen Sie zu sehr
 auf." - direkte Anrede, Jarvis-Persoenlichkeit vorhanden. Kein Bild
 zurueckgeblieben, allgemeiner Chat unauffaellig.
+
+## 37. Persoenlichkeit zu foermlich/steif - Ton auf "vertraut und locker" nachgeschaerft (2026-08-12)
+
+Leons Rueckmeldung: Jarvis hat zwar Persoenlichkeit, klingt aber nicht wie
+Iron Mans Jarvis, sondern zu foermlich/steif. Auf Rueckfrage bestaetigt:
+speziell der Formalitaets-Punkt (nicht Proaktivitaet oder Antwortlaenge).
+
+**Ursachen, mehrere kombiniert:**
+- `PersonalityStyle.name` stand fest auf `"professionell"` - dieser Wert
+  fliesst direkt in den System-Prompt ("Stil: Persönlichkeit=...") und
+  faerbt den gesamten Ton Richtung Firmen-Assistent statt vertrauter
+  Begleiter.
+- `salutation_instruction()` verlangte "Sir... nicht nur zu Beginn, sondern
+  durchgehend... lass sie nie unbemerkt weg" - erzwang die Anrede in JEDEM
+  Satz statt sie natuerlich einzustreuen, wie es der eigentliche
+  Iron-Man-Jarvis tut.
+- `DEFAULT_JARVIS_SYSTEM_PROMPT` beschrieb die Rolle als "verlässlicher
+  persönlicher Assistent" - sachlich korrekt, aber ohne jede Waerme/
+  Vertrautheit.
+- **Zusaetzlicher Fund beim Nachschauen:** die fruehere Humor-Abschwaechung
+  aus Abschnitt 34 hatte nur EINE der zwei Kopien der Anweisung erwischt -
+  `build_compact_jarvis_system_prompt()` (genutzt vom "Schneller
+  Sprachmodus", bei Leon aktiv) hatte noch den alten, zwanghaften Wortlaut
+  ("in so gut wie jede Antwort... kein gelegentliches Extra"). Jetzt
+  ebenfalls abgeschwaecht.
+
+**Neue Vorgabe von Leon:** Jarvis soll ihn nie beim Vornamen ansprechen,
+ausser er sagt das ausdruecklich.
+
+**Fix:**
+- `PersonalityStyle.name` Default von `"professionell"` auf
+  `"vertraut und locker"` geaendert.
+- `salutation_instruction()` fuer Sir/Madam: "natürlich eingestreut, dort
+  wo es sich wirklich passend anfühlt... nicht zwanghaft in jedem Satz"
+  statt erzwungener Wiederholung. Neue Namensregel direkt mit eingebaut
+  (nicht bei der "keine Anrede"-Einstellung, die ausdruecklich Namen will).
+- Rollenbeschreibung im Basis-Prompt auf "vertrauter, kompetenter
+  persönlicher Assistent, der dich gut kennt - locker und direkt, nicht
+  förmlich oder distanziert" geaendert.
+- Zweite, bisher uebersehene Kopie der Humor-Anweisung im kompakten Prompt
+  nachgezogen.
+
+322 Tests weiterhin gruen (keine Tests haengen am exakten Wortlaut). Live
+mit drei verschiedenen Anfragen verifiziert: "Sir" erscheint natuerlich
+einmal pro Antwort statt erzwungen mehrfach, kein Firmensprech, kein
+Vorname verwendet. Subjektive Feinabstimmung - Leon soll das im
+laufenden Gebrauch weiter beurteilen.
+
+## 38. Vorname trotz Prompt-Verbot verwendet + unabhaengiger Ollama-Streaming-Bug (2026-08-12)
+
+Leons Live-Test direkt nach Abschnitt 37 zeigte zwei Probleme:
+
+**1) Vorname trotz Prompt-Verbot:** phi4-mini (kleineres lokales Modell)
+ignorierte die neue "niemals den Vornamen"-Anweisung aus Abschnitt 37
+gelegentlich ("danke der Nachfrage, Leon!") - gleiches Muster wie bei
+anderen Bausteinen diese Sitzung: Prompt-Worte allein reichen bei diesem
+Modell nicht zuverlaessig.
+
+**Fix:** neue Funktionen `jarvis.py::strip_first_name_address()`
+(deterministischer Rueckhalt, entfernt Anrede-Vorkommen des Vornamens wie
+", Leon!"/", Leon."/fuehrendes "Leon,") und `wants_first_name_permission()`
+(erkennt eine ausdrueckliche Erlaubnis wie "nenn mich bei meinem Namen" -
+dann wird fuer diese Antwort NICHT entfernt). Angewendet auf den finalen
+allgemeinen Chat-Pfad in `answer_message()` sowie auf
+`summarize_mail_digest_via_llm()`/`humanize_camera_feedback_via_llm()`.
+Zusaetzlich das Prompt-Beispiel in `salutation_instruction()` konkretisiert
+(explizites NICHT/SONDERN-Beispiel, gleiche Technik wie bei anderen
+Prompt-Haertungen diese Sitzung).
+
+**2) Unabhaengiger, tieferliegender Fund beim Untersuchen:** waehrend der
+Live-Tests traten wiederholt komplett leere Antworten auf ("answer": "").
+Direkte Rohanalyse ergab: Ollamas Streaming-Endpunkt (`/api/chat` mit
+`stream: true`) lieferte fuer phi4-mini HTTP 200 mit einem komplett leeren
+Body (0 Bytes, keine einzige NDJSON-Zeile) - reproduzierbar sowohl direkt
+per curl/urllib als auch ueber `LLMClient.ask_stream()`. Derselbe Prompt
+ueber den NICHT gestreamten Weg (`LLMClient.ask()`) lieferte zuverlaessig
+eine vollstaendige Antwort. Ein reiner Ollama-/Modell-Bug (bestaetigt: mit
+`gemma3:4b` funktionierte Streaming einwandfrei, nur `phi4-mini` betroffen),
+kein Fehler in Jarvis' eigenem NDJSON-Parsing.
+
+**Fix:** `LLMClient.ask_stream()` faellt jetzt automatisch auf den nicht
+gestreamten `ask()`-Weg zurueck, wenn der Ollama-Streaming-Versuch eine
+leere Antwort liefert - exakt dasselbe Muster, das fuer OpenAI-Streaming-
+Fehler bereits existierte (Exception -> Ruecksturz), jetzt auch fuer den
+Ollama-"leise leer"-Fall. Repliziert die Antwort als Wort-fuer-Wort-Chunks
+an `on_chunk`, damit Streaming-Konsumenten (die App) weiterhin einen
+Streaming-Effekt sehen, auch wenn die Antwort technisch nicht gestreamt
+wurde.
+
+3 neue Tests fuer `strip_first_name_address()`/`wants_first_name_permission()`
+(`tests/test_first_name_address.py`), 3 neue Tests fuer den Streaming-
+Ruecksturz (`tests/test_llm_client_stream_fallback.py`, `_ask_ollama`/`ask()`
+gemockt). 331 Tests insgesamt, alle gruen. Xcode-Build erfolgreich.
+
+Live verifiziert: drei aufeinanderfolgende Anfragen mit demselben Prompt,
+der zuvor leere Antworten und Namensnennung produzierte - alle drei liefern
+jetzt vollstaendige, kohaerente Antworten ohne Vornamen.

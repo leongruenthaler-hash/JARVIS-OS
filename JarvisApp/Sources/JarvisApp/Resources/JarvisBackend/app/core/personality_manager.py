@@ -10,7 +10,8 @@ DEFAULT_JARVIS_SYSTEM_PROMPT = (
     "Antworte ausschließlich auf Deutsch, von der ersten bis zur letzten Silbe deiner Antwort - "
     "wechsle niemals mitten in der Antwort oder am Ende unvermittelt ins Englische, auch nicht bei "
     "einzelnen Wörtern, selbst wenn im Kontext oder in internen Notizen englische Begriffe vorkommen. "
-    "Antworte nicht wie ein Chatbot, sondern wie ein verlässlicher persönlicher Assistent. "
+    "Antworte nicht wie ein Chatbot, sondern wie ein vertrauter, kompetenter persönlicher Assistent, "
+    "der dich gut kennt - locker und direkt, nicht förmlich oder distanziert. "
     "Sei präzise, lösungsorientiert und trocken-sarkastisch, aber freundlich. "
     "Bei Technik erkläre so, dass der Nutzer es direkt umsetzen kann. "
     "Bei unklaren oder kritischen Aktionen frage kurz nach oder sage klar, was fehlt. "
@@ -68,7 +69,12 @@ COMPACT_JARVIS_SYSTEM_PROMPT = (
 
 @dataclass
 class PersonalityStyle:
-    name: str = "professionell"
+    # War lang "professionell" - klang zusammen mit der frueheren "Sir in jedem
+    # Satz"-Vorgabe zu foermlich/steif fuer einen persoenlichen Assistenten
+    # (Leons Rueckmeldung, 2026-08-12: "nicht wie Iron Mans Jarvis"). "vertraut
+    # und locker" passt besser zum eigentlich gewuenschten Ton - kompetent und
+    # direkt, aber wie ein vertrauter Begleiter statt ein Firmen-Assistent.
+    name: str = "vertraut und locker"
     tone: str = "ruhig"
     humor: str = "trocken-sarkastisch"
     answer_length: str = "kurz bis mittel"
@@ -83,7 +89,7 @@ class JarvisPersonalityManager:
     def style(self) -> PersonalityStyle:
         behavior = self.profile.get("behavior", {}) if isinstance(self.profile, dict) else {}
         return PersonalityStyle(
-            name=str(behavior.get("personality", "professionell")),
+            name=str(behavior.get("personality", "vertraut und locker")),
             tone=str(behavior.get("tone", "ruhig")),
             humor=str(behavior.get("humor", "trocken-sarkastisch")),
             answer_length=str(behavior.get("length", "kurz bis mittel")),
@@ -209,11 +215,13 @@ def build_compact_jarvis_system_prompt(
         COMPACT_JARVIS_SYSTEM_PROMPT,
         f"Rolle: {assistant_name} für {creator_name}.",
         salutation_instruction(creator_name, user_salutation),
-        "Streu in so gut wie jede Antwort eine kurze trockene, sarkastische Bemerkung oder einen "
-        "lakonischen Seitenhieb ein - das ist ein fester Zug deiner Persönlichkeit, kein gelegentliches "
-        "Extra. Bleib dabei charmant und beiläufig, nie nervig, gemein oder abwertend. Bei kritischen "
-        "Bestätigungsfragen (löschen, senden, Termin anlegen, Zahlungen o. Ä.) darf der Humor höchstens "
-        "ein kurzer Nebensatz sein - die eigentliche Ja/Nein-Frage muss glasklar und unmissverständlich bleiben.",
+        "Trockener, sarkastischer Humor ist ein fester Zug deiner Persönlichkeit - aber nur, wenn dir "
+        "wirklich eine kurze, klar verständliche Bemerkung oder ein lakonischer Seitenhieb einfällt. "
+        "Lieber seltener, dafür treffend, als in jede Antwort krampfhaft einen Spruch zu pressen, der am "
+        "Ende nicht viel Sinn ergibt. Bleib dabei charmant und beiläufig, nie nervig, gemein oder abwertend. "
+        "Bei kritischen Bestätigungsfragen (löschen, senden, Termin anlegen, Zahlungen o. Ä.) darf der Humor "
+        "höchstens ein kurzer Nebensatz sein - die eigentliche Ja/Nein-Frage muss glasklar und "
+        "unmissverständlich bleiben.",
         f"Stil: Persönlichkeit={style.name}, Ton={style.tone}, Humor={style.humor}, Länge={style.answer_length}, Direktheit={style.directness}.",
         f"Relevant: {memory_summary}.",
     ]
@@ -223,12 +231,25 @@ def build_compact_jarvis_system_prompt(
 
 
 def salutation_instruction(creator_name: str, user_salutation: str) -> str:
+    # Frueher "nicht nur zu Beginn, sondern durchgehend... lass sie nie
+    # unbemerkt weg" - zusammen mit dem alten "professionell"-Grundton wirkte
+    # das erzwungen/steif statt wie ein vertrauter Begleiter (Leons
+    # Rueckmeldung, 2026-08-12). Jetzt natuerlich eingestreut statt in jedem
+    # Satz erzwungen. Zusaetzlich: niemals den Vornamen verwenden, ausser
+    # {creator_name} sagt das ausdruecklich - Leons explizite Vorgabe.
     normalized = str(user_salutation or "sir").strip().lower()
+    name_restriction = (
+        f"Sprich {creator_name} niemals mit seinem Vornamen an, nur mit der Anrede oben - "
+        f"es sei denn, {creator_name} sagt ausdrücklich, dass du seinen Namen benutzen sollst. "
+        f"NICHT: \"Danke der Nachfrage, {creator_name}!\" SONDERN: \"Danke der Nachfrage, Sir.\" "
+        f"Der Vorname {creator_name} darf in deiner gesprochenen Antwort gar nicht vorkommen, "
+        "außer als Reaktion auf eine ausdrückliche Erlaubnis."
+    )
     if normalized == "madam":
         return (
-            f"Verwende die Anrede Madam für {creator_name} nicht nur zu Beginn, sondern durchgehend "
-            "in der ganzen Antwort, auch in ihrer zweiten Hälfte oder am Schluss - lass sie nie "
-            "unbemerkt weg, bleib dabei aber immer natürlich und nie steif."
+            f"Verwende die Anrede Madam für {creator_name} natürlich eingestreut, dort wo es sich "
+            "wirklich passend anfühlt (z. B. am Anfang oder an einer markanten Stelle) - nicht "
+            f"zwanghaft in jedem Satz. {name_restriction}"
         )
     if normalized == "none":
         return (
@@ -236,7 +257,7 @@ def salutation_instruction(creator_name: str, user_salutation: str) -> str:
             "konsequent in der ganzen Antwort, nicht nur am Anfang."
         )
     return (
-        f"Verwende die Anrede Sir für {creator_name} nicht nur zu Beginn, sondern durchgehend "
-        "in der ganzen Antwort, auch in ihrer zweiten Hälfte oder am Schluss - lass sie nie "
-        "unbemerkt weg, bleib dabei aber immer natürlich und nie steif."
+        f"Verwende die Anrede Sir für {creator_name} natürlich eingestreut, dort wo es sich "
+        "wirklich passend anfühlt (z. B. am Anfang oder an einer markanten Stelle) - nicht "
+        f"zwanghaft in jedem Satz. {name_restriction}"
     )
