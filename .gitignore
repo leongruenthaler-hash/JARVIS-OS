@@ -31,6 +31,12 @@ CameraHelper/
 JarvisApp/.build/
 JarvisApp/.swiftpm/
 **/DerivedData/
+
+# Zur Laufzeit aus app/*.swift kompilierte Helfer-Binaries (photos_client.py/
+# stt_engines.py bauen sie bei Bedarf automatisch neu) - Build-Ergebnisse,
+# keine Quelltexte.
+app/apple_speech
+app/photos_helper
 *.xcuserstate
 **/xcuserdata/
 
