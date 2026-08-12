@@ -1255,3 +1255,32 @@ gesprochene Antwort erhalten, Bild danach nachweislich nicht mehr auf der
 Platte. Regressionscheck: eine normale Fotos-Anfrage loest weiterhin
 korrekt die Fotos-Domaene aus, keine Kollision; allgemeiner Chat
 unauffaellig.
+
+## 36. Kamera-Feedback: rohe Bildbeschreibung ohne Persoenlichkeit durchgereicht (2026-08-12)
+
+Leons Live-Test direkt nach Abschnitt 35: die Antwort beschrieb "die Person"
+in der dritten Person, ohne Anrede, ohne den ueblichen trockenen Jarvis-Ton
+- "das ist nicht die Antwort, die ich erwartet habe". Ursache:
+`handle_camera_command()` gab `LocalVisionService.describe_camera_photo()`s
+rohe Bildbeschreibung unveraendert als Antwort zurueck, ohne sie durch die
+Persoenlichkeits-Schicht laufen zu lassen - anders als beim allgemeinen Chat
+oder dem Mail-Update (Abschnitt 27), wo genau dieser Umformulierungs-Schritt
+bereits existiert.
+
+**Fix:** neue Funktion `humanize_camera_feedback_via_llm()` (gleiches
+Muster wie `summarize_mail_digest_via_llm()`), formuliert die rohe,
+dritte-Person-Bildbeschreibung in eine kurze, direkt an Leon gerichtete
+Einschaetzung um (Anrede ueber die bestehende `salutation_instruction()`,
+konsistent mit "Sir" ueberall sonst in der App), inklusive dem trockenen
+Jarvis-Unterton. Faellt auf die rohe Beschreibung zurueck, wenn die
+Umformulierung leer bleibt, damit nie eine leere Antwort entsteht.
+
+2 neue Tests ergaenzt (erfolgreiche Umformulierung enthaelt nicht mehr "die
+Person", Ruecksturz-Test bei leerer LLM-Antwort), 5 bestehende Kamera-Tests
+angepasst (neuer `llm`-Parameter). 322 Tests insgesamt, alle gruen. Xcode-
+Build erfolgreich. Live mit Leons exakter Formulierung "Jarvis wie sehe ich
+aus" verifiziert: "Sir, das helle Grau scheint Ihnen heute wirklich zu
+stehen. Ihr Outfit strahlt eine gewisse Entspanntheit aus, die durchaus
+sympathisch wirkt - aber bitte nicht übertreiben, sonst fallen Sie zu sehr
+auf." - direkte Anrede, Jarvis-Persoenlichkeit vorhanden. Kein Bild
+zurueckgeblieben, allgemeiner Chat unauffaellig.

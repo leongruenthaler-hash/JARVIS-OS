@@ -2405,6 +2405,47 @@ def summarize_mail_digest_via_llm(
     return re.sub(r"\s*\n+\s*", " ", cleaned).strip()
 
 
+def humanize_camera_feedback_via_llm(llm: LLMClient, raw_description: str) -> str | None:
+    """Formuliert eine rohe Vision-Modell-Bildbeschreibung
+    (LocalVisionService.describe_camera_photo()) in eine persoenliche, direkt
+    an den Nutzer gerichtete Einschaetzung um - siehe
+    plans/2026-08-11-jarvis-kamera-feedback.md, Nachschaerfung. Ohne diesen
+    Schritt kam die rohe Bildunterschrift 1:1 durch: dritte Person ("Die
+    Person traegt..."), keine Anrede, keine Jarvis-Persoenlichkeit - live von
+    Leon bemaengelt ("das ist nicht die Antwort, die ich erwartet habe").
+    Gibt None zurueck, wenn die LLM-Antwort leer war, damit der Aufrufer auf
+    die rohe Beschreibung zurueckfallen kann statt ganz ohne Antwort
+    dazustehen."""
+    from core.personality_manager import salutation_instruction
+
+    address_instruction = salutation_instruction(configured_user_name(), str(CONFIG.get("user_salutation", "sir")))
+    prompt = [
+        {
+            "role": "system",
+            "content": (
+                f"Du bist Jarvis, {configured_user_name()}s persönlicher Assistent. "
+                f"{configured_user_name()} hat dich gerade gebeten, sein Aussehen/Outfit über die Kamera zu beurteilen. "
+                "Du bekommst eine automatisch erzeugte, neutrale Bildbeschreibung in der dritten Person. "
+                f"Formuliere daraus eine kurze, persönliche Einschätzung, die {configured_user_name()} DIREKT anspricht "
+                "(nicht 'die Person', sondern 'Sie'/'dein Outfit'). "
+                f"{address_instruction} "
+                "Ein bis zwei Sätze, mit dem üblichen trockenen, sarkastischen Jarvis-Unterton, aber freundlich und "
+                "nie abwertend. Kein Markdown, keine Aufzählung, kein Verweis darauf, dass du eine automatische "
+                "Bildanalyse umformulierst."
+            ),
+        },
+        {
+            "role": "user",
+            "content": f"Automatische Bildbeschreibung: {raw_description}",
+        },
+    ]
+    answer = llm.ask(prompt, max_output_tokens=90, user_text="kamera outfit feedback umformulieren")
+    answer = answer.strip()
+    if not answer:
+        return None
+    return clean_ai_answer(answer)
+
+
 def should_ignore_transcript(text: str, audio_stats: dict[str, float]) -> bool:
     normalized = normalize_text(text)
 
@@ -5186,7 +5227,7 @@ def handle_screen_command(text: str, memory: Memory | None = None) -> str | None
     return summary
 
 
-def handle_camera_command(text: str) -> str | None:
+def handle_camera_command(text: str, llm: LLMClient) -> str | None:
     """Kamera-Feedback auf Zuruf (siehe
     plans/2026-08-11-jarvis-kamera-feedback.md): ein einzelnes Kamerabild,
     lokal per Ollama-Vision-Modell zu Erscheinungsbild/Outfit analysiert,
@@ -5195,7 +5236,11 @@ def handle_camera_command(text: str) -> str | None:
     Gedaechtnis vorgemerkt, ein Kamerabild ist unmittelbarer/persoenlicher als
     ein Bildschirmfoto. Nur enge, mehrwortige Ausloese-Saetze (siehe
     DOMAIN_TERMS["camera"]), damit sich das nicht mit der Fotos-Domaene
-    ueberschneidet."""
+    ueberschneidet. Die rohe Vision-Beschreibung wird ueber
+    humanize_camera_feedback_via_llm() in eine persoenliche, direkt
+    angesprochene Antwort umformuliert - live von Leon bemaengelt, dass die
+    rohe dritte-Person-Bildbeschreibung ohne Anrede/Persoenlichkeit
+    unveraendert durchkam."""
     if not has_domain(text, "camera"):
         return None
 
@@ -5226,7 +5271,7 @@ def handle_camera_command(text: str) -> str | None:
     description = result.get("description") or ""
     if not description:
         return "Ich habe ein Foto aufgenommen, konnte aber nichts Eindeutiges erkennen."
-    return description
+    return humanize_camera_feedback_via_llm(llm, description) or description
 
 
 def is_execution_promise(text: str) -> bool:
@@ -5844,7 +5889,7 @@ def answer_message(
     camera_permission = ensure_privacy_domain_permission(memory, "camera", "Jarvis würde ein einzelnes Kamerabild aufnehmen, lokal analysieren und danach sofort löschen.") if has_domain(question, "camera") else None
     if camera_permission is not None:
         return _result(camera_permission)
-    camera_answer = handle_camera_command(question) if has_permission("camera") else None
+    camera_answer = handle_camera_command(question, llm) if has_permission("camera") else None
     if camera_answer is not None:
         record_exchange(memory, question, camera_answer)
         return _result(camera_answer, mail_followup=False)
