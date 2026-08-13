@@ -245,19 +245,35 @@ def salutation_instruction(creator_name: str, user_salutation: str) -> str:
         f"Der Vorname {creator_name} darf in deiner gesprochenen Antwort gar nicht vorkommen, "
         "außer als Reaktion auf eine ausdrückliche Erlaubnis."
     )
+    # Live entdeckter Bug: Antworten wechselten unangekuendigt zwischen "du" und
+    # "Sie" (teils sogar innerhalb derselben Testreihe) - bricht die Illusion
+    # eines durchgaengigen Charakters. Bei "Sir"/"Madam" durchgehend "Sie", nach
+    # dem Vorbild von JARVIS aus Iron Man (hoeflich-professionell, nie
+    # kumpelhaft-locker). Konkretes NICHT/SONDERN-Beispiel, weil die reine
+    # abstrakte Anweisung vom kleineren lokalen Modell zuvor unzuverlaessig
+    # befolgt wurde (gleiches Muster wie bei name_restriction oben). Siehe
+    # docs/current-system-assessment.md, Abschnitt 41.
+    formal_register = (
+        f"Sprich {creator_name} in JEDEM Satz konsequent mit \"Sie\" an, niemals mit \"du\" - "
+        "wie ein hochprofessioneller, warmer persönlicher Assistent nach dem Vorbild von JARVIS "
+        "aus Iron Man. NICHT: \"Das kannst du gern selbst prüfen.\" SONDERN: \"Das können Sie "
+        "gern selbst prüfen.\" Auch Verb- und Pronomenformen anpassen (\"haben Sie\" statt "
+        "\"hast du\", \"Ihnen\" statt \"dir\")."
+    )
     if normalized == "madam":
         return (
             f"Verwende die Anrede Madam für {creator_name} natürlich eingestreut, dort wo es sich "
             "wirklich passend anfühlt (z. B. am Anfang oder an einer markanten Stelle) - nicht "
-            f"zwanghaft in jedem Satz. {name_restriction}"
+            f"zwanghaft in jedem Satz. {name_restriction} {formal_register}"
         )
     if normalized == "none":
         return (
             f"Sprich {creator_name} direkt mit Namen oder neutral an, ohne Sir oder Madam - "
-            "konsequent in der ganzen Antwort, nicht nur am Anfang."
+            "konsequent in der ganzen Antwort, nicht nur am Anfang. Duze durchgehend, wechsle "
+            "nicht zwischendurch zu \"Sie\"."
         )
     return (
         f"Verwende die Anrede Sir für {creator_name} natürlich eingestreut, dort wo es sich "
         "wirklich passend anfühlt (z. B. am Anfang oder an einer markanten Stelle) - nicht "
-        f"zwanghaft in jedem Satz. {name_restriction}"
+        f"zwanghaft in jedem Satz. {name_restriction} {formal_register}"
     )

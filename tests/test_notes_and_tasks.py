@@ -97,7 +97,7 @@ def test_notes_read_request_surfaces_access_error(monkeypatch, memory):
 
 def test_tasks_command_reports_no_open_tasks(memory):
     assert jarvis.handle_tasks_command(memory, "was habe ich für offene Aufgaben?") == (
-        "Du hast aktuell keine offenen Aufgaben."
+        "Sie haben aktuell keine offenen Aufgaben."
     )
 
 

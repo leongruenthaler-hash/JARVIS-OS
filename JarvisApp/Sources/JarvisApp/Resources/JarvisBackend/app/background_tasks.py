@@ -60,7 +60,7 @@ class MailBackgroundWorker:
         cache["overnight_requested_at"] = datetime.now().isoformat(timespec="seconds")
         self._save_cache(cache)
         return (
-            "Verstanden. Solange Jarvis läuft, lese ich nachts deine Mail-Übersichten im Hintergrund vor "
+            "Verstanden. Solange Jarvis läuft, lese ich nachts Ihre Mail-Übersichten im Hintergrund vor "
             "und halte morgens ein schnelles Update bereit. Wenn eine neue Mail eine klare Rechnung, "
             "Frist oder einen Termin mit Datum enthält, lege ich automatisch eine Erinnerung oder "
             f"einen Kalendereintrag an. Geplant ist {self.overnight_time} Uhr."
@@ -271,6 +271,19 @@ class MailBackgroundWorker:
             self._save_cache(cache)
             return {"ok": True, "action": result}
 
+    def resolve_pending_calendar_actions(self, action_keys: list[str], approve: bool) -> list[dict[str, Any]]:
+        """Duenner Wrapper um resolve_pending_calendar_action() fuer die
+        Sammel-Bestaetigung/-Ablehnung aus dem Chat (siehe
+        plans/2026-08-13-jarvis-kalender-vorschlaege-per-chat-bestaetigen.md).
+        Einzelne, bereits anderweitig aufgeloeste Keys werden uebersprungen statt
+        die ganze Operation abzubrechen."""
+        resolved: list[dict[str, Any]] = []
+        for action_key in action_keys:
+            outcome = self.resolve_pending_calendar_action(action_key, approve)
+            if outcome.get("ok"):
+                resolved.append(outcome["action"])
+        return resolved
+
     def _build_summary(
         self,
         messages: list[MailMessage],
@@ -316,8 +329,8 @@ class MailBackgroundWorker:
             titles = "; ".join(action["title"] for action in calendar_actions[:3])
             noun = "Vorschlag" if len(calendar_actions) == 1 else "Vorschläge"
             calendar_text = (
-                f" Ich habe außerdem {len(calendar_actions)} Kalender-/Erinnerungs-{noun} aus deinen Mails "
-                f"erkannt, aber noch nicht angelegt: {titles}. Bestätige sie im Dashboard, bevor ich sie anlege."
+                f" Ich habe außerdem {len(calendar_actions)} Kalender-/Erinnerungs-{noun} aus Ihren Mails "
+                f"erkannt, aber noch nicht angelegt: {titles}. Bestätigen Sie sie im Dashboard, bevor ich sie anlege."
             )
 
         return f"{intro} {summary_text}{calendar_text}"

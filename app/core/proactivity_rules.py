@@ -92,7 +92,12 @@ def rule_pending_calendar_actions_waiting(context: dict[str, Any]) -> list[dict[
                 f"{count} aus Mail erkannte(r) Kalender-{noun} sind seit mindestens "
                 f"{hours_threshold:.0f} Stunde(n) unbeantwortet."
             ),
-            "data": {"count": count},
+            "data": {
+                "count": count,
+                "action_keys": [
+                    action.get("action_key") for action in old_enough if action.get("action_key")
+                ],
+            },
             "dedup_key": "pending_calendar_actions",
         }
     ]

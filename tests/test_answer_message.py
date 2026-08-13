@@ -213,7 +213,48 @@ def test_briefing_request_uses_real_data_not_general_chat(memory, workers):
 
     fake_briefing.assert_called_once()
     assert result.text == "Echtes Briefing mit echten Daten"
-    assert llm.ask_calls == []
+
+
+# --- _result(): zentraler Vorname-Leak-Fix ---------------------------------
+# Live entdeckter Bug (2026-08-13): mehrere fest formulierte Antworten
+# (handle_project_command, handle_local_command, handle_system_command)
+# nutzten configured_user_name() direkt, ohne durch strip_first_name_address()
+# zu laufen - das passierte bisher nur im finalen allgemeinen Chat-Pfad.
+# Fix: _result(), der EINZIGE Ausgangspunkt fuer jede Antwort aus
+# answer_message(), bereinigt jetzt selbst. Siehe
+# docs/current-system-assessment.md, Abschnitt 41.
+
+
+def test_direct_handler_answer_has_first_name_stripped(memory, workers):
+    with patch.object(jarvis, "handle_system_command", return_value=None), \
+         patch.object(jarvis, "handle_preference_command", return_value=None), \
+         patch.object(jarvis, "handle_style_command", return_value=None), \
+         patch.object(jarvis, "handle_project_command", return_value="Es ist ambitioniert, Leon, aber nicht abwegig."):
+        result = jarvis.answer_message("was hältst du von meinem projekt", memory, _FakeLLM(), {}, workers=workers)
+
+    assert "Leon" not in result.text
+    assert "ambitioniert" in result.text
+
+
+def test_direct_handler_answer_without_name_is_unchanged(memory, workers):
+    with patch.object(jarvis, "handle_system_command", return_value="Ja, Internetzugriff ist aktiv."):
+        result = jarvis.answer_message("bist du online", memory, _FakeLLM(), {}, workers=workers)
+
+    assert result.text == "Ja, Internetzugriff ist aktiv."
+
+
+def test_general_chat_answer_still_has_name_stripped(memory, workers):
+    llm = _FakeLLM(answer="Danke der Nachfrage, Leon!")
+    with patch.object(jarvis, "has_domain", return_value=False), \
+         patch.object(jarvis, "looks_like_calendar_query", return_value=False), \
+         patch.object(jarvis, "maybe_ask_domain_clarification", return_value=None), \
+         patch.object(jarvis, "should_use_web_search", return_value=False), \
+         patch.object(jarvis, "ensure_cloud_llm_permission", return_value=None), \
+         patch.object(jarvis, "execute_promised_action_if_possible", return_value=None):
+        result = jarvis.answer_message("wie geht es dir", memory, llm, {}, workers=workers)
+
+    assert "Leon" not in result.text
+    assert len(llm.ask_calls) == 1
 
 
 def test_briefing_trigger_matches_words_separated_by_space(memory):

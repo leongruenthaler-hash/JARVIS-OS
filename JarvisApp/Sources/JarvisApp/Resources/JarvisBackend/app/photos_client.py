@@ -240,7 +240,7 @@ class PhotoIndex:
 
         status = output.strip()
         if status in {"authorized", "limited"}:
-            return "Fotos-Zugriff ist erlaubt. Du kannst jetzt sagen: Jarvis, scanne meine Fotos im Hintergrund."
+            return "Fotos-Zugriff ist erlaubt. Sie können jetzt sagen: Jarvis, scanne meine Fotos im Hintergrund."
 
         return (
             f"Der Fotos-Zugriff ist noch nicht erlaubt. Aktueller macOS-Status: {status}. "
@@ -307,8 +307,8 @@ class PhotoIndex:
             folder.mkdir(parents=True, exist_ok=False)
         except PermissionError as exc:
             raise PhotosAccessError(
-                "Ich habe passende Fotos gefunden, darf aber gerade keinen Ordner auf deinem Schreibtisch erstellen. "
-                "Aktiviere in Jarvis die Datei-Berechtigung und erlaube macOS den Zugriff auf den Schreibtisch."
+                "Ich habe passende Fotos gefunden, darf aber gerade keinen Ordner auf Ihrem Schreibtisch erstellen. "
+                "Aktivieren Sie in Jarvis die Datei-Berechtigung und erlauben Sie macOS den Zugriff auf den Schreibtisch."
             ) from exc
         except FileExistsError as exc:
             # unique_desktop_folder() checked for a free name and mkdir(exist_ok=False)
@@ -316,8 +316,8 @@ class PhotoIndex:
             # folder name in between) previously surfaced as an unhandled crash instead
             # of the same friendly error every other export failure gets here.
             raise PhotosAccessError(
-                "Ich habe passende Fotos gefunden, aber der Zielordner auf deinem Schreibtisch wurde gerade "
-                "anderweitig angelegt. Versuch es gleich noch einmal."
+                "Ich habe passende Fotos gefunden, aber der Zielordner auf Ihrem Schreibtisch wurde gerade "
+                "anderweitig angelegt. Versuchen Sie es gleich noch einmal."
             ) from exc
         size = int(preview_size or self.config.get("photos_desktop_export_preview_size", 1800))
         exported = 0
@@ -358,9 +358,9 @@ class PhotoIndex:
 
         if not PermissionManager().is_allowed("external_api"):
             raise PhotosAccessError(
-                "Für die OpenAI-Fotoanalyse fehlt noch deine Zustimmung. Aktiviere die "
+                "Für die OpenAI-Fotoanalyse fehlt noch Ihre Zustimmung. Aktivieren Sie die "
                 "Berechtigung 'Externe APIs' im Datenschutz-Bereich - erst danach verlassen "
-                "Foto-Vorschaubilder dein Gerät."
+                "Foto-Vorschaubilder Ihr Gerät."
             )
 
         try:
@@ -371,7 +371,7 @@ class PhotoIndex:
         cache = self._load_cache()
         entries = list(cache.get("entries", []))
         if not entries:
-            raise PhotosAccessError("Im Fotoindex sind noch keine Fotos. Scanne zuerst deine Fotos im Hintergrund.")
+            raise PhotosAccessError("Im Fotoindex sind noch keine Fotos. Scannen Sie zuerst Ihre Fotos im Hintergrund.")
 
         limit = int(max_items or self.config.get("openai_photo_vision_max_per_run", 20))
         limit = max(1, min(limit, 100))
@@ -437,7 +437,7 @@ class PhotoIndex:
         cache = self._load_cache()
         entries = list(cache.get("entries", []))
         if not entries:
-            raise PhotosAccessError("Im Fotoindex sind noch keine Fotos. Scanne zuerst deine Fotos.")
+            raise PhotosAccessError("Im Fotoindex sind noch keine Fotos. Scannen Sie zuerst Ihre Fotos.")
 
         service = LocalVisionService(self.config)
         status = service.status()
@@ -879,7 +879,7 @@ class PhotoIndex:
     <key>CFBundleVersion</key>
     <string>3</string>
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>Jarvis braucht Zugriff, um deine Fotos lokal zu durchsuchen und passende Alben zu erstellen.</string>
+    <string>Jarvis braucht Zugriff, um Ihre Fotos lokal zu durchsuchen und passende Alben zu erstellen.</string>
     <key>NSPhotoLibraryAddUsageDescription</key>
     <string>Jarvis braucht Zugriff, um gefundene Fotos in neue Fotos-Alben zu legen.</string>
 </dict>
@@ -1021,12 +1021,12 @@ class PhotoBackgroundWorker:
     def request_scan(self) -> str:
         with self.lock:
             if self.scan_thread is not None and self.scan_thread.is_alive():
-                return "Ich scanne deine Fotos bereits im Hintergrund."
+                return "Ich scanne Ihre Fotos bereits im Hintergrund."
 
             self.scan_thread = threading.Thread(target=self._scan_safely, daemon=True)
             self.scan_thread.start()
 
-        return "Ich scanne deine Fotos im Hintergrund und baue den Suchindex auf."
+        return "Ich scanne Ihre Fotos im Hintergrund und baue den Suchindex auf."
 
     def request_vision_analysis(self) -> str:
         if not bool(self.config.get("openai_photo_vision_enabled", False)):
@@ -1034,7 +1034,7 @@ class PhotoBackgroundWorker:
 
         with self.lock:
             if self.vision_thread is not None and self.vision_thread.is_alive():
-                return "Ich analysiere deine Fotos bereits genauer mit OpenAI."
+                return "Ich analysiere Ihre Fotos bereits genauer mit OpenAI."
 
             self.vision_thread = threading.Thread(target=self._vision_safely, daemon=True)
             self.vision_thread.start()
@@ -1052,7 +1052,7 @@ class PhotoBackgroundWorker:
         if self.scan_thread is not None and self.scan_thread.is_alive():
             return (
                 "Ich baue den Fotoindex gerade noch auf. "
-                "Sobald der Scan fertig ist, kann ich die Treffer auf deinen Schreibtisch legen."
+                "Sobald der Scan fertig ist, kann ich die Treffer auf Ihren Schreibtisch legen."
             )
 
         if not self.index.has_entries():
@@ -1070,7 +1070,7 @@ class PhotoBackgroundWorker:
             )
 
         return (
-            f"Erledigt. Ich habe {count} passende Foto(s) in den neuen Ordner {folder.name} auf deinem Schreibtisch gelegt."
+            f"Erledigt. Ich habe {count} passende Foto(s) in den neuen Ordner {folder.name} auf Ihrem Schreibtisch gelegt."
         )
 
     def count_search(self, query: str) -> str:
@@ -1273,7 +1273,7 @@ def clean_photo_query(query: str) -> str:
         flags=re.IGNORECASE,
     )[0]
     query = re.sub(
-        r"\b(?:bitte|mal|meine|meinen|meiner|ich|habe|hab|wie|viele|wieviele|anzahl|zaehl|zähl|zähle|ein|eine|einen|raus|heraus|suchen|such|finde|zeig|zeige|fotos|foto|bilder|bild|album|icloud|iphone)\b",
+        r"\b(?:bitte|mal|meine|meinen|meiner|ich|habe|hab|hast|du|schon|noch|bereits|wie|viele|wieviele|anzahl|zaehl|zähl|zähle|ein|eine|einen|raus|heraus|suchen|such|finde|zeig|zeige|fotos|foto|bilder|bild|album|icloud|iphone)\b",
         " ",
         query,
         flags=re.IGNORECASE,

@@ -540,6 +540,105 @@ def normalize_document_categories(categories: list[str] | None) -> list[str]:
     return normalized_categories
 
 
+def search_messages_by_terms(
+    search_terms: list[str],
+    max_messages: int = 50,
+    account_name: str | None = None,
+    mailbox_name: str | None = None,
+) -> list[MailMessage]:
+    """Read-only Vorschau fuer move_matching_messages_to_trash()'s Suchlogik -
+    findet Mails, deren Absender/Betreff einen der Suchbegriffe enthaelt, ohne
+    etwas zu loeschen. Existiert, damit eine Loesch-Bestaetigung echte,
+    gefundene Betreffs zeigen kann statt einer vagen Ankuendigung - siehe
+    docs/current-system-assessment.md, Abschnitt 41 (Mail-Loeschen mit
+    unbekanntem Absender fiel vorher still auf zuletzt gelesene, unbezogene
+    Mails zurueck)."""
+    cleaned_terms = [
+        _escape_applescript_text(term)
+        for term in search_terms
+        if str(term).strip()
+    ]
+    if not cleaned_terms:
+        return []
+
+    configured_account = _escape_applescript_text(account_name or "")
+    configured_mailbox = _escape_applescript_text(mailbox_name or "")
+    apple_terms = "{" + ", ".join(f'"{term}"' for term in cleaned_terms) + "}"
+    script = f"""
+    set fieldSeparator to ASCII character 31
+    set recordSeparator to ASCII character 30
+    set targetTerms to {apple_terms}
+    set maxMessages to {int(max_messages)}
+    set configuredAccount to "{configured_account}"
+    set configuredMailbox to "{configured_mailbox}"
+    set outputText to ""
+
+    tell application "Mail"
+        set targetMailbox to missing value
+
+        if configuredAccount is not "" and configuredMailbox is not "" then
+            repeat with accountRef in every account
+                set accountText to name of accountRef as string
+                if accountText is configuredAccount then
+                    repeat with mailboxRef in every mailbox of accountRef
+                        set mailboxText to name of mailboxRef as string
+                        if mailboxText is configuredMailbox then
+                            set targetMailbox to mailboxRef
+                            exit repeat
+                        end if
+                    end repeat
+                end if
+            end repeat
+        end if
+
+        if targetMailbox is missing value then
+            try
+                set targetMailbox to inbox
+            end try
+        end if
+
+        if targetMailbox is missing value then return ""
+
+        set messageCount to count of messages of targetMailbox
+        if messageCount < maxMessages then
+            set limitCount to messageCount
+        else
+            set limitCount to maxMessages
+        end if
+
+        repeat with messageIndex from 1 to limitCount
+            set messageRef to item messageIndex of messages of targetMailbox
+            set senderText to ""
+            set subjectText to ""
+            set messageId to ""
+
+            try
+                set senderText to sender of messageRef as string
+            end try
+            try
+                set subjectText to subject of messageRef as string
+            end try
+            try
+                set messageId to id of messageRef as string
+            end try
+
+            set searchableText to senderText & " " & subjectText
+            repeat with targetTerm in targetTerms
+                if searchableText contains (targetTerm as string) then
+                    set outputText to outputText & messageId & fieldSeparator & senderText & fieldSeparator & subjectText & fieldSeparator & "" & fieldSeparator & "" & recordSeparator
+                    exit repeat
+                end if
+            end repeat
+        end repeat
+    end tell
+
+    return outputText
+    """
+
+    raw_output = _run_applescript(script, timeout=20)
+    return _parse_messages(raw_output)
+
+
 def move_matching_messages_to_trash(
     search_terms: list[str],
     max_messages: int = 50,
@@ -1003,23 +1102,23 @@ def _run_applescript(script: str, timeout: int = 8) -> str:
     lowered_error = error_text.lower()
     if "not authorized" in lowered_error or "not allowed" in lowered_error:
         raise MailAccessError(
-            "Apple Mail Zugriff wurde noch nicht erlaubt. Oeffne macOS "
+            "Apple Mail Zugriff wurde noch nicht erlaubt. Oeffnen Sie macOS "
             "Systemeinstellungen > Datenschutz & Sicherheit > Automation "
-            "und erlaube Terminal oder VS Code den Zugriff auf Mail."
+            "und erlauben Sie Terminal oder VS Code den Zugriff auf Mail."
         )
 
     if "application can't be found" in lowered_error or "kann nicht gelesen werden" in lowered_error:
         raise MailAccessError(
             "Apple Mail ist aus dieser Umgebung gerade nicht erreichbar. "
-            "Starte Jarvis aus deinem normalen Terminal und bestaetige die macOS-Frage, "
+            "Starten Sie Jarvis aus Ihrem normalen Terminal und bestaetigen Sie die macOS-Frage, "
             "dass Terminal oder VS Code Mail steuern darf."
         )
 
     if "syntax error" in lowered_error and "klassenname" in lowered_error:
         raise MailAccessError(
             "Apple Mail konnte aus dieser Umgebung sein Scripting-Woerterbuch nicht sauber laden. "
-            "Starte Jarvis aus deinem normalen Terminal, nicht aus einer isolierten Umgebung, "
-            "und bestaetige die macOS-Automation-Freigabe fuer Mail."
+            "Starten Sie Jarvis aus Ihrem normalen Terminal, nicht aus einer isolierten Umgebung, "
+            "und bestaetigen Sie die macOS-Automation-Freigabe fuer Mail."
         )
 
     raise MailAccessError(f"Apple Mail konnte nicht gelesen werden: {error_text}")

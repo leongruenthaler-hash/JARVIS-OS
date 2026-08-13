@@ -21,21 +21,25 @@ class PrivacyDashboard:
         self.logger = PrivacyLogger(self.base_path / "logs", enabled=bool(config.get("privacy_logging_enabled", True)))
 
     def status(self) -> str:
+        # Vorher ein roher Dump aller ~20 internen JSON-Dateinamen im
+        # Speicherordner ("long_memory.json, settings.json, ..."), technisch
+        # korrekt aber wie ein Debug-Log - kein persoenlicher Assistent wuerde
+        # das laut vorlesen. Jetzt eine kurze, natuerliche Zusammenfassung mit
+        # denselben Kerninformationen (KI lokal/Cloud, wo Daten liegen,
+        # welche Berechtigungen aktiv sind). Siehe
+        # docs/current-system-assessment.md, Abschnitt 41.
         manager = ModelManager(self.config, self.base_path)
         model_status = manager.status()
         provider = model_status.provider
         cloud_ai = provider.lower() in {"openai", "anthropic", "google"}
-        stored_files = [path.name for path in self.base_path.glob("*.json") if path.name != "privacy_permissions.json"]
-        local_models = ", ".join(model_status.installed_models) if model_status.installed_models else "keine erkannt"
-        missing = ", ".join(model_status.missing_models) if model_status.missing_models else "keine"
-        return (
-            "Datenschutz-Dashboard. "
-            f"Aktives Modell: {model_status.active_model}. KI-Anbieter: {provider}. Cloud-KI: {'ja' if cloud_ai else 'nein'}. "
-            f"OpenAI aktiv: {'ja' if model_status.openai_enabled else 'nein'}. "
-            f"Lokale Modelle: {local_models}. Fehlende empfohlene Modelle: {missing}. "
-            f"Gespeicherte Datenbereiche: {', '.join(stored_files) if stored_files else 'keine'}. "
-            f"{self.permission_manager.summary()}"
+
+        ai_line = f"Ich arbeite gerade mit {model_status.active_model}, "
+        ai_line += "über die Cloud." if cloud_ai else "komplett lokal auf diesem Mac."
+        storage_line = (
+            "Ihr Gedächtnis, Ihre Einstellungen und Ihr Gesprächsverlauf liegen "
+            "ausschließlich lokal auf diesem Mac - nichts davon wird irgendwo hochgeladen."
         )
+        return f"{ai_line} {storage_line} {self.permission_manager.summary()}"
 
     def export_data(self) -> str:
         export_dir = self.base_path / "exports"

@@ -1381,3 +1381,352 @@ gemockt). 331 Tests insgesamt, alle gruen. Xcode-Build erfolgreich.
 Live verifiziert: drei aufeinanderfolgende Anfragen mit demselben Prompt,
 der zuvor leere Antworten und Namensnennung produzierte - alle drei liefern
 jetzt vollstaendige, kohaerente Antworten ohne Vornamen.
+
+## 39. Kalender-Vorschlaege per Chat bestaetigen/ablehnen (2026-08-13)
+
+Leon entdeckte live (Screenshot): auf die proaktive Meldung "X Kalender-
+Vorschlaege aus deinen Mails warten noch auf deine Bestaetigung" antwortete
+er im Chat mit "das bestaetige ich nicht" - Jarvis verstand den Bezug nicht
+und fragte verwirrt zurueck, was genau nicht bestaetigt wurde. Ursache: die
+Mail-Kalender-Vorschlaege lebten nur in `MailBackgroundWorker` und waren
+ausschliesslich ueber Einzel-Klicks in der App-Oberflaeche
+(`resolve_pending_calendar_action()`, `app/local_server.py`) aufloesbar -
+die generische Chat-Bestaetigungslogik (`handle_pending_action_flow()`)
+kannte diesen Zustand gar nicht.
+
+**Fix:** `rule_pending_calendar_actions_waiting()`
+(`app/core/proactivity_rules.py`) liefert jetzt die betroffenen
+`action_keys` mit. Sobald `local_server.py::proactivity_events()` die
+Meldung tatsaechlich ausliefert, schreibt sie einen
+`pending_mail_calendar_confirmation`-Merker (mit 24h-TTL) in
+`Memory.settings`. Neuer Zweig in `handle_pending_action_flow()` erkennt bei
+aktivem Merker eine allgemeine Zustimmung/Ablehnung und loest ueber die neue
+Sammel-Methode `MailBackgroundWorker.resolve_pending_calendar_actions()`
+alle offenen Vorschlaege auf einmal auf (bestaetigen oder verwerfen).
+
+**Zusatzfund:** "das bestaetige ich nicht" wurde von der bestehenden
+`is_cancel`-Erkennung gar nicht als Ablehnung erkannt, weil das Wort
+"bestaetig" selbst im Satz vorkommt und keine der `cancel_terms` matcht.
+Neue Bedingung ergaenzt: enthaelt der Satz "bestaetig" UND "nicht", gilt er
+als Ablehnung - betrifft alle `pending_*`-Flows, nicht nur diesen neuen.
+
+8 neue Tests (`tests/test_pending_mail_calendar_confirmation.py`). 339 Tests
+insgesamt, alle gruen. Xcode-Build erfolgreich.
+
+Live auf dem Mac verifiziert mit Leons echten, real aus Mails erkannten
+offenen Kalender-Vorschlaegen (4 echte + 1 synthetischer Testeintrag):
+`/api/proactivity/events` lieferte die Meldung inkl. `action_keys`, der
+Merker wurde korrekt gesetzt, "Jarvis das bestaetige ich nicht" antwortete
+mit "Alles klar, ich trage die 5 Kalender-Vorschlaege aus deinen Mails
+nicht ein." (statt der vorherigen verwirrten Rueckfrage). Vor dem Test
+wurden `background_mail_cache.json` und `settings.json` gesichert und
+danach unveraendert wiederhergestellt - Leons echte, noch unbeantwortete
+Vorschlaege sind exakt im urspruenglichen Zustand.
+
+**Bekannte, nicht behobene Einschraenkung** (vorbestehend, nicht durch
+diesen Fix verursacht): die generische `is_cancel`-Erkennung ist insgesamt
+eng gefasst - z.B. erkennt keiner der `pending_*`-Zweige "nein, das nicht"
+(nur die exakte Kurzform "nein" funktioniert zuverlaessig). Bei Nicht-
+Erkennung faellt die Anfrage auf die allgemeine LLM-Antwort durch, die
+plausibel klingt, aber den offenen Zustand nicht aufloest (Merker bleibt bis
+zum TTL-Ablauf stehen). Siehe auch Abschnitt 40.
+
+Details: `plans/2026-08-13-jarvis-kalender-vorschlaege-per-chat-bestaetigen.md`.
+
+## 40. Speicherplatz-Aufraeumhinweise per Chat abfragbar machen (2026-08-13)
+
+Leons genaue Frage "welche Dateien koennen wir loeschen, die mir mehr
+Speicherplatz bringen und nicht fuer Coding-Arbeiten benoetigt werden"
+landete im generischen Datei-Such-Fallback (`handle_file_command()` ->
+`search_files()`) und lieferte dessen hart codierte "nichts gefunden"-
+Vorlage mit der eingesetzten Rohanfrage - erkennbar kaputt, keine echte
+Antwort. Eine passive Warnung bei knappem Speicher existierte bereits
+(`rule_low_disk_space`), aber keine aktive, im Chat abfragbare Funktion mit
+konkreten Vorschlaegen.
+
+**Fix:** neue Funktionen in `app/files_client.py`:
+`list_cleanup_candidates()`/`suggest_cleanup_files()` lesen den bestehenden
+Dateiindex, schliessen Dateien innerhalb von Git-Repos (Vorfahren-Suche nach
+`.git`, memoisiert fuer Performance) und bekannten Projekt-/Cache-
+Ordnernamen (`node_modules`, `.venv`, `Projekte`, `JARVIS-OS`, ...) HART aus
+- Leons ausdrueckliche Vorgabe: alles innerhalb selbst angelegter Ordner ist
+tabu, unabhaengig von Groesse/Alter. Restliche Kandidaten werden nach
+Groesse sortiert. Neue enge Intent-Erkennung in `handle_file_command()`:
+Speicherplatz-Wortgruppe UND Loeschen-Wortgruppe muessen beide zutreffen,
+bevor der generische Fallback ueberhaupt greift. Geloescht wird nie
+automatisch - `move_to_trash()` verschiebt ueber Finder/AppleScript in den
+echten macOS-Papierkorb (rueckgaengig machbar), niemals endgueltig. Neuer
+`pending_cleanup_confirmation`-Merker (30 Min. TTL) + Zweig in
+`handle_pending_action_flow()`, exakt nach demselben Sammel-Bestaetigungs-
+Muster wie die Kalender-Vorschlaege in Abschnitt 39.
+
+14 neue Tests (`tests/test_cleanup_suggestions.py`). 353 Tests insgesamt,
+alle gruen. Xcode-Build erfolgreich.
+
+Live auf dem Mac mit Leons echtem Dateisystem verifiziert: seine genaue
+Beispiel-Frage lieferte 8 sinnvolle Kandidaten (Installer wie
+`Xcode_27_beta_2.xip`, `Claude.dmg`, `VSCode-darwin-arm64.dmg` etc. aus
+Downloads, zusammen rund 3,2 GB) - keine einzige Datei aus einem Projekt-
+/Code-Ordner darunter. Ablehnung ("nein") wurde korrekt erkannt, keine
+Datei wurde angetastet (per `ls` nach dem Test bestaetigt).
+
+Gleicher Zusatzfund wie in Abschnitt 39: "nein, das nicht" wurde beim
+Live-Test nicht erkannt, nur die exakte Kurzform "nein" zuverlaessig.
+
+Details: `plans/2026-08-13-jarvis-speicherplatz-aufraeumen-per-chat.md`.
+
+## 41. Faehigkeits-Simulation: 11 Bugs behoben + vollstaendige Sie-Umstellung (2026-08-13)
+
+Leon bat um eine systematische Simulation: jede Jarvis-Faehigkeit mit
+mehreren menschlichen Formulierungen live gegen die laufende App testen und
+bewerten, ob die Antwort wie ein echter persoenlicher Assistent klingt (29
+Testfaelle, alle Domaenen). Ergebnis als Artefakt-Bericht geliefert, danach
+bat Leon: "alle [Funde] ... bitte beheben ... so ausbauen ... dass ich mit
+Jarvis endlich mal normal reden kann. So wie Ironman Jarvis." Elf Fixes plus
+eine vollstaendige Umstellung von "du" auf "Sie" (siehe Fund 5 unten).
+
+**1) Kritisch - Mail-Loeschen mit unbekanntem Absender:** "Loesche die Mail
+von Anthropic" fiel still auf "die zuletzt gelesenen Mails" zurueck (nur
+Indeed/PayPal/Stepstone waren als Absender hinterlegt) - haette 7 komplett
+unbezogene Mails geloescht. Fix: neue Funktion
+`mail_client.py::search_messages_by_terms()` (read-only Vorschau, keine
+Loeschung), `jarvis.py::extract_mail_delete_target()` erkennt freie
+Absendernamen, echte Suche im Postfach vor der Bestaetigung. Kein Treffer ->
+ehrliche Rueckfrage statt Rateversuch.
+
+**2) Notizen-Lese-Trigger + State-Hijack:** "Was steht AUF meinem
+Einkaufszettel?" (nur "steht IN" war hinterlegt) startete ungefragt einen
+Notiz-Schreiben-Vorgang. Die naechste, unabhaengige Nachricht wurde dadurch
+als Notizinhalt geschluckt - live in Leons echter Notiz passiert, manuell
+korrigiert. Fix: `_NOTES_READ_TRIGGERS` erweitert, plus Schutz in
+`handle_pending_note_flow()` gegen frage-artige Folgenachrichten (gleiches
+Muster wie `handle_pending_action_flow()`).
+
+**3) Foto-Status-Frage:** "Wie viele Fotos hast du indiziert?" wurde als
+Suchbegriff interpretiert ("508 passende Foto(s) fuer hast du schon
+indiziert"). Fix: neue Erkennung vor `extract_photo_count_query()`, routet
+auf `photo_worker.status()`.
+
+**4) Gedaechtnis-Selbstfrage:** "Was weisst du ueber mich?" (mit
+Fragezeichen) matchte den Uebersichts-Vergleich nicht, landete in
+recall_patterns mit "mich" als (nicht existentem) Suchthema -> "Dazu habe
+ich noch nichts im Langzeitgedaechtnis: mich". Fix: Satzzeichen vor dem
+Vergleich entfernt, "mich"/"mir" als Themen explizit ausgeschlossen.
+
+**5) Vorname-Leak systemisch geschlossen + volle Sie-Umstellung:**
+`strip_first_name_address()` griff bisher nur im finalen Chat-Pfad -
+`handle_project_command`/`handle_local_command`/`handle_system_command` etc.
+leakten Leons Vornamen direkt. Fix: Bereinigung in `_result()`, dem
+EINZIGEN Ausgangspunkt jeder Antwort aus `answer_message()` - schuetzt
+systemisch alle Handler, auch kuenftige. Bei diesem Fund entschied Leon
+zusaetzlich: durchgehend "Sie" statt "du", "wie Ironman Jarvis". Umgesetzt:
+`salutation_instruction()` (personality_manager.py) mit konkretem
+NICHT/SONDERN-Beispiel fuer die KI-generierten Antworten (allgemeiner Chat,
+Kamera-Feedback, jetzt auch Mail-Zusammenfassung), PLUS eine komplette,
+manuelle Sichtung jeder "du/dein/dir/dich"-Vorkommnis in jarvis.py,
+files_client.py, photos_client.py, mail_client.py, music_client.py,
+background_tasks.py, local_server.py, privacy_dashboard.py,
+permission_manager.py: echte Jarvis-Antworten auf "Sie/Ihr/Ihnen"
+umgestellt (inkl. Verb-Konjugation bei Imperativen), Erkennungs-Trigger
+(was Leon selbst sagt) UND LLM-Meta-Instruktionen ("Du bist Jarvis..." -
+redet das Modell an, nicht Leon) bewusst unangetastet gelassen. Erste
+Grep-Runde war case-sensitiv und uebersah satzanfaengliche Grossschreibung
+("Deine letzten Notizen", "Du hast...") - zweite, gezielte Runde hat das
+nachgeholt.
+
+**Nebenfund:** `local_server.py::_clean_question()` ruft bereits
+`remove_wake_word()` auf, die bei "Hallo Jarvis" das "Hallo" MIT entfernt
+(Annahme: reine Weckwort-Aeusserung ohne Frage -> "Ja?"). Das ist
+beabsichtigtes Verhalten fuer die Sprachsteuerung (kurze Antwort beim
+Aufwecken, kein langer Redeschwall), kein Bug - `handle_local_command()`s
+neue Weckwort-Erkennung (Fund 8) greift trotzdem fuer Faelle, wo der Text
+ungestrippt ankommt.
+
+**6) Kalender-Zeitraum ignoriert:** "morgen" und "diese Woche" lieferten
+wortgleich dieselbe, ungefilterte Liste wie eine Anfrage ganz ohne
+Zeitangabe - nur "heute" filterte. Fix: `answer_calendar_query()` erkennt
+jetzt auch `only_tomorrow`/`only_this_week`, berechnet passende
+`until`-Grenzen fuer `list_upcoming_calendar_items()`.
+
+**7) Mail-Zusammenfassung abgeschnitten:** `mail_summary_max_output_tokens`
+stand in allen drei config.json-Kopien (Live-Config, Repo-Root,
+app/config.json) auf 180 - zu knapp fuer 7 Mails, Antwort brach mitten im
+Satz ab. Fix: auf 320 angehoben (passend zum Code-eigenen Default).
+
+**8) Begruessung erkennt Weckwort nicht:** "Hallo Jarvis" matchte keine der
+Kurzformeln in `handle_local_command()`, nur isoliertes "hallo". Fix:
+Weckwort wird vor dem Phrasen-Abgleich abgetrennt (siehe Nebenfund oben
+fuer die Einschraenkung ueber den Server-Pfad).
+
+**9) Datenschutz-Status wie Debug-Log:** `PrivacyDashboard.status()` zaehlte
+~20 interne JSON-Dateinamen auf. Fix: kurze, natuerliche Zusammenfassung
+(KI lokal/Cloud, wo Daten liegen, Berechtigungen) statt Datei-Dump.
+
+**10) Tagesbriefing ohne Kalendertermine:** `handle_daily_briefing_command()`
+rief `list_upcoming_calendar_items(limit=10)` OHNE `until`-Grenze auf -
+iteriert Kalender-fuer-Kalender in beliebiger Reihenfolge, ein heutiger
+Termin aus einem spaeter durchsuchten Kalender fiel bei `limit=10`
+komplett unter den Tisch, bevor `events_on_date()` ueberhaupt filtern
+konnte. `local_server.py::daily_briefing()` hatte das `until`-Limit
+bereits (Kommentar sagte "konsistent mit..." - war es nicht mehr). Fix:
+`until=Tagesende`, `limit=20`, wie im Server-Pfad.
+
+33 neue Tests (`test_mail_delete_target_extraction.py`,
+`test_notes_read_and_state_hijack.py`, `test_photo_status_routing.py`,
+`test_memory_self_overview.py`, `test_calendar_time_ranges.py`,
+`test_greeting_wake_word.py`, `test_daily_briefing_calendar_until.py`,
+plus Erweiterungen in `test_answer_message.py`). 386 Tests insgesamt, alle
+gruen. Drei Xcode-Builds (elf Fixes -> Sie-Umstellung Runde 1 ->
+Grossschreibung-Nachschaerfung), jeweils live gegen die echte App
+verifiziert.
+
+Live verifiziert (Auszug): "Was haeltst du von meinem Projekt?" ->
+"Es ist ambitioniert aber nicht abwegig..." (kein Vorname mehr); "Was
+steht auf meinem Einkaufszettel?" -> "Ihre letzten Notizen: ..." (Sie-Form,
+kein Hijack der Folgefrage mehr); "Was weisst du ueber mich?" -> echte
+gespeicherte Fakten statt kaputter Antwort; "Welche Aufgaben sind noch
+offen?" -> "Sie haben aktuell keine offenen Aufgaben."; Datenschutz-Status
+liest sich jetzt wie eine kurze, natuerliche Aussage statt Datei-Dump.
+
+## 42. Runde-2-Simulation: doppelter Umfang, natuerlichere Sprache - zwei strukturelle Wurzelursachen behoben (2026-08-13)
+
+Leon bat um eine Fortsetzung der Simulation aus Abschnitt 41: "wiederhole
+bitte den gleichen Test nur doppelt so aufwaendig, verwende noch mehr
+natuerliche Sprache und schaue, wie sein Verhalten darauf ist." Ergebnis:
+alle 11 Fixes aus Runde 1 halten, aber sie sind auf exakte Formulierungen
+zugeschnitten - ein eingestreutes Fuellwort oder ein Satz ohne das erwartete
+Fragewort am Anfang reicht, damit die Erkennung daneben greift. Waehrend des
+Tests kam es zu zwei echten Seiteneffekten auf Leons echten Daten (unten
+dokumentiert, beide sofort erkannt und wiederhergestellt). Bericht als
+Artefakt geliefert, danach bat Leon: "fixe alle Punkte die falsch gelaufen
+sind ... testet das Ganze anschliessend noch einmal."
+
+**Zwei strukturelle Wurzelursachen (nicht 12 unabhaengige Einzelfehler):**
+
+**A) Fuzzy-Match-Bug in `pending_action_matches_text()`:** verglich einzelne
+Woerter (>3 Zeichen) aus der Nutzer-Nachricht per **Teilstring** gegen den
+kompletten Text aller offenen pending-Aktionen. "wach" in "bist du wach" ist
+zufaellig Teilstring von "wachsen" in einem echten Mail-Betreff -> eine
+harmlose Begruessung wurde als Reaktion auf eine offene
+Kalender-Bestaetigung fehlinterpretiert. **Das ist der Vorfall, der live
+passierte:** ein Test-"abbrechen" (fuer einen anderen Zweck gedacht) wurde
+dadurch von einer echten, im Hintergrund neu entstandenen
+`pending_mail_calendar_confirmation` abgefangen und hat 4 echte
+Kalender-Vorschlaege aus Leons Mails abgelehnt. Kein echter Kalendereintrag
+wurde angelegt oder geloescht (Ablehnung ist rein intern); anhand eines
+Backups exakt identifiziert und in den Wartezustand zurueckversetzt. Fix:
+neue Funktion `_whole_words()` zerlegt Text in bereinigte, komplette
+Woerter; der Fuzzy-Abgleich prueft jetzt Mitgliedschaft in dieser Menge statt
+Teilstring-Enthaltensein - "wach" != "wachsen" mehr.
+
+**B) Ja/Nein-Fragen-Schutz nur bei W-Fragen:** sowohl
+`handle_pending_note_flow()` als auch `handle_pending_action_flow()` hatten
+je eine eigene, leicht unterschiedliche Liste von Frage-Satzanfaengen, die
+vor dem Verschlucken einer Folgenachricht schuetzt - beide kannten nur
+was/welche/wann/wie/wo/warum/wieso, keine Ja/Nein-Fragen (hab ich/ist/kann
+ich/...). **Das ist der zweite Vorfall:** "Hab ich heute irgendwas Wichtiges
+bekommen im Posteingang?" - eine stinknormale Frage ohne W-Fragewort - wurde
+woertlich an Leons echte Einkaufszettel-Notiz angehaengt, weil kein Schutz
+griff. Sofort bemerkt, Notiz in der echten Notizen-App bereinigt. Fix: eine
+gemeinsame Konstante `QUESTION_SHAPE_PREFIXES` (W-Fragen + hab
+ich/bin ich/kann ich/soll ich/darf ich/muss ich/wird/gibt es/...) ersetzt
+beide Kopien - verhindert genau die Art von Drift, die den Vorfall
+verursacht hat.
+
+**Weitere Einzelfixes (Alltagssprache statt Lehrbuch-Formulierung):**
+
+**C) Fuellwort-Toleranz:** neue Funktion `strip_filler_words()` entfernt
+eigentlich/mal/gerade/halt/eben/denn/mittlerweile/uebrigens vor
+Erkennungs-Vergleichen (nie auf echten Inhalt angewandt). Behebt "Was steht
+EIGENTLICH auf meinem Einkaufszettel?" (brach den Runde-1-Lese-Trigger, weil
+der exakte Teilstring "was steht auf" nicht mehr zusammenhaengend war).
+
+**D) Kalender-Erkennung fuer Alltagssprache:** `handle_calendar_command()`
+bumpt `is_query` jetzt zusaetzlich, wenn kein eindeutiges Erstell-Verb da
+ist UND die Nachricht wie eine Frage klingt (Fragezeichen oder
+`QUESTION_SHAPE_PREFIXES`-Anfang) - behebt "Wann ist eigentlich mein
+naechster Termin?" (fragte bisher nach Datum/Uhrzeit statt zu antworten).
+DOMAIN_TERMS["calendar"] um "wochenende"/"eingetragen"/"ansteht" erweitert,
+CALENDAR_QUERY_PHRASES um "naechster termin"/"hab ich diese woche"/"hab ich
+noch was vor" - behebt "Ist am Wochenende was bei mir eingetragen?" und "Hab
+ich diese Woche noch was Wichtiges vor mir?" (fielen bisher komplett durch
+zu generischem Chat, der faelschlich behauptete, gar keinen Kalenderzugriff
+zu haben). Eigene Falle beim Umsetzen: der erste Entwurf nutzte "trag" als
+Erstell-Verb-Indikator - kollidierte als Teilstring mit "eingetragen" und
+haette die Wochenend-Frage wieder als Erstell-Wunsch fehlklassifiziert;
+auf "trag ein"/"trage ein" praezisiert.
+
+**E) Speicherplatz-Erkennung fuer Alltagssprache:** zwei Probleme.
+Erstens fehlten Umgangssprache-Signale ("weg koennte", "rumliegen", "los
+werden") und "festplatte" als eigenstaendiger Begriff (bisher nur
+"festplatte voll" als direkt benachbarte Woerter). Zweitens - der groessere
+Fund - lag die ganze `cleanup_intent`-Pruefung HINTER dem allgemeinen
+`file_context`/`root_context`-Filter in `handle_file_command()`: "Ich brauch
+dringend mehr Speicherplatz ..., was weg koennte" enthaelt kein
+"datei"/"ordner"/"desktop"-Wort, die Funktion gab also schon vorher `None`
+zurueck, bevor die (damals bereits aus Runde 1 vorhandene) Aufraeum-Logik
+ueberhaupt lief. Fix: `cleanup_intent` wird jetzt VOR diesem Filter
+geprueft.
+
+**F) Foto-Status-Erkennung fuer Alltagssprache:** "Wie viele Fotos hast du
+eigentlich mittlerweile durchsucht?" nutzt "durchsucht" statt "indiziert" -
+fiel durch den Runde-1-Fix und landete in einer sinnlosen Bildersuche nach
+den Fragewoertern selbst. Fix: "durchsucht"/"gescannt"/"erfasst"/"schon
+durch"/"fertig mit" ergaenzt.
+
+**G) "Bin wieder da" ohne Halluzination:** ohne eigenen Pfad lief das durch
+den freien Chat, der aus der gespeicherten Tatsache "lebt in Amberg" eine
+unpassende Vermutung machte ("Herzlichen Glueckwunsch zurueck zu Amberg!").
+Fix: eigener, kurzer Pfad in `handle_local_command()`.
+
+**H) Stress-Aeusserungen ohne Empathie:** "Puh, stressiger Tag heute" bekam
+einen zufaelligen "Spruch des Tages" statt jeder Anteilnahme. Fix:
+Stimmungs-Erkennung (stressig/anstrengend/erschoepft/geschafft/...) mit
+kurzer, menschlicher Reaktion.
+
+**I) Freie Verabschiedung nicht erkannt:** "Alles klar, das waer's von mir
+erstmal, bis spaeter" landete generisch im freien Chat statt der
+eingeuebten Jarvis-Verabschiedung (nur exakte Kurzformeln waren hinterlegt).
+Fix: zusaetzliche Substring-Erkennung fuer freie Formulierungen.
+
+**J) Halluzinierte "Erinnerung" an vergangene Anfragen:** "Weisst du
+eigentlich noch, woran ich zuletzt mit dir gearbeitet hab?" bekam eine
+selbstbewusst vorgetragene, aber frei erfundene Antwort (der letzte
+Gespraechsfetzen als angebliche Tatsache). Ein Assistent, der sich sicher
+irrt, untergraebt Vertrauen mehr als einer, der ehrlich zugibt, keinen
+Gespraechsverlauf zu speichern. Fix: eigene Erkennung fuer
+Gespraechsverlauf-Meta-Fragen in `handle_memory_command()`, gibt eine
+ehrliche, feste Antwort statt an die freie Chat-Antwort durchzureichen.
+
+**Nebenfund waehrend der Live-Verifikation (kein Code-Bug, wichtig fuer
+Leon):** Nach dem Wiederherstellen der 4 abgelehnten Kalender-Vorschlaege
+(Vorfall A) und einem App-Neustart hat die bereits bestehende, unabhaengige
+Automatik (`auto_calendar_from_mail_enabled`, Standard an - legt bei
+"klaren Mails mit Rechnung, Frist oder Termin automatisch etwas an") alle 4
+tatsaechlich als echte Erinnerungen in Apple Reminders angelegt, OHNE dass
+im Chat bestaetigt wurde. Das ist die bestehende, beabsichtigte
+Automatik-Funktion, kein neuer Bug - aber ein direkter Nebeneffekt des
+Wiederherstellens waehrend des Tests. Zwei der vier sind harmlos
+(LinkedIn-Post-Digest, Marketing-Mail), zwei betreffen Tom Weigls
+Unterschriftenanforderungen (Leons echtes Tom-Projekt) und sind vermutlich
+tatsaechlich relevant. Leon wurde direkt informiert, nichts eigenmaechtig
+geloescht.
+
+22 neue Tests (`test_round2_natural_language_fixes.py`), 408 Tests
+insgesamt, alle gruen. Ein Xcode-Build, Backend-Kopie synchronisiert
+(`diff` bestaetigt identisch). Live-Verifikation gegen die echte App nach
+Neustart (frischer Auth-Token): "Hey Jarvis, bist du wach" -> normale
+Antwort statt Kalender-Erinnerung; "Wann ist eigentlich mein naechster
+Termin?" -> echte Terminliste statt Datum-Nachfrage; "Ist am Wochenende was
+bei mir eingetragen?" -> echte Terminliste; "Ich brauch dringend mehr
+Speicherplatz ..." und "Meine Festplatte ist ziemlich voll ..." -> echter
+Aufraeum-Vorschlag mit konkreten Dateien; "Wie viele Fotos hast du
+eigentlich mittlerweile durchsucht?" -> echter Index-Status; "Bin wieder
+da" -> "Willkommen zurueck. Was liegt an?" (kein Amberg-Bezug); "Puh,
+stressiger Tag heute muss ich sagen" -> "Klingt nach einem anstrengenden
+Tag. Soll ich Ihnen etwas abnehmen..."; "Alles klar, das waer's von mir
+erstmal, bis spaeter" -> "Bis spaeter. Ich bleibe so lange brav."; "Weisst
+du eigentlich noch, woran ich zuletzt mit dir gearbeitet hab?" -> ehrliche
+Antwort statt erfundener "Erinnerung". Waehrend der Live-Verifikation
+entstandene Test-Notiz ("ZZZ_JarvisTest_Bitte_Ignorieren") sofort wieder
+geloescht.

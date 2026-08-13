@@ -26,23 +26,23 @@ _LOCK = threading.RLock()
 
 
 PERMISSION_DEFINITIONS: dict[str, str] = {
-    "microphone": "Jarvis braucht das Mikrofon, um deine Sprachbefehle lokal zu erkennen.",
-    "camera": "Jarvis darf die Kamera nur nutzen, wenn du eine sichtbare Kamerafunktion startest.",
-    "location": "Jarvis darf Standortdaten nur nutzen, wenn du eine ortsbezogene Funktion ausdrücklich aktivierst.",
-    "mail": "Jarvis liest Apple-Mail-Übersichten nur, um deine angefragten Mail-Aufgaben auszuführen.",
-    "calendar": "Jarvis nutzt Kalender nur, um Termine anzuzeigen oder nach deiner Bestätigung anzulegen.",
-    "reminders": "Jarvis nutzt Erinnerungen nur, um Erinnerungen nach deiner Bestätigung anzulegen oder zu verwalten.",
+    "microphone": "Jarvis braucht das Mikrofon, um Ihre Sprachbefehle lokal zu erkennen.",
+    "camera": "Jarvis darf die Kamera nur nutzen, wenn Sie eine sichtbare Kamerafunktion starten.",
+    "location": "Jarvis darf Standortdaten nur nutzen, wenn Sie eine ortsbezogene Funktion ausdrücklich aktivieren.",
+    "mail": "Jarvis liest Apple-Mail-Übersichten nur, um Ihre angefragten Mail-Aufgaben auszuführen.",
+    "calendar": "Jarvis nutzt Kalender nur, um Termine anzuzeigen oder nach Ihrer Bestätigung anzulegen.",
+    "reminders": "Jarvis nutzt Erinnerungen nur, um Erinnerungen nach Ihrer Bestätigung anzulegen oder zu verwalten.",
     "contacts": "Jarvis nutzt Kontakte nur, um angefragte Kontakte zu finden oder Anrufe vorzubereiten.",
     "notes": "Jarvis nutzt Notizen nur, um angefragte Notizen zu erstellen, zu lesen oder zu ändern.",
     "files": "Jarvis nutzt Dateien nur, um angefragte Ordner und Dateien lokal zu suchen, zu kopieren oder zu verschieben.",
-    "photos": "Jarvis nutzt Fotos nur, um deine Fotomediathek nach deiner Freigabe zu durchsuchen oder Alben zu erstellen.",
-    "screen": "Jarvis macht nur nach deiner Freigabe einen einzelnen Screenshot deines aktiven Fensters (nicht der ganzen Bildschirm-Ansicht), analysiert ihn lokal und löscht ihn danach sofort wieder.",
-    "music": "Jarvis steuert Musik nur, wenn du Musikfunktionen ausdrücklich nutzt.",
-    "internet": "Jarvis nutzt Internetzugriff nur für Websuche oder externe Dienste, wenn du zustimmst.",
+    "photos": "Jarvis nutzt Fotos nur, um Ihre Fotomediathek nach Ihrer Freigabe zu durchsuchen oder Alben zu erstellen.",
+    "screen": "Jarvis macht nur nach Ihrer Freigabe einen einzelnen Screenshot Ihres aktiven Fensters (nicht der ganzen Bildschirm-Ansicht), analysiert ihn lokal und löscht ihn danach sofort wieder.",
+    "music": "Jarvis steuert Musik nur, wenn Sie Musikfunktionen ausdrücklich nutzen.",
+    "internet": "Jarvis nutzt Internetzugriff nur für Websuche oder externe Dienste, wenn Sie zustimmen.",
     "external_api": "Jarvis sendet Daten an externe APIs nur nach aktiver Zustimmung.",
     "cloud_llm": "Jarvis sendet Prompts an Cloud-KI nur nach aktiver Zustimmung. Sensible Inhalte werden vorher angekündigt.",
-    "memory": "Jarvis speichert Langzeit-Erinnerungen und Gesprächsverlauf nur, wenn du diese Speicherung erlaubst.",
-    "usage_patterns": "Jarvis merkt sich nur, WELCHE Art von Anfrage du WANN stellst (z. B. 'Kalender, montags morgens'), nie den Wortlaut, um wiederkehrende Muster zu erkennen und dir passende Automatisierungen vorzuschlagen.",
+    "memory": "Jarvis speichert Langzeit-Erinnerungen und Gesprächsverlauf nur, wenn Sie diese Speicherung erlauben.",
+    "usage_patterns": "Jarvis merkt sich nur, WELCHE Art von Anfrage Sie WANN stellen (z. B. 'Kalender, montags morgens'), nie den Wortlaut, um wiederkehrende Muster zu erkennen und Ihnen passende Automatisierungen vorzuschlagen.",
 }
 
 

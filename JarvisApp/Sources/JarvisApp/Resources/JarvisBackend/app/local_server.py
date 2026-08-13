@@ -146,7 +146,7 @@ def _speech_error_message(exc: Exception) -> str:
     if "device -1" in lowered or "error querying device" in lowered:
         return (
             "Die Sprachaufnahme konnte nicht gestartet werden, weil Python kein gültiges Standard-Mikrofon findet. "
-            "Öffne Systemeinstellungen > Ton > Eingabe und wähle dein MacBook-Mikrofon aus. Prüfe zusätzlich "
+            "Öffnen Sie Systemeinstellungen > Ton > Eingabe und wählen Sie Ihr MacBook-Mikrofon aus. Prüfen Sie zusätzlich "
             f"Datenschutz & Sicherheit > Mikrofon für Xcode, Terminal und Python. Technisch: {detail}"
         )
     if "inputstream" in lowered or "portaudio" in lowered or "sounddevice" in lowered:
@@ -1179,6 +1179,21 @@ class JarvisLocalServer:
 
     def proactivity_events(self) -> dict[str, Any]:
         events = PROACTIVITY_ENGINE.evaluate(self._proactivity_context(), self.config)
+        # Sobald die "Kalender-Vorschlaege warten auf Bestaetigung"-Meldung tatsaechlich
+        # ausgeliefert wird, einen Merker hinterlegen, an den ein spaeterer freier
+        # Chat-Satz ("das bestaetige ich nicht") anknuepfen kann - siehe
+        # plans/2026-08-13-jarvis-kalender-vorschlaege-per-chat-bestaetigen.md.
+        # handle_pending_action_flow() in jarvis.py liest/loescht diesen Schluessel.
+        for event in events:
+            if event.dedup_key == "pending_calendar_actions":
+                action_keys = event.data.get("action_keys") or []
+                if action_keys:
+                    settings = self.memory.get("settings") or {}
+                    settings["pending_mail_calendar_confirmation"] = {
+                        "action_keys": action_keys,
+                        "set_at": time.time(),
+                    }
+                    self.memory.set("settings", settings)
         return {"events": [event.to_dict() for event in events]}
 
     def proactivity_history(self) -> dict[str, Any]:
@@ -1662,7 +1677,7 @@ class JarvisLocalServer:
             if not transcript:
                 return {
                     "transcript": "",
-                    "answer": "Ich habe dich akustisch gehört, aber keinen Text verstanden.",
+                    "answer": "Ich habe Sie akustisch gehört, aber keinen Text verstanden.",
                     "status": "empty",
                     "source": "local",
                     "model": self.models.active_model,
@@ -1823,7 +1838,7 @@ class JarvisLocalServer:
 
         try:
             if hasattr(core, "is_end_command") and core.is_end_command(question):
-                return "Alles klar. Ich bin wieder still, bis du Jarvis sagst."
+                return "Alles klar. Ich bin wieder still, bis Sie Jarvis sagen."
 
             fast = self._handle_fast_commands(question)
             if fast is not None:
@@ -2012,7 +2027,7 @@ class JarvisLocalServer:
             if not bool(status.get("available")):
                 return str(status.get("message") or "Es ist noch kein lokales Vision-Modell installiert.")
             self.start_local_photo_vision_analysis()
-            return f"Ich analysiere deine Fotos lokal mit {status.get('model')}. Keine Bilder verlassen deinen Mac."
+            return f"Ich analysiere Ihre Fotos lokal mit {status.get('model')}. Keine Bilder verlassen Ihren Mac."
 
         if "wie weit" in normalized or "fortschritt" in normalized or "fotoanalyse" in normalized:
             progress = self._photos_vision_status()

@@ -9,7 +9,7 @@ import threading
 import time
 import warnings
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
@@ -49,9 +49,12 @@ from files_client import (
     copy_item,
     create_folder,
     detect_root_hint,
+    list_cleanup_candidates,
     move_item,
     move_items_matching,
+    move_to_trash,
     search_files,
+    suggest_cleanup_files,
     summarize_folder,
 )
 from llm_client import LLMClient
@@ -64,6 +67,7 @@ from mail_client import (
     move_matching_messages_to_trash,
     move_messages_to_trash,
     normalize_document_categories,
+    search_messages_by_terms,
     unread_inbox_count,
 )
 from mail_calendar_actions import _extract_datetime
@@ -218,6 +222,20 @@ def permissions_required() -> bool:
 # survive into an unrelated later conversation.
 PENDING_PERMISSION_TTL_SECONDS = 300
 
+# Wie lange eine ausgelieferte "X Kalender-Vorschlaege warten auf deine
+# Bestaetigung"-Meldung im Chat noch per freiem Satz ("das bestaetige ich
+# nicht") beantwortbar ist. Grosszuegiger als PENDING_PERMISSION_TTL_SECONDS,
+# weil Leon eine Proaktivitaets-Meldung oft erst Stunden spaeter liest -
+# siehe plans/2026-08-13-jarvis-kalender-vorschlaege-per-chat-bestaetigen.md.
+PENDING_MAIL_CALENDAR_CONFIRMATION_TTL_SECONDS = 24 * 3600
+
+# Wie lange ein gerade im Chat gezeigter Speicherplatz-Aufraeum-Vorschlag noch
+# per "ja"/"lösch die" bestaetigt werden kann - kuerzer als die Kalender-TTL,
+# weil das hier eine unmittelbare Gespraechsfolge ist (der Vorschlag wurde
+# gerade erst gezeigt), nicht eine Stunden spaeter gelesene Benachrichtigung.
+# Siehe plans/2026-08-13-jarvis-speicherplatz-aufraeumen-per-chat.md.
+PENDING_CLEANUP_CONFIRMATION_TTL_SECONDS = 30 * 60
+
 
 def ensure_permission(memory: Memory, permission: str, action_summary: str) -> str | None:
     if not permissions_required():
@@ -236,7 +254,7 @@ def ensure_permission(memory: Memory, permission: str, action_summary: str) -> s
     manager.mark_explanation_shown(permission)
     privacy_log("permission_manager", "pending_permission_set", permission=permission, action=action_summary)
     return (
-        f"Dafür brauche ich deine ausdrückliche Zustimmung für {permission}. "
+        f"Dafür brauche ich Ihre ausdrückliche Zustimmung für {permission}. "
         f"Warum: {manager.explanation(permission)} "
         f"Geplante Nutzung: {action_summary}. Sag ja zum Erlauben oder nein zum Abbrechen."
     )
@@ -258,7 +276,7 @@ def ensure_cloud_llm_permission(memory: Memory, question: str) -> str | None:
     return ensure_permission(
         memory,
         "cloud_llm",
-        "Jarvis würde deine Anfrage an eine Cloud-KI senden, um eine Antwort zu erzeugen.",
+        "Jarvis würde Ihre Anfrage an eine Cloud-KI senden, um eine Antwort zu erzeugen.",
     )
 
 
@@ -307,7 +325,7 @@ def handle_privacy_command(memory: Memory, text: str) -> str | None:
         permission = mapping.get(grant_match.group(1))
         if permission:
             manager.grant(permission)
-            return f"Erlaubt: {permission}. Du kannst diese Berechtigung jederzeit wieder deaktivieren."
+            return f"Erlaubt: {permission}. Sie können diese Berechtigung jederzeit wieder deaktivieren."
     if revoke_match:
         permission = mapping.get(revoke_match.group(1))
         if permission:
@@ -354,7 +372,7 @@ def get_input_device():
 
             raise RuntimeError(
                 "Kein Standard-Mikrofon gefunden. Oeffne macOS Systemeinstellungen > "
-                "Datenschutz & Sicherheit > Mikrofon und erlaube deinem Terminal den Zugriff. "
+                "Datenschutz & Sicherheit > Mikrofon und erlauben Sie Ihrem Terminal den Zugriff. "
                 "Falls noetig, ermittle danach die Geraetenummer mit: "
                 ".venv/bin/python -m sounddevice"
             )
@@ -622,6 +640,46 @@ def normalize_text(text: str) -> str:
     return normalized.strip(" ,.!?;:")
 
 
+# Satzanfaenge, an denen eine Nachricht eher wie eine eigenstaendige Frage
+# klingt als wie die Antwort auf eine offene Rueckfrage (Notiz-Inhalt,
+# Kalender-Bestaetigung, Aufraeum-Bestaetigung, ...). Frueher hatten
+# handle_pending_note_flow() und handle_pending_action_flow() je eine eigene,
+# leicht unterschiedliche Kopie dieser Liste - die Notiz-Kopie kannte W-Fragen
+# UND "hast du"/"kannst du"/"gibt es", die Bestaetigungs-Kopie nur W-Fragen.
+# Genau diese Luecke sorgte in der Runde-2-Simulation (2026-08-13) dafuer,
+# dass "Hab ich heute irgendwas Wichtiges bekommen im Posteingang?" - eine
+# stinknormale Ja/Nein-Frage ohne W-Fragewort - unbemerkt als Notiz-Inhalt
+# uebernommen und an eine echte Notiz angehaengt wurde. Eine gemeinsame,
+# vollstaendige Liste (W-Fragen UND Ja/Nein-Fragen) fuer beide Stellen
+# verhindert, dass sie wieder auseinanderlaufen.
+QUESTION_SHAPE_PREFIXES = (
+    "was ", "welche ", "welcher ", "welches ", "wann ", "wie ", "wo ", "warum ", "wieso ", "wer ",
+    "hab ich", "habe ich", "hast du", "haben sie",
+    "bin ich", "bist du", "sind sie",
+    "ist ", "sind ", "war ",
+    "kann ich", "kannst du", "können sie", "könnte ich", "könnten sie",
+    "soll ich", "sollst du", "sollen wir", "sollte ich",
+    "darf ich", "dürfen wir",
+    "muss ich", "musst du", "müssen wir",
+    "wird ", "werden ", "gibt es",
+)
+
+
+# Fuellwoerter, die ein Mensch beim Sprechen natuerlicherweise einstreut
+# ("Was steht EIGENTLICH auf..."), die aber eng gefasste Trigger-Phrasen wie
+# "was steht auf" zerreissen, weil dort ein exakter Teilstring-Vergleich
+# laeuft. strip_filler_words() ist NUR fuer Erkennungs-Vergleiche gedacht -
+# niemals auf echten Notiz-/Aufgaben-Inhalt oder gespeicherten Nutzertext
+# anwenden, sonst gehen echte Woerter verloren. Siehe Runde-2-Simulation,
+# docs/current-system-assessment.md Abschnitt 42.
+_FILLER_WORDS = {"eigentlich", "mal", "gerade", "grad", "halt", "eben", "denn", "einfach", "mittlerweile", "übrigens", "uebrigens"}
+
+
+def strip_filler_words(normalized_text: str) -> str:
+    words = [word for word in normalized_text.split(" ") if word not in _FILLER_WORDS]
+    return re.sub(r"\s+", " ", " ".join(words)).strip()
+
+
 DOMAIN_TERMS = {
     "notes": (
         "notiz",
@@ -641,6 +699,9 @@ DOMAIN_TERMS = {
         "erinnere mich",
         "termine heute",
         "agenda",
+        "wochenende",
+        "eingetragen",
+        "ansteht",
     ),
     "mail": (
         "mail",
@@ -782,6 +843,12 @@ CALENDAR_QUERY_PHRASES = (
     "welche termine",
     "was liegt an",
     "was ist heute los",
+    "nächster termin",
+    "naechster termin",
+    "nächste termin",
+    "hab ich diese woche",
+    "hab ich noch was vor",
+    "was hab ich vor",
 )
 
 
@@ -1911,7 +1978,7 @@ def handle_preference_command(memory: Memory, text: str) -> str | None:
     ):
         include_sources = settings.get("include_sources", False)
         if include_sources:
-            return f"Ja, {configured_user_address()}. Deine Quellen-Präferenz steht auf: Quellen anzeigen."
+            return f"Ja, {configured_user_address()}. Ihre Quellen-Präferenz steht auf: Quellen anzeigen."
         return f"Ja, {configured_user_address()}. Quellen lasse ich weg."
 
     return None
@@ -1935,8 +2002,19 @@ def handle_daily_briefing_command(memory: Memory, text: str) -> str | None:
     try:
         # "heutige Termine" statt "naechste 3 Termine" - konsistent mit
         # local_server.py::daily_briefing(), siehe
-        # plans/2026-08-08-jarvis-tagesbriefing-ausbauen.md.
-        calendar_items = events_on_date(list_upcoming_calendar_items(limit=10).get("items", []))
+        # plans/2026-08-08-jarvis-tagesbriefing-ausbauen.md. Live entdeckter
+        # Bug (2026-08-13): hier fehlte bisher das "until"-Limit, das
+        # local_server.py::daily_briefing() bereits hatte - list_upcoming_
+        # calendar_items() iteriert Kalender-fuer-Kalender in beliebiger
+        # Reihenfolge (nicht nach Datum sortiert) und brach schon nach den
+        # ersten 10 GEFUNDENEN (nicht: naechsten) Terminen ab, bevor
+        # events_on_date() ueberhaupt zum Filtern kam - ein heutiger Termin
+        # aus einem spaeter durchsuchten Kalender fiel dadurch komplett
+        # unter den Tisch. Siehe docs/current-system-assessment.md,
+        # Abschnitt 41.
+        now = datetime.now()
+        end_of_today = datetime(now.year, now.month, now.day, 23, 59, 59)
+        calendar_items = events_on_date(list_upcoming_calendar_items(limit=20, until=end_of_today).get("items", []))
     except Exception:
         calendar_items = []
     try:
@@ -2044,6 +2122,12 @@ def handle_project_command(text: str) -> str | None:
 
 def handle_local_command(text: str) -> str | None:
     normalized = normalize_text(text)
+    # Weckwort "jarvis" am Anfang/Ende einer sonst exakten Kurzformel abtrennen,
+    # bevor gegen die Phrasen-Sets verglichen wird. Live entdeckter Bug: "Hallo
+    # Jarvis" - die naheliegendste reale Formulierung, Weckwort plus Gruss -
+    # matchte bisher keine der Kurzformeln unten, nur das isolierte Wort
+    # "hallo" tat das. Siehe docs/current-system-assessment.md, Abschnitt 41.
+    without_wake_word = re.sub(r"^jarvis\s+|\s+jarvis$", "", normalized).strip() or normalized
 
     greeting_phrases = {
         "hallo",
@@ -2054,11 +2138,34 @@ def handle_local_command(text: str) -> str | None:
         "guten abend",
     }
 
-    if normalized in greeting_phrases:
+    if without_wake_word in greeting_phrases:
         return f"Ich bin da, {configured_user_name()}. Was liegt an? Ich bin heute ungewöhnlich wach."
 
     if normalized in {"ja", "jarvis", "ja jarvis"}:
         return "Was liegt an?"
+
+    # "Bin wieder da" ist eine reine Wiederkehr-Meldung, kein inhaltlicher
+    # Prompt - live entdeckter Bug (Runde-2-Simulation, 2026-08-13): ohne
+    # eigenen Pfad lief das durch den freien Chat, der aus einer gespeicherten
+    # Tatsache ("lebt in Amberg") eine unpassende, uebergriffige Vermutung
+    # machte ("Herzlichen Glueckwunsch zurueck zu Amberg!"). Substring- statt
+    # Exact-Match, weil Menschen das selten wortgleich tippen ("So, bin wieder
+    # da" etc.). Siehe docs/current-system-assessment.md, Abschnitt 42.
+    return_phrases = ("bin wieder da", "bin zurück", "bin zurueck", "wieder zurück", "wieder zurueck", "bin wieder hier")
+    if any(phrase in normalized for phrase in return_phrases):
+        return f"Willkommen zurück, {configured_user_name()}. Was liegt an?"
+
+    # Kurze Stimmungs-/Stress-Aeusserungen verdienen eine kurze menschliche
+    # Reaktion statt eines themenfremden Zufallsspruchs - live entdeckter Bug:
+    # "Puh, stressiger Tag heute" bekam den "Spruch des Tages" statt jeder
+    # Anteilnahme. Siehe docs/current-system-assessment.md, Abschnitt 42.
+    stress_phrases = (
+        "stressiger tag", "stressig", "anstrengend", "erschöpft", "erschoepft",
+        "geschafft heute", "bin geschafft", "kaputt heute", "müde heute", "muede heute",
+        "chaotisch heute", "am limit", "harter tag", "langer tag",
+    )
+    if any(phrase in normalized for phrase in stress_phrases):
+        return "Klingt nach einem anstrengenden Tag. Soll ich Ihnen etwas abnehmen, oder brauchen Sie erstmal einen Moment?"
 
     thanks_phrases = {
         "danke",
@@ -2069,7 +2176,7 @@ def handle_local_command(text: str) -> str | None:
         "ok danke",
     }
 
-    if normalized in thanks_phrases:
+    if without_wake_word in thanks_phrases:
         return "Gern. Höflichkeit ist eine seltene, aber wertvolle Ressource."
 
     polite_done_phrases = {
@@ -2089,10 +2196,22 @@ def handle_local_command(text: str) -> str | None:
         "alles klar",
     }
 
-    if normalized in polite_done_phrases:
+    if without_wake_word in polite_done_phrases:
         return "Alles klar. Ich halte kurz den Mund."
 
-    if normalized in {"bis später", "bis spaeter", "tschüss", "tschuess"}:
+    # Freie Verabschiedungen ("das wär's von mir erstmal, bis später") klingen
+    # selten wie die kurzen Exact-Match-Formeln oben - live entdeckter Bug
+    # (Runde-2-Simulation, 2026-08-13): landete generisch im freien Chat statt
+    # der eingeuebten Jarvis-Verabschiedung. Siehe
+    # docs/current-system-assessment.md, Abschnitt 42.
+    farewell_phrases = (
+        "bis später", "bis spaeter", "tschüss", "tschuess", "bis dann",
+        "das wär's", "das wars", "bin dann mal weg", "melde mich später", "melde mich spaeter",
+        "mach's gut", "machs gut", "wir sprechen uns", "das reicht für heute", "das reicht fuer heute",
+    )
+    if without_wake_word in {"bis später", "bis spaeter", "tschüss", "tschuess"} or any(
+        phrase in normalized for phrase in farewell_phrases
+    ):
         return f"Bis später, {configured_user_name()}. Ich bleibe so lange brav."
 
     return None
@@ -2386,11 +2505,15 @@ def summarize_mail_digest_via_llm(
     Gibt None zurueck, wenn die LLM-Antwort leer/unbrauchbar war, damit der
     Aufrufer auf eine mechanische Zusammenfassung zurueckfallen kann, statt
     ganz ohne Mail-Update dazustehen."""
+    from core.personality_manager import salutation_instruction
+
+    address_instruction = salutation_instruction(configured_user_name(), str(CONFIG.get("user_salutation", "sir")))
     prompt = [
         {
             "role": "system",
             "content": (
                 f"Du bist Jarvis, {configured_user_name()}s persönlicher Assistent. "
+                f"{address_instruction} "
                 "Fasse Apple-Mail-Übersichten auf Deutsch natürlich, knapp und in normaler gesprochener Sprache zusammen. "
                 "Antworte so, als würdest du Leon kurz am Schreibtisch informieren, nicht als würdest du jede Zeile vorlesen. "
                 "Wichtig: niemals die Mails einzeln als Liste herunterbeten, keine Zeile-für-Zeile-Wiedergabe, "
@@ -2407,9 +2530,9 @@ def summarize_mail_digest_via_llm(
                 "Löschen oder Verschieben nur als Vorschlag, niemals als bereits ausgeführte Aktion. "
                 "Mach das kurz, menschlich und mit dem üblichen trockenen Jarvis-Ton.\n\n"
                 "Beispiel für den erwarteten Stil (Format, nicht Inhalt übernehmen): "
-                "\"Drei Themen: eine Rechnung von deinem Stromanbieter über 64 Euro, fällig Ende des Monats, "
-                "außerdem zwei Newsletter, die du vermutlich überspringen kannst, und eine Terminanfrage von "
-                "Julia für nächste Woche, auf die du noch antworten solltest.\""
+                "\"Drei Themen, Sir: eine Rechnung von Ihrem Stromanbieter über 64 Euro, fällig Ende des Monats, "
+                "außerdem zwei Newsletter, die Sie vermutlich überspringen können, und eine Terminanfrage von "
+                "Julia für nächste Woche, auf die Sie noch antworten sollten.\""
             ),
         },
         {
@@ -2466,7 +2589,7 @@ def humanize_camera_feedback_via_llm(llm: LLMClient, raw_description: str) -> st
                 f"{configured_user_name()} hat dich gerade gebeten, sein Aussehen/Outfit über die Kamera zu beurteilen. "
                 "Du bekommst eine automatisch erzeugte, neutrale Bildbeschreibung in der dritten Person. "
                 f"Formuliere daraus eine kurze, persönliche Einschätzung, die {configured_user_name()} DIREKT anspricht "
-                "(nicht 'die Person', sondern 'Sie'/'dein Outfit'). "
+                "(nicht 'die Person', sondern 'Sie'/'Ihr Outfit'). "
                 f"{address_instruction} "
                 "Ein bis zwei Sätze, mit dem üblichen trockenen, sarkastischen Jarvis-Unterton, aber freundlich und "
                 "nie abwertend. Kein Markdown, keine Aufzählung, kein Verweis darauf, dass du eine automatische "
@@ -2525,6 +2648,8 @@ def has_pending_action(memory: Memory) -> bool:
         "pending_mail_document_export",
         "pending_file_action",
         "pending_domain_clarification",
+        "pending_mail_calendar_confirmation",
+        "pending_cleanup_confirmation",
     )
     return any(isinstance(settings.get(key), dict) for key in pending_keys)
 
@@ -2551,6 +2676,18 @@ def is_short_confirmation(text: str) -> bool:
     }
 
 
+def _whole_words(text: str) -> set[str]:
+    """Zerlegt Text in sauly bereinigte, komplette Woerter (keine Teilstrings).
+
+    Wird fuer den Fuzzy-Abgleich in pending_action_matches_text() gebraucht:
+    ein naiver `wort in text`-Teilstring-Vergleich matcht auch dann, wenn
+    "wach" zufaellig Teil von "wachsen" in einem Mail-Betreff ist - siehe
+    Runde-2-Simulation vom 2026-08-13. Ein Vergleich gegen komplette Woerter
+    verhindert genau diese Zufallstreffer.
+    """
+    return set(re.findall(r"[a-zäöüß0-9]+", text.lower()))
+
+
 def pending_action_matches_text(settings: dict, normalized_text: str) -> bool:
     if any(term in normalized_text for term in ("berechtigung", "erlaub", "freigabe", "zugriff", "bestätig", "bestaetig")):
         return True
@@ -2565,43 +2702,70 @@ def pending_action_matches_text(settings: dict, normalized_text: str) -> bool:
         "pending_mail_delete": ("mail", "mails", "papierkorb", "lösch", "loesch", "verschieb"),
         "pending_call_contact": ("anruf", "anrufen", "ruf", "kontakt", "telefon"),
         "pending_call_choice": ("nummer", "endung", "telefon", "kontakt", "anruf"),
+        "pending_mail_calendar_confirmation": ("kalender", "termin", "termine", "vorschlag", "vorschläge", "vorschlaege", "eintragen", "mail", "mails"),
+        "pending_cleanup_confirmation": ("papierkorb", "löschen", "loeschen", "datei", "dateien", "speicherplatz", "aufräumen", "aufraeumen"),
     }
 
     for key, terms in context_by_key.items():
         pending = settings.get(key)
         if not isinstance(pending, dict):
             continue
-        pending_text = normalize_text(" ".join(str(value) for value in pending.values()))
+        pending_words = _whole_words(" ".join(str(value) for value in pending.values()))
         if key == "pending_permission":
-            if pending_text and any(word for word in normalized_text.split() if len(word) > 5 and word in pending_text):
+            if pending_words and any(word for word in normalized_text.split() if len(word) > 5 and word in pending_words):
                 return True
             continue
         if any(term in normalized_text for term in terms):
             return True
-        if pending_text and any(word for word in normalized_text.split() if len(word) > 3 and word in pending_text):
+        if pending_words and any(word for word in normalized_text.split() if len(word) > 3 and word in pending_words):
             return True
 
     return False
 
 
+def _memory_overview_answer(memory: Memory, memory_system: "JarvisMemorySystem") -> str:
+    fact_summary = memory_system.facts_summary()
+    if fact_summary == "Keine wichtigen Langzeitnotizen.":
+        return "Ich habe mir bisher noch keine Langzeit-Erinnerungen gespeichert."
+
+    facts = memory.all_facts()[-10:]
+    settings = memory.get("settings") or {}
+    settings["pending_memory_list"] = [item.get("content", "") for item in facts]
+    memory.set("settings", settings)
+    fact_list = "\n".join(f"{index + 1}. {item['content']}" for index, item in enumerate(facts))
+    return (
+        f"Das habe ich mir gemerkt:\n{fact_list}\n"
+        "Sag z. B. 'vergiss Nummer 3', wenn ich mir davon etwas nicht mehr merken soll."
+    )
+
+
 def handle_memory_command(memory: Memory, text: str) -> str | None:
     normalized = text.strip()
-    lowered = normalized.lower()
+    lowered = normalized.lower().rstrip("?!. ")
     memory_system = JarvisMemorySystem(memory)
 
     if lowered in {"was weißt du über mich", "was weisst du über mich", "was hast du dir gemerkt"}:
-        fact_summary = memory_system.facts_summary()
-        if fact_summary == "Keine wichtigen Langzeitnotizen.":
-            return "Ich habe mir bisher noch keine Langzeit-Erinnerungen gespeichert."
+        return _memory_overview_answer(memory, memory_system)
 
-        facts = memory.all_facts()[-10:]
-        settings = memory.get("settings") or {}
-        settings["pending_memory_list"] = [item.get("content", "") for item in facts]
-        memory.set("settings", settings)
-        fact_list = "\n".join(f"{index + 1}. {item['content']}" for index, item in enumerate(facts))
+    # Meta-Frage nach dem Gespraechsverlauf ("woran haben wir zuletzt
+    # gearbeitet", "was haben wir gerade gemacht") ist etwas anderes als eine
+    # Frage nach einem gespeicherten Fakt - Jarvis merkt sich Fakten
+    # dauerhaft, aber KEINEN Gespraechsverlauf. Live entdeckter Bug
+    # (Runde-2-Simulation, 2026-08-13): ohne eigenen Pfad landete das im
+    # freien Chat, der aus dem letzten Gespraechsfetzen selbstbewusst eine
+    # frei erfundene "Erinnerung" praesentierte ("Ja, Sie haben mich
+    # gebeten..."). Eine ehrliche Absage ist fuer einen Assistenten, dem man
+    # vertrauen soll, besser als eine selbstbewusst falsche Antwort. Siehe
+    # docs/current-system-assessment.md, Abschnitt 42.
+    conversation_recall_phrases = (
+        "woran haben wir", "woran wir zuletzt", "woran ich zuletzt", "woran wir gerade",
+        "was haben wir zuletzt", "was haben wir gerade gemacht", "letztes gespräch", "letztes gespraech",
+        "worüber haben wir gesprochen", "worueber haben wir gesprochen", "was haben wir besprochen",
+    )
+    if any(phrase in lowered for phrase in conversation_recall_phrases):
         return (
-            f"Das habe ich mir gemerkt:\n{fact_list}\n"
-            "Sag z. B. 'vergiss Nummer 3', wenn ich mir davon etwas nicht mehr merken soll."
+            "Ich merke mir wichtige Fakten dauerhaft, aber keinen laufenden Gesprächsverlauf. "
+            "Sagen Sie mir gern kurz, worum es ging, dann kann ich anknüpfen."
         )
 
     forget_numbered_match = re.match(
@@ -2664,6 +2828,15 @@ def handle_memory_command(memory: Memory, text: str) -> str | None:
             continue
 
         topic = normalized[match.start(1):].strip(" .,!?:;")
+        # "was weisst du ueber mich" landete bisher hier statt in der obigen
+        # Uebersicht, weil "mich" faelschlich als Such-THEMA statt als
+        # Selbstbezug behandelt wurde ("mich" ist nie ein echtes Thema) -
+        # lieferte die kaputte Antwort "Dazu habe ich noch nichts im
+        # Langzeitgedaechtnis: mich". Siehe
+        # docs/current-system-assessment.md, Abschnitt 41.
+        if topic.lower().rstrip("?!. ") in {"mich", "mir"}:
+            return _memory_overview_answer(memory, memory_system)
+
         results = memory.search_facts(topic)
         if not results:
             return f"Dazu habe ich noch nichts im Langzeitgedächtnis: {topic}"
@@ -2688,6 +2861,23 @@ def handle_pending_note_flow(memory: Memory, text: str) -> str | None:
     state = pending.get("state")
     title = str(pending.get("title") or "").strip()
     body = str(pending.get("body") or "").strip()
+
+    # Sieht die Nachricht eher nach einer eigenstaendigen Frage aus als nach
+    # Notiz-Inhalt? Live entdeckter Bug: eine voellig unabhaengige Folgefrage
+    # ("Welche Aufgaben sind noch offen?") wurde bisher stillschweigend als
+    # Notiz-Text uebernommen, weil hier jede Antwort ungeprueft akzeptiert
+    # wurde. Gleiches Schutzmuster wie in handle_pending_action_flow() - beide
+    # nutzen jetzt QUESTION_SHAPE_PREFIXES, siehe deren Kommentar fuer die
+    # Geschichte, warum eine gemeinsame Liste noetig wurde. Siehe
+    # docs/current-system-assessment.md, Abschnitt 41 und 42.
+    normalized_reply = normalize_text(text)
+    if normalized_reply.startswith(QUESTION_SHAPE_PREFIXES):
+        pending_label = title or "die Notiz"
+        return (
+            f"Das klingt nach einer eigenen Frage, nicht nach Notiz-Inhalt. "
+            f"Ich lasse {pending_label} erstmal offen stehen - sag mir, was rein soll, "
+            "oder \"abbrechen\", um die Notiz zu verwerfen."
+        )
 
     if state == "awaiting_title":
         title = clean_note_title(text)
@@ -2761,15 +2951,15 @@ def classify_domain_via_llm(llm: LLMClient, question: str) -> list[str]:
 
 
 _DOMAIN_CLARIFICATION_PHRASES = {
-    "mail": "deine Mails",
-    "calendar": "deinen Kalender oder eine Erinnerung",
+    "mail": "Ihre Mails",
+    "calendar": "Ihren Kalender oder eine Erinnerung",
     "notes": "eine Notiz",
-    "files": "deine Dateien oder deinen Schreibtisch",
-    "photos": "deine Fotos",
-    "screen": "deinen Bildschirm",
-    "contacts": "deine Kontakte",
+    "files": "Ihre Dateien oder Ihren Schreibtisch",
+    "photos": "Ihre Fotos",
+    "screen": "Ihren Bildschirm",
+    "contacts": "Ihre Kontakte",
     "music": "die Musik",
-    "tasks": "deine Aufgaben",
+    "tasks": "Ihre Aufgaben",
 }
 
 
@@ -2795,9 +2985,9 @@ def maybe_ask_domain_clarification(llm: LLMClient, memory: Memory, question: str
 
     if len(domains) == 1:
         guess = _DOMAIN_CLARIFICATION_PHRASES.get(domains[0], domains[0])
-        return f"Meintest du gerade {guess}, oder ging es um etwas anderes? Sag kurz, was gemeint war."
+        return f"Meinten Sie gerade {guess}, oder ging es um etwas anderes? Sagen Sie kurz, was gemeint war."
     guesses = " oder ".join(_DOMAIN_CLARIFICATION_PHRASES.get(domain, domain) for domain in domains)
-    return f"Ging es dabei um {guesses}? Sag kurz, was gemeint war, dann mach ich weiter."
+    return f"Ging es dabei um {guesses}? Sagen Sie kurz, was gemeint war, dann mach ich weiter."
 
 
 def _dispatch_confirmed_domain(
@@ -2815,8 +3005,8 @@ def _dispatch_confirmed_domain(
     permission_prompts = {
         "notes": "Jarvis würde eine Notiz über Apple Notes erstellen oder ändern.",
         "calendar": "Jarvis würde Kalenderdaten verwenden.",
-        "files": "Jarvis würde deinen Schreibtisch oder Dateien lokal lesen oder ändern.",
-        "photos": "Jarvis würde deine Fotos-App oder den lokalen Fotoindex verwenden.",
+        "files": "Jarvis würde Ihren Schreibtisch oder Dateien lokal lesen oder ändern.",
+        "photos": "Jarvis würde Ihre Fotos-App oder den lokalen Fotoindex verwenden.",
         "screen": "Jarvis würde einen einzelnen Screenshot deines aktiven Fensters aufnehmen und lokal analysieren.",
         "mail": "Jarvis würde Apple Mail lokal lesen oder bearbeiten.",
         "contacts": "Jarvis würde Kontakte lesen oder einen Anruf vorbereiten.",
@@ -3021,7 +3211,7 @@ def handle_pending_domain_clarification_flow(
     memory.set("settings", settings)
 
     if normalized in {"nein", "nein danke", "abbrechen", "vergiss es", "stopp", "stop", "weder noch", "nichts davon"}:
-        return "Alles klar, dann lass ich das - sag gern nochmal genauer, was ich für dich tun soll."
+        return "Alles klar, dann lass ich das - sagen Sie gern nochmal genauer, was ich für Sie tun soll."
 
     chosen: str | None = None
     if len(candidates) == 1 and normalized in {"ja", "ja bitte", "ok", "okay", "genau", "richtig", "stimmt"}:
@@ -3047,6 +3237,7 @@ def handle_pending_action_flow(
     memory: Memory,
     text: str,
     photo_worker: PhotoBackgroundWorker | None = None,
+    mail_worker: MailBackgroundWorker | None = None,
 ) -> str | None:
     settings = memory.get("settings") or {}
     normalized = normalize_text(text)
@@ -3091,8 +3282,17 @@ def handle_pending_action_flow(
         or normalized.startswith("ja ")
         or any(term in normalized for term in ("mach das", "ich bestätige", "ich bestaetige"))
     )
-    is_cancel = normalized in cancel_terms or any(term in normalized for term in cancel_terms if len(term) > 4)
-    if normalized.startswith(("was ", "welche ", "welcher ", "welches ", "wann ", "wie ", "wo ", "warum ", "wieso ")):
+    is_cancel = (
+        normalized in cancel_terms
+        or any(term in normalized for term in cancel_terms if len(term) > 4)
+        # "das bestätige ich nicht" o.ä. - live von Leon entdeckter Bug: eine
+        # Ablehnung, die das Wort "bestätig(e/en)" selbst enthält, wurde bisher
+        # von keinem der obigen Muster erfasst (kein exaktes cancel_terms-Match,
+        # "nicht" alleine steht nicht in cancel_terms). Siehe
+        # plans/2026-08-13-jarvis-kalender-vorschlaege-per-chat-bestaetigen.md.
+        or (("bestätig" in normalized or "bestaetig" in normalized) and "nicht" in normalized)
+    )
+    if normalized.startswith(QUESTION_SHAPE_PREFIXES):
         return None
     explicit_new_command = any(
         term in normalized
@@ -3150,7 +3350,7 @@ def handle_pending_action_flow(
                 return _continue_multistep_chain_if_pending(
                     memory,
                     "pending_permission",
-                    "Die Berechtigungsanfrage ist inzwischen abgelaufen. Bitte stelle deine Anfrage noch einmal, falls du sie noch erlauben möchtest.",
+                    "Die Berechtigungsanfrage ist inzwischen abgelaufen. Bitte stellen Sie Ihre Anfrage noch einmal, falls Sie sie noch erlauben möchten.",
                     aborted=True,
                     photo_worker=photo_worker,
                 )
@@ -3162,13 +3362,13 @@ def handle_pending_action_flow(
                 memory, "pending_permission", "Alles klar, ich erteile diese Berechtigung nicht.", aborted=True, photo_worker=photo_worker
             )
         if not is_confirm:
-            return "Ich warte auf deine Entscheidung. Sag ja zum Erlauben oder nein zum Abbrechen."
+            return "Ich warte auf Ihre Entscheidung. Sagen Sie ja zum Erlauben oder nein zum Abbrechen."
         if permission:
             PermissionManager().grant(permission, source="chat_pending_permission_confirm")
             settings.pop("pending_permission", None)
             memory.set("settings", settings)
             privacy_log("permission", "granted", permission=permission)
-            granted_message = f"Erlaubt: {permission}. Bitte stelle deine Anfrage noch einmal, dann führe ich sie kontrolliert aus."
+            granted_message = f"Erlaubt: {permission}. Bitte stellen Sie Ihre Anfrage noch einmal, dann führe ich sie kontrolliert aus."
             return _continue_multistep_chain_if_pending(
                 memory, "pending_permission", granted_message, aborted=False, photo_worker=photo_worker
             )
@@ -3188,7 +3388,7 @@ def handle_pending_action_flow(
             is_confirm=is_confirm,
             is_cancel=is_cancel,
             cancel_message="Alles klar, ich verschiebe nichts.",
-            waiting_message="Ich warte noch auf deine Bestätigung. Sag ja zum Verschieben oder abbrechen.",
+            waiting_message="Ich warte noch auf Ihre Bestätigung. Sagen Sie ja zum Verschieben oder abbrechen.",
         )
         if is_confirm or is_cancel:
             return _continue_multistep_chain_if_pending(memory, "pending_desktop_move", result, aborted=is_cancel, photo_worker=photo_worker)
@@ -3204,7 +3404,7 @@ def handle_pending_action_flow(
             is_confirm=is_confirm,
             is_cancel=is_cancel,
             cancel_message="Alles klar, ich verschiebe nichts.",
-            waiting_message="Ich warte noch auf deine Bestätigung. Sag ja zum Verschieben oder abbrechen.",
+            waiting_message="Ich warte noch auf Ihre Bestätigung. Sagen Sie ja zum Verschieben oder abbrechen.",
         )
         if is_confirm or is_cancel:
             return _continue_multistep_chain_if_pending(memory, "pending_desktop_move_many", result, aborted=is_cancel, photo_worker=photo_worker)
@@ -3220,11 +3420,122 @@ def handle_pending_action_flow(
             is_confirm=is_confirm,
             is_cancel=is_cancel,
             cancel_message="Alles klar, ich erstelle nichts.",
-            waiting_message="Ich warte noch auf deine Bestätigung. Sag ja zum Erstellen oder abbrechen.",
+            waiting_message="Ich warte noch auf Ihre Bestätigung. Sagen Sie ja zum Erstellen oder abbrechen.",
         )
         if is_confirm or is_cancel:
             return _continue_multistep_chain_if_pending(memory, "pending_calendar_create", result, aborted=is_cancel, photo_worker=photo_worker)
         return result
+
+    # Sammel-Bestaetigung/-Ablehnung der aus Mails erkannten Kalender-Vorschlaege,
+    # sobald Jarvis die proaktive "X Kalender-Vorschlaege warten..."-Meldung
+    # tatsaechlich ausgeliefert hat (Merker gesetzt in
+    # local_server.py::proactivity_events()). Kein ACTION_ENGINE.resolve(), weil
+    # das hier mehrere Vorschlaege auf einmal betrifft statt eines einzelnen
+    # execution_data-Dicts - siehe
+    # plans/2026-08-13-jarvis-kalender-vorschlaege-per-chat-bestaetigen.md.
+    pending_mail_calendar_confirmation = settings.get("pending_mail_calendar_confirmation")
+    if isinstance(pending_mail_calendar_confirmation, dict):
+        action_keys = [key for key in (pending_mail_calendar_confirmation.get("action_keys") or []) if key]
+        set_at = pending_mail_calendar_confirmation.get("set_at")
+        age_seconds = (time.time() - set_at) if isinstance(set_at, (int, float)) else None
+        expired = (
+            not action_keys
+            or age_seconds is None
+            or age_seconds > PENDING_MAIL_CALENDAR_CONFIRMATION_TTL_SECONDS
+        )
+        if expired:
+            settings.pop("pending_mail_calendar_confirmation", None)
+            memory.set("settings", settings)
+            if is_confirm or is_cancel:
+                return _continue_multistep_chain_if_pending(
+                    memory,
+                    "pending_mail_calendar_confirmation",
+                    "Die Kalender-Vorschläge aus Ihren Mails sind nicht mehr aktuell. Sagen Sie mir gern noch einmal, worum es geht.",
+                    aborted=True,
+                    photo_worker=photo_worker,
+                )
+        elif is_cancel:
+            settings.pop("pending_mail_calendar_confirmation", None)
+            memory.set("settings", settings)
+            if mail_worker is not None:
+                mail_worker.resolve_pending_calendar_actions(action_keys, approve=False)
+            noun = "Vorschlag" if len(action_keys) == 1 else "Vorschläge"
+            return _continue_multistep_chain_if_pending(
+                memory,
+                "pending_mail_calendar_confirmation",
+                f"Alles klar, ich trage die {len(action_keys)} Kalender-{noun} aus Ihren Mails nicht ein.",
+                aborted=True,
+                photo_worker=photo_worker,
+            )
+        elif is_confirm:
+            settings.pop("pending_mail_calendar_confirmation", None)
+            memory.set("settings", settings)
+            resolved = mail_worker.resolve_pending_calendar_actions(action_keys, approve=True) if mail_worker is not None else []
+            count = len(resolved)
+            if count:
+                noun = "Termin" if count == 1 else "Termine"
+                message = f"Erledigt, ich habe {count} {noun} aus Ihren Mails eingetragen."
+            else:
+                message = "Ich konnte die Vorschläge gerade nicht eintragen. Sagen Sie mir gern noch einmal Bescheid."
+            return _continue_multistep_chain_if_pending(
+                memory, "pending_mail_calendar_confirmation", message, aborted=not count, photo_worker=photo_worker
+            )
+        else:
+            return "Ich warte noch auf Ihre Antwort zu den Kalender-Vorschlägen aus Ihren Mails. Sagen Sie ja zum Eintragen oder nein zum Verwerfen."
+
+    # Sammel-Bestaetigung/-Ablehnung eines gerade im Chat gezeigten
+    # Speicherplatz-Aufraeum-Vorschlags (suggest_cleanup_files() in
+    # handle_file_command()). Loeschen bedeutet hier immer "in den
+    # Papierkorb legen", niemals endgueltig - Leons ausdrueckliche Vorgabe.
+    # Siehe plans/2026-08-13-jarvis-speicherplatz-aufraeumen-per-chat.md.
+    pending_cleanup_confirmation = settings.get("pending_cleanup_confirmation")
+    if isinstance(pending_cleanup_confirmation, dict):
+        items = [item for item in (pending_cleanup_confirmation.get("items") or []) if isinstance(item, dict) and item.get("path")]
+        set_at = pending_cleanup_confirmation.get("set_at")
+        age_seconds = (time.time() - set_at) if isinstance(set_at, (int, float)) else None
+        expired = (
+            not items
+            or age_seconds is None
+            or age_seconds > PENDING_CLEANUP_CONFIRMATION_TTL_SECONDS
+        )
+        if expired:
+            settings.pop("pending_cleanup_confirmation", None)
+            memory.set("settings", settings)
+            if is_confirm or is_cancel:
+                return _continue_multistep_chain_if_pending(
+                    memory,
+                    "pending_cleanup_confirmation",
+                    "Der Aufräum-Vorschlag ist nicht mehr aktuell. Fragen Sie mich gern noch einmal nach löschbaren Dateien.",
+                    aborted=True,
+                    photo_worker=photo_worker,
+                )
+        elif is_cancel:
+            settings.pop("pending_cleanup_confirmation", None)
+            memory.set("settings", settings)
+            noun = "Datei" if len(items) == 1 else "Dateien"
+            return _continue_multistep_chain_if_pending(
+                memory,
+                "pending_cleanup_confirmation",
+                f"Alles klar, ich lösche die {len(items)} {noun} nicht.",
+                aborted=True,
+                photo_worker=photo_worker,
+            )
+        elif is_confirm:
+            settings.pop("pending_cleanup_confirmation", None)
+            memory.set("settings", settings)
+            moved, skipped = move_to_trash([Path(str(item["path"])) for item in items])
+            if moved:
+                noun = "Datei" if len(moved) == 1 else "Dateien"
+                message = f"Erledigt, ich habe {len(moved)} {noun} in den Papierkorb gelegt."
+                if skipped:
+                    message += f" {len(skipped)} davon waren nicht mehr da oder ließen sich nicht verschieben."
+            else:
+                message = "Ich konnte keine der Dateien in den Papierkorb legen. Vielleicht wurden sie inzwischen schon verschoben oder gelöscht."
+            return _continue_multistep_chain_if_pending(
+                memory, "pending_cleanup_confirmation", message, aborted=not moved, photo_worker=photo_worker
+            )
+        else:
+            return "Ich warte noch auf Ihre Antwort zum Aufräum-Vorschlag. Sagen Sie ja zum In-den-Papierkorb-Legen oder nein zum Abbrechen."
 
     pending_mail_document_export = settings.get("pending_mail_document_export")
     if isinstance(pending_mail_document_export, dict):
@@ -3236,7 +3547,7 @@ def handle_pending_action_flow(
             is_confirm=is_confirm,
             is_cancel=is_cancel,
             cancel_message="Alles klar, ich kopiere nichts.",
-            waiting_message="Ich warte auf dein Ja oder Abbrechen.",
+            waiting_message="Ich warte auf Ihr Ja oder Abbrechen.",
         )
         if is_confirm or is_cancel:
             return _continue_multistep_chain_if_pending(memory, "pending_mail_document_export", result, aborted=is_cancel, photo_worker=photo_worker)
@@ -3252,7 +3563,7 @@ def handle_pending_action_flow(
             is_confirm=is_confirm,
             is_cancel=is_cancel,
             cancel_message="Alles klar, ich ändere nichts.",
-            waiting_message="Ich warte auf dein Ja oder Abbrechen.",
+            waiting_message="Ich warte auf Ihr Ja oder Abbrechen.",
         )
         if is_confirm or is_cancel:
             return _continue_multistep_chain_if_pending(memory, "pending_file_action", result, aborted=is_cancel, photo_worker=photo_worker)
@@ -3268,7 +3579,7 @@ def handle_pending_action_flow(
             is_confirm=is_confirm,
             is_cancel=is_cancel,
             cancel_message="Alles klar, ich verschiebe keine Mails.",
-            waiting_message="Ich warte noch auf deine Bestätigung. Sag ja zum Ausführen oder abbrechen.",
+            waiting_message="Ich warte noch auf Ihre Bestätigung. Sagen Sie ja zum Ausführen oder abbrechen.",
         )
         if is_confirm or is_cancel:
             return _continue_multistep_chain_if_pending(memory, "pending_mail_delete", result, aborted=is_cancel, photo_worker=photo_worker)
@@ -3284,7 +3595,7 @@ def handle_pending_action_flow(
             is_confirm=is_confirm,
             is_cancel=is_cancel,
             cancel_message="Alles klar, ich starte keinen Anruf.",
-            waiting_message="Ich warte noch auf deine Bestätigung. Sag ja zum Anrufen oder abbrechen.",
+            waiting_message="Ich warte noch auf Ihre Bestätigung. Sagen Sie ja zum Anrufen oder abbrechen.",
         )
         if is_confirm or is_cancel:
             return _continue_multistep_chain_if_pending(memory, "pending_call_contact", result, aborted=is_cancel, photo_worker=photo_worker)
@@ -3350,7 +3661,10 @@ _NOTES_READ_TRIGGERS = (
     "welche notiz",
     "welche notizen",
     "was steht in",
+    "was steht auf",
     "was steht meinen",
+    "was ist auf",
+    "was ist in",
     "liste meine notizen",
     "liste der notizen",
     "übersicht",
@@ -3391,7 +3705,11 @@ def _looks_like_notes_read_request(text: str) -> bool:
     normalized = normalize_text(text)
     if any(verb in normalized for verb in _NOTES_CREATE_VERBS):
         return False
-    return any(trigger in normalized for trigger in _NOTES_READ_TRIGGERS)
+    if any(trigger in normalized for trigger in _NOTES_READ_TRIGGERS):
+        return True
+    # Fuellwort-tolerant nachschauen ("was steht EIGENTLICH auf ..."), siehe
+    # strip_filler_words(). Runde-2-Simulation, 2026-08-13.
+    return any(trigger in strip_filler_words(normalized) for trigger in _NOTES_READ_TRIGGERS)
 
 
 def handle_notes_command(memory: Memory, text: str) -> str | None:
@@ -3415,7 +3733,7 @@ def handle_notes_command(memory: Memory, text: str) -> str | None:
         items = "; ".join(
             f"{note['title']} ({note['modified'].strftime('%d.%m.%Y')})" for note in notes
         )
-        return f"Deine letzten Notizen: {items}."
+        return f"Ihre letzten Notizen: {items}."
 
     title = extract_note_title(text)
     body = extract_note_body(text)
@@ -3466,7 +3784,7 @@ def handle_tasks_command(memory: Memory, text: str) -> str | None:
 
     tasks = TaskManager(memory).list_tasks(status="offen") + TaskManager(memory).list_tasks(status="in_arbeit")
     if not tasks:
-        return "Du hast aktuell keine offenen Aufgaben."
+        return "Sie haben aktuell keine offenen Aufgaben."
 
     items = []
     for task in tasks[:8]:
@@ -3480,7 +3798,7 @@ def handle_tasks_command(memory: Memory, text: str) -> str | None:
     if remaining > 0:
         summary += f"; und {remaining} weitere" if remaining > 1 else "; und 1 weitere"
 
-    return f"Deine offenen Aufgaben: {summary}."
+    return f"Ihre offenen Aufgaben: {summary}."
 
 
 def save_note_or_append(title: str, body: str, append: bool = False) -> str:
@@ -3583,6 +3901,26 @@ def clean_note_body(text: str) -> str:
     return body.strip(" .,!?:;")
 
 
+def extract_mail_delete_target(text: str) -> str | None:
+    """Erkennt einen freien Absender-/Betreff-Namen in einer Loesch-Anfrage,
+    der KEINER der drei fest hinterlegten target_aliases (Indeed/PayPal/
+    Stepstone) entspricht - z.B. "Loesche die Mail von Anthropic". Vorher
+    fiel ein unbekannter Name still auf die zuletzt gelesenen/zusammen-
+    gefassten Mails zurueck, was voellig unbezogene Mails geloescht haette
+    (live entdeckt, siehe docs/current-system-assessment.md, Abschnitt 41)."""
+    match = re.search(r"(?:mails?|nachrichten?)\s+von\s+(.+?)(?:[.?!]|$)", text, flags=re.IGNORECASE)
+    if not match:
+        return None
+    candidate = match.group(1).strip(" .,!?")
+    candidate = re.sub(
+        r"\s+(?:löschen|loeschen|entfernen|weg|bitte|in\s+den\s+papierkorb).*$",
+        "",
+        candidate,
+        flags=re.IGNORECASE,
+    ).strip(" .,!?")
+    return candidate or None
+
+
 def handle_mail_delete_command(text: str, memory: Memory | None = None) -> str | None:
     normalized = normalize_text(text)
     question_about_done = any(
@@ -3616,7 +3954,7 @@ def handle_mail_delete_command(text: str, memory: Memory | None = None) -> str |
     if question_about_done and not clear_delete_command:
         return (
             "Ich führe bei einer Nachfrage nichts aus. "
-            "Wenn du möchtest, sag klar: Lege Stepstone und Indeed in den Papierkorb."
+            "Wenn Sie möchten, sagen Sie klar: Lege Stepstone und Indeed in den Papierkorb."
         )
 
     delete_terms = (
@@ -3664,18 +4002,73 @@ def handle_mail_delete_command(text: str, memory: Memory | None = None) -> str |
         if any(alias in normalized for alias in aliases)
     ]
     if not selected_targets:
+        # Erst versuchen, einen freien Namen ("...von Anthropic") zu erkennen und
+        # ECHT im Postfach zu suchen, statt sofort auf zuletzt gelesene/
+        # zusammengefasste Mails auszuweichen - die koennen von etwas voellig
+        # anderem stammen als das, was gerade gemeint war.
+        extracted_target = extract_mail_delete_target(text)
+        if extracted_target:
+            if memory is None:
+                return f"Ich würde Mails von {extracted_target} nur nach Ihrer Bestätigung löschen."
+            try:
+                matches = search_messages_by_terms(
+                    [extracted_target],
+                    account_name=MAIL_INBOX_ACCOUNT,
+                    mailbox_name=MAIL_INBOX_MAILBOX,
+                )
+            except MailAccessError as exc:
+                return str(exc)
+            except Exception as exc:
+                print("Mail Suche Fehler:", type(exc).__name__)
+                matches = []
+            if not matches:
+                return (
+                    f"Ich finde keine Mails von {extracted_target} in Ihrem Postfach. "
+                    "Meinen Sie einen anderen Namen, oder soll ich anders suchen?"
+                )
+            match_ids = [message.message_id for message in matches if message.message_id]
+            sample = "; ".join(message.subject for message in matches[:3] if message.subject)
+            count_word = "eine Mail" if len(matches) == 1 else f"{len(matches)} Mails"
+            return ACTION_ENGINE.propose(
+                memory,
+                "pending_mail_delete",
+                ActionProposal(
+                    action_type="mail_delete",
+                    execution_data={
+                        "selected_targets": [extracted_target],
+                        "search_terms": [],
+                        "message_ids": match_ids,
+                        "subjects": [message.subject for message in matches],
+                        "senders": [message.sender for message in matches],
+                    },
+                    confirm_prompt=(
+                        f"Ich habe {count_word} von {extracted_target} gefunden, "
+                        f"u. a.: {sample}. Soll ich die wirklich in den Papierkorb legen? "
+                        "Sag ja oder abbrechen."
+                    ),
+                ),
+            )
+
+        # Kein erkennbarer Absender/Name in der Anfrage ueberhaupt (z.B. nur
+        # "loesch die mail") - erst jetzt auf die zuletzt gelesenen/
+        # zusammengefassten Mails zurueckfallen, mit ehrlich benannten
+        # Betreffs in der Bestaetigung statt der vagen Pauschalformulierung.
         if memory is None:
             return None
         settings = memory.get("settings") or {}
         last_mail_summary = settings.get("last_mail_summary")
         last_summary_ids = []
+        last_summary_subjects = []
         if isinstance(last_mail_summary, dict):
             last_summary_ids = [
                 str(item)
                 for item in last_mail_summary.get("message_ids") or []
                 if str(item).strip()
             ]
+            last_summary_subjects = list(last_mail_summary.get("subjects") or [])
         if last_summary_ids:
+            sample = "; ".join(str(subject) for subject in last_summary_subjects[:3] if subject)
+            sample_note = f" (u. a.: {sample})" if sample else ""
             return ACTION_ENGINE.propose(
                 memory,
                 "pending_mail_delete",
@@ -3685,16 +4078,17 @@ def handle_mail_delete_command(text: str, memory: Memory | None = None) -> str |
                         "selected_targets": ["letzte gelesene Mails"],
                         "search_terms": [],
                         "message_ids": last_summary_ids,
-                        "subjects": list(last_mail_summary.get("subjects") or []),
+                        "subjects": last_summary_subjects,
                         "senders": list(last_mail_summary.get("senders") or []),
                     },
                     confirm_prompt=(
-                        "Ich nehme die zuletzt gelesenen Mails. "
-                        "Soll ich sie wirklich in den Papierkorb legen? Sag ja oder abbrechen."
+                        f"Sie haben keinen Namen genannt, daher nehme ich die zuletzt gelesenen "
+                        f"Mails{sample_note}. Soll ich sie wirklich in den Papierkorb legen? "
+                        "Sag ja oder abbrechen."
                     ),
                 ),
             )
-        return None
+        return "Wessen Mails soll ich löschen? Sag mir den Absender oder das Thema."
 
     search_terms_by_target = {
         "Indeed": ["Indeed", "indeed"],
@@ -3708,7 +4102,7 @@ def handle_mail_delete_command(text: str, memory: Memory | None = None) -> str |
     targets_text = " und ".join(selected_targets)
     if memory is None:
         return (
-            f"Ich würde Mails von {targets_text} nur nach deiner Bestätigung verschieben. "
+            f"Ich würde Mails von {targets_text} nur nach Ihrer Bestätigung verschieben. "
             "Sag es mir noch einmal, dann räume ich auf."
         )
 
@@ -3782,7 +4176,7 @@ def execute_mail_delete(data: dict) -> str:
                 )
             return (
                 "Ich konnte die zuletzt gelesenen Mails nicht mehr sauber zuordnen. "
-                "Wenn du willst, nenne ich sie dir noch einmal und wir räumen dann gezielt auf."
+                "Wenn Sie möchten, nenne ich sie Ihnen noch einmal und wir räumen dann gezielt auf."
             )
         return f"Erledigt. Ich habe {moved_count} gelesene Mail(s) in den Papierkorb gelegt."
     try:
@@ -3859,7 +4253,7 @@ def handle_mail_document_export_command(text: str, memory: Memory | None = None)
 
     category_text = format_mail_document_categories(categories)
     if memory is None:
-        return f"Ich würde {category_text} aus deinen Mails auf den Schreibtisch kopieren."
+        return f"Ich würde {category_text} aus Ihren Mails auf den Schreibtisch kopieren."
 
     max_messages = int(CONFIG.get("mail_document_export_max_messages", 80))
     return ACTION_ENGINE.propose(
@@ -3873,7 +4267,7 @@ def handle_mail_document_export_command(text: str, memory: Memory | None = None)
             },
             confirm_prompt=(
                 f"Ich habe noch nichts kopiert. Soll ich {category_text} aus den letzten "
-                f"{max_messages} Mails auf deinen Schreibtisch kopieren?"
+                f"{max_messages} Mails auf Ihren Schreibtisch kopieren?"
             ),
         ),
     )
@@ -4347,6 +4741,19 @@ def _format_event_time(raw_start: str) -> str:
 def answer_calendar_query(text: str, normalized: str) -> str:
     wants_reminders = "erinner" in normalized and "termin" not in normalized and "kalender" not in normalized
     only_today = "heute" in normalized and "morgen" not in normalized and "woche" not in normalized
+    # Live entdeckter Bug (2026-08-13): "morgen" und "diese Woche" lieferten bisher
+    # wortgleich dieselbe, ungefilterte Liste wie eine Anfrage ganz ohne Zeitangabe -
+    # nur "heute" filterte tatsaechlich. Siehe docs/current-system-assessment.md,
+    # Abschnitt 41.
+    only_tomorrow = (
+        not only_today
+        and any(term in normalized for term in ("morgen", "morgigen"))
+        and "übermorgen" not in normalized
+        and "uebermorgen" not in normalized
+    )
+    only_this_week = not only_today and not only_tomorrow and any(
+        term in normalized for term in ("diese woche", "der woche", "woche an", "diese ganze woche")
+    )
 
     try:
         if wants_reminders:
@@ -4357,11 +4764,20 @@ def answer_calendar_query(text: str, normalized: str) -> str:
             return "Offene Erinnerungen: " + "; ".join(lines) + "."
 
         until = None
+        query_limit = 5
+        now = datetime.now()
+        end_of_day = datetime(now.year, now.month, now.day, 23, 59, 59)
         if only_today:
-            now = datetime.now()
-            until = datetime(now.year, now.month, now.day, 23, 59, 59)
+            until = end_of_day
+        elif only_tomorrow:
+            until = end_of_day + timedelta(days=2)
+            query_limit = 15
+        elif only_this_week:
+            days_until_sunday = 6 - now.weekday()  # Montag=0 ... Sonntag=6
+            until = end_of_day + timedelta(days=days_until_sunday)
+            query_limit = 25
 
-        items = list_upcoming_calendar_items(limit=5, until=until).get("items", [])
+        items = list_upcoming_calendar_items(limit=query_limit, until=until).get("items", [])
         if only_today:
             # Zusaetzlich zur AppleScript-seitigen until-Vorfilterung (grob, haengt am
             # Ende an einem locale-formatierten Datumsvergleich) wird hier noch einmal
@@ -4369,25 +4785,64 @@ def answer_calendar_query(text: str, normalized: str) -> str:
             # unabhaengig vom Systemdatumsformat. Behebt den gemeldeten Bug, dass "was
             # steht heute an" teils Termine aus dem ganzen Jahr zeigte.
             items = events_on_date(items)
+        elif only_tomorrow:
+            items = events_on_date(items, on=now + timedelta(days=1))
+
         if not items:
-            return "Für heute sehe ich keine Termine." if only_today else "Ich sehe aktuell keine anstehenden Termine."
+            if only_today:
+                return "Für heute sehe ich keine Termine."
+            if only_tomorrow:
+                return "Für morgen sehe ich keine Termine."
+            if only_this_week:
+                return "Für diese Woche sehe ich keine Termine mehr."
+            return "Ich sehe aktuell keine anstehenden Termine."
 
         lines = [f"{item.get('title') or 'Termin'} um {_format_event_time(item.get('start', ''))} Uhr" for item in items]
-        prefix = "Heute steht an: " if only_today else "Deine nächsten Termine: "
+        if only_today:
+            prefix = "Heute steht an: "
+        elif only_tomorrow:
+            prefix = "Morgen steht an: "
+        elif only_this_week:
+            prefix = "Diese Woche steht an: "
+        else:
+            prefix = "Ihre nächsten Termine: "
         return prefix + "; ".join(lines) + "."
     except CalendarAccessError as exc:
         return str(exc)
     except Exception as exc:
         print("Kalender Fehler:", type(exc).__name__)
-        return "Ich konnte deinen Kalender gerade nicht lesen."
+        return "Ich konnte Ihren Kalender gerade nicht lesen."
 
 
 def handle_calendar_command(text: str, memory: Memory | None = None) -> str | None:
     normalized = normalize_text(text)
     domain_match = has_domain(text, "calendar")
     is_query = looks_like_calendar_query(text)
-    if not is_query and domain_match and any(term in normalized for term in ("hab ich", "habe ich", "steht")):
-        is_query = True
+    if not is_query and domain_match:
+        # Kein eindeutiges Erstell-Verb, aber klingt nach einer Frage (Fragezeichen
+        # oder ein Frage-Satzanfang aus QUESTION_SHAPE_PREFIXES) -> eher lesen als
+        # ungefragt den Erstellen-Flow starten. Bewusst NICHT create_terms
+        # wiederverwendet, weil dort "termin" selbst mit drinsteht (ein Substantiv,
+        # kein Erstell-Verb) und sonst jede Termin-Frage als Erstell-Absicht
+        # durchginge. Live-Bug aus der Runde-2-Simulation, 2026-08-13: "Wann ist
+        # eigentlich mein nächster Termin?" fragte statt einer Antwort nach
+        # Datum/Uhrzeit, weil hier bisher nur "hab ich"/"habe ich"/"steht" erkannt
+        # wurden. Siehe docs/current-system-assessment.md, Abschnitt 42.
+        # "trag"/"trage" bewusst NICHT als blosser Wortstamm - der ist Teil von
+        # "eingetragen" ("ist am Wochenende was eingetragen?" ist eine Frage,
+        # kein Erstell-Wunsch, wuerde mit dem blossen Stamm aber faelschlich
+        # als einer erkannt).
+        has_create_verb = any(
+            term in normalized
+            for term in ("erstelle", "erstell", "setz", "setze", "trag ein", "trage ein", "einzutragen", "erinnere mich")
+        )
+        looks_like_question = (
+            any(term in normalized for term in ("hab ich", "habe ich", "steht"))
+            or text.strip().endswith("?")
+            or normalized.startswith(QUESTION_SHAPE_PREFIXES)
+        )
+        if not has_create_verb and looks_like_question:
+            is_query = True
     if not domain_match and not is_query:
         return None
 
@@ -4610,7 +5065,7 @@ def handle_contact_command(text: str, memory: Memory | None = None) -> str | Non
         resolved_contact = matches[0]
         resolved_name = resolved_contact.name
         if memory is None:
-            return f"Ich würde {resolved_name} nur nach deiner Bestätigung anrufen."
+            return f"Ich würde {resolved_name} nur nach Ihrer Bestätigung anrufen."
 
         settings = memory.get("settings") or {}
         if len(resolved_contact.phones) > 1:
@@ -4791,7 +5246,7 @@ def handle_desktop_command(text: str, memory: Memory | None = None) -> str | Non
             source_name = clean_desktop_name(move_match.group(1))
             target_folder = clean_desktop_name(move_match.group(2))
             if not source_name or not target_folder:
-                return "Was soll ich wohin auf deinem Schreibtisch verschieben?"
+                return "Was soll ich wohin auf Ihrem Schreibtisch verschieben?"
 
             if memory is None:
                 return f"Ich würde {source_name} in den Schreibtisch-Ordner {target_folder} schieben."
@@ -4856,7 +5311,7 @@ def handle_desktop_command(text: str, memory: Memory | None = None) -> str | Non
         return str(exc)
     except Exception as exc:
         print("Desktop Fehler:", type(exc).__name__)
-        return "Ich konnte deinen Schreibtisch nicht lesen."
+        return "Ich konnte Ihren Schreibtisch nicht lesen."
 
     return None
 
@@ -4897,6 +5352,51 @@ ACTION_ENGINE.register("desktop_move_many", execute_desktop_move_many)
 
 def handle_file_command(text: str, memory: Memory | None = None) -> str | None:
     normalized = normalize_text(text)
+
+    # Speicherplatz-Aufraeum-Anfragen ("welche Dateien koennen wir loeschen,
+    # die mir mehr Speicherplatz bringen") landeten bisher fälschlich im
+    # generischen Datei-Such-Fallback weiter unten und lieferten dessen
+    # "nichts gefunden"-Vorlage mit der eingesetzten Rohanfrage - erkennbar
+    # kaputt. Enge Erkennung: BEIDE Wortgruppen muessen zutreffen, damit
+    # normale Datei-Suchen/-Verschiebungen nicht faelschlich hier landen.
+    # Siehe plans/2026-08-13-jarvis-speicherplatz-aufraeumen-per-chat.md.
+    # Erweiterung Runde-2-Simulation (2026-08-13): "Ich brauch dringend mehr
+    # Speicherplatz ..., was weg könnte" und "Meine Festplatte ist ziemlich
+    # voll, ... die nur rumliegen" fielen durch - zum einen weil
+    # "festplatte voll" nur als direkt benachbarte Woerter zaehlte und "weg
+    # koennte"/"rumliegen" gar nicht als Aufraeum-Signal bekannt waren, zum
+    # anderen weil BEIDE Saetze den weiter unten stehenden
+    # file_context/root_context-Filter gar nicht erst passierten (keines der
+    # Woerter "datei"/"ordner"/"desktop"/... kommt darin vor) - die Funktion
+    # gab also schon vorher None zurueck, bevor die Aufraeum-Erkennung
+    # ueberhaupt lief. cleanup_intent wird deshalb jetzt VOR diesem Filter
+    # geprueft, nicht mehr danach. Siehe
+    # docs/current-system-assessment.md, Abschnitt 42.
+    cleanup_intent = (
+        any(
+            term in normalized
+            for term in ("speicherplatz", "speicher freigeben", "festplatte voll", "festplatte", "speicher voll", "mehr speicher")
+        )
+        and any(
+            term in normalized
+            for term in (
+                "löschen", "loeschen", "aufräumen", "aufraeumen", "freigeben", "sparen", "papierkorb",
+                "weg könnte", "weg koennte", "weg kann", "rumliegen", "nicht mehr brauch", "nicht gebraucht",
+                "nicht benötigt", "nicht benoetigt", "los werden",
+            )
+        )
+    )
+    if cleanup_intent:
+        cleanup_text, cleanup_candidates = suggest_cleanup_files(config=CONFIG)
+        if cleanup_candidates and memory is not None:
+            settings = memory.get("settings") or {}
+            settings["pending_cleanup_confirmation"] = {
+                "items": cleanup_candidates,
+                "set_at": time.time(),
+            }
+            memory.set("settings", settings)
+        return cleanup_text
+
     file_context = has_domain(text, "files")
     root_context = any(
         term in normalized
@@ -5110,6 +5610,27 @@ def handle_photo_command(
     if any(term in normalized for term in ("wie weit", "fortschritt", "progress", "stand")) and any(term in normalized for term in ("fotoindex", "foto index", "index")):
         return photo_worker.progress_answer()
 
+    # "Wie viele Fotos hast du schon indiziert?" fragt nach dem GESAMT-Stand des
+    # Index, nicht nach einem inhaltlichen Suchbegriff - live entdeckter Bug:
+    # extract_photo_count_query() fand kein Praeposition-Muster (kein "von"/"mit"
+    # o.ae.), liess die Restwoerter "hast du schon indiziert" als vermeintlichen
+    # Suchbegriff stehen und lieferte eine nonsensische Antwort ("508 passende
+    # Foto(s) fuer hast du schon indiziert"). Muss VOR extract_photo_count_query
+    # abgefangen werden. Siehe docs/current-system-assessment.md, Abschnitt 41.
+    # Erweiterung Runde-2-Simulation (2026-08-13): "Wie viele Fotos hast du
+    # eigentlich mittlerweile durchsucht?" nutzt statt "indiziert" das
+    # umgangssprachliche "durchsucht"/"gescannt" - fiel bisher durch und
+    # landete in einer sinnlosen Bildersuche nach den Fragewoertern selbst.
+    # Siehe docs/current-system-assessment.md, Abschnitt 42.
+    if any(term in normalized for term in ("wie viele", "wieviele", "anzahl")) and any(
+        term in normalized
+        for term in (
+            "indiziert", "im index", "fotoindex", "foto index",
+            "durchsucht", "gescannt", "erfasst", "durchgesehen", "schon durch", "fertig mit",
+        )
+    ):
+        return photo_worker.status()
+
     count_query = extract_photo_count_query(text)
     if count_query:
         return photo_worker.count_search(count_query)
@@ -5164,7 +5685,7 @@ def handle_photo_command(
                 file_permission = ensure_privacy_domain_permission(
                     memory,
                     "files",
-                    "Jarvis würde passende Foto-Vorschauen in einen neuen Ordner auf deinem Schreibtisch exportieren.",
+                    "Jarvis würde passende Foto-Vorschauen in einen neuen Ordner auf Ihrem Schreibtisch exportieren.",
                 )
                 if file_permission is not None:
                     return file_permission
@@ -5179,13 +5700,13 @@ def handle_photo_command(
 
     query = extract_photo_query(text)
     if not query:
-        return "Wonach soll ich in deinen Fotos suchen?"
+        return "Wonach soll ich in Ihren Fotos suchen?"
 
     if memory is not None:
         file_permission = ensure_privacy_domain_permission(
             memory,
             "files",
-            "Jarvis würde passende Foto-Vorschauen in einen neuen Ordner auf deinem Schreibtisch exportieren.",
+            "Jarvis würde passende Foto-Vorschauen in einen neuen Ordner auf Ihrem Schreibtisch exportieren.",
         )
         if file_permission is not None:
             return file_permission
@@ -5246,7 +5767,7 @@ def handle_screen_command(text: str, memory: Memory | None = None) -> str | None
     if not description:
         return "Ich habe das aktive Fenster aufgenommen, konnte aber nichts Eindeutiges erkennen."
 
-    summary = f"In {app}: {description}" if app else f"Auf deinem Bildschirm: {description}"
+    summary = f"In {app}: {description}" if app else f"Auf Ihrem Bildschirm: {description}"
 
     if memory is not None:
         fact_subject = f"{configured_user_name()} hatte {app + ' ' if app else ''}offen: {description}"
@@ -5776,10 +6297,22 @@ def answer_message(
     route = llm.plan(routing_history, user_text=question, force_local=force_local)
 
     def _result(text: Any, mail_followup: bool = pending_mail_followup) -> AnswerResult:
-        return AnswerResult(text=str(text), pending_mail_followup=mail_followup, provider=route.provider, model=route.model)
+        # Zentraler, einziger Ausgangspunkt fuer JEDE Antwort aus dieser Funktion
+        # (Mail, Kalender, Notizen, Dateien, Kamera, Bildschirm, Pending-Flows,
+        # allgemeiner Chat, ...) - strip_first_name_address() hier statt in jedem
+        # einzelnen Handler anzuwenden schliesst den Vorname-Leak systemisch:
+        # mehrere fest formulierte Antworten (handle_project_command,
+        # handle_local_command, handle_system_command) nutzten Leons Vornamen
+        # bisher direkt und ungefiltert, weil sie NICHT durch den finalen
+        # allgemeinen Chat-Pfad liefen, wo die Bereinigung vorher nur passierte.
+        # Aufruf hier ist idempotent - Handler, die bereits selbst bereinigen
+        # (Kamera-Feedback, Mail-Zusammenfassung), aendern sich dadurch nicht.
+        # Siehe docs/current-system-assessment.md, Abschnitt 41.
+        cleaned_text = strip_first_name_address(str(text), configured_user_name())
+        return AnswerResult(text=cleaned_text, pending_mail_followup=mail_followup, provider=route.provider, model=route.model)
 
     if is_end_command(question):
-        return _result("Alles klar. Ich bin wieder still, bis du Jarvis sagst.")
+        return _result("Alles klar. Ich bin wieder still, bis Sie Jarvis sagen.")
 
     # Tagesbriefing bewusst VOR der direct_handlers-Kette (wie main() das vor
     # der Zusammenfuehrung bereits als eigenen Vorab-Check tat) statt als
@@ -5791,6 +6324,21 @@ def answer_message(
     briefing_answer = handle_daily_briefing_command(memory, question)
     if briefing_answer is not None:
         return _result(briefing_answer)
+
+    # Eine offene Kalender-Vorschlags-Bestaetigung (siehe
+    # pending_mail_calendar_confirmation weiter unten in handle_pending_action_flow)
+    # braucht einen MailBackgroundWorker, auch wenn die Antwort selbst kein
+    # "mail"-Domaenen-Wort enthaelt (z.B. "das bestaetige ich nicht") - die
+    # normale Lazy-Init weiter unten (has_domain(question, "mail")) greift hier
+    # zu spaet, da handle_pending_action_flow bereits vorher in direct_handlers
+    # laeuft. Siehe plans/2026-08-13-jarvis-kalender-vorschlaege-per-chat-bestaetigen.md.
+    if (
+        workers.mail_worker is None
+        and isinstance((memory.get("settings") or {}).get("pending_mail_calendar_confirmation"), dict)
+        and has_permission("mail")
+    ):
+        workers.mail_worker = MailBackgroundWorker(config, llm)
+        workers.mail_worker.start()
 
     # record_mode steuert bewusst pro Handler, ob/wie record_exchange() aufgerufen
     # wird - das ist die einzige Stelle, an der main() und _answer_with_core() vor
@@ -5810,7 +6358,7 @@ def answer_message(
         ("handle_memory_command", (memory, question), {}, "no_auto_memory"),
         ("handle_pending_note_flow", (memory, question), {}, "normal"),
         ("handle_pending_domain_clarification_flow", (memory, question), {"photo_worker": workers.photo_worker}, "normal"),
-        ("handle_pending_action_flow", (memory, question), {"photo_worker": workers.photo_worker}, "normal"),
+        ("handle_pending_action_flow", (memory, question), {"photo_worker": workers.photo_worker, "mail_worker": workers.mail_worker}, "normal"),
     ]
     if has_pending_action(memory):
         pending_action_handler = direct_handlers.pop()
@@ -5895,7 +6443,7 @@ def answer_message(
         return _result(calendar_answer)
 
     normalized_question = normalize_text(question)
-    file_permission = ensure_privacy_domain_permission(memory, "files", "Jarvis würde deinen Schreibtisch oder Dateien lokal lesen oder ändern.") if has_domain(question, "files") or "desktop" in normalized_question or "schreibtisch" in normalized_question else None
+    file_permission = ensure_privacy_domain_permission(memory, "files", "Jarvis würde Ihren Schreibtisch oder Dateien lokal lesen oder ändern.") if has_domain(question, "files") or "desktop" in normalized_question or "schreibtisch" in normalized_question else None
     if file_permission is not None:
         return _result(file_permission)
     for file_handler in (handle_desktop_command, handle_file_command):
@@ -5904,7 +6452,7 @@ def answer_message(
             record_exchange(memory, question, answer)
             return _result(answer, mail_followup=False)
 
-    photo_permission = ensure_privacy_domain_permission(memory, "photos", "Jarvis würde deine Fotos-App oder den lokalen Fotoindex verwenden.") if has_domain(question, "photos") else None
+    photo_permission = ensure_privacy_domain_permission(memory, "photos", "Jarvis würde Ihre Fotos-App oder den lokalen Fotoindex verwenden.") if has_domain(question, "photos") else None
     if photo_permission is None and has_domain(question, "photos") and any(term in normalized_question for term in ("openai", "vision", "analysiere", "analysieren", "was siehst")):
         photo_permission = ensure_cloud_llm_permission(memory, question)
     if photo_permission is not None:
@@ -6045,9 +6593,9 @@ def main():
     memory = Memory()
     permission_manager = PermissionManager()
 
-    print("Hinweis: Jarvis ist ein KI-System. Du interagierst mit automatisierter KI-Unterstützung; wichtige Aktionen werden erst nach deiner Bestätigung ausgeführt.")
+    print("Hinweis: Jarvis ist ein KI-System. Sie interagieren mit automatisierter KI-Unterstützung; wichtige Aktionen werden erst nach Ihrer Bestätigung ausgeführt.")
     if permissions_required() and not permission_manager.is_allowed("microphone"):
-        print("Jarvis braucht Mikrofonzugriff, um deine Sprachbefehle zu erkennen.")
+        print("Jarvis braucht Mikrofonzugriff, um Ihre Sprachbefehle zu erkennen.")
         consent = input("Mikrofon für Jarvis erlauben? Tippe ja oder nein: ").strip().lower()
         if consent in {"ja", "j", "yes", "y"}:
             permission_manager.grant("microphone")
@@ -6163,7 +6711,7 @@ def main():
                 # sich auf answer_message()s eigene is_end_command-Pruefung zu
                 # verlassen, die diesen Zustand nicht kennt (existiert nur im
                 # Server-Pfad als reine Text-Antwort ohne conversation_active).
-                answer = "Alles klar. Ich bin wieder still, bis du Jarvis sagst."
+                answer = "Alles klar. Ich bin wieder still, bis Sie Jarvis sagen."
                 conversation_active = False
                 print(f"\nJARVIS: {console_text(answer, 'answer')}")
                 speak(answer, voice=voice)

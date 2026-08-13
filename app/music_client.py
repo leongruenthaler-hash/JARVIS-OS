@@ -210,7 +210,7 @@ def _run_applescript(script: str) -> str:
         )
 
     if "song_not_found" in lowered_error:
-        raise MusicAccessError("Ich habe den Titel in deiner Apple-Music-Mediathek nicht gefunden.")
+        raise MusicAccessError("Ich habe den Titel in Ihrer Apple-Music-Mediathek nicht gefunden.")
 
     if "playlist_not_found" in lowered_error:
         raise MusicAccessError("Ich habe diese Playlist in Apple Music nicht gefunden.")
