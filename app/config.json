@@ -94,6 +94,8 @@
     "photos_scan_timeout_seconds": 3600,
     "photos_search_max_results": 25,
     "photos_album_prefix": "Jarvis",
+    "local_photo_vision_background_enabled": true,
+    "local_photo_vision_max_per_run": 200,
     "openai_photo_vision_enabled": false,
     "openai_photo_vision_model": "gpt-5.4-nano",
     "openai_photo_vision_max_per_run": 20,

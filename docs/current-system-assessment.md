@@ -1730,3 +1730,65 @@ du eigentlich noch, woran ich zuletzt mit dir gearbeitet hab?" -> ehrliche
 Antwort statt erfundener "Erinnerung". Waehrend der Live-Verifikation
 entstandene Test-Notiz ("ZZZ_JarvisTest_Bitte_Ignorieren") sofort wieder
 geloescht.
+
+## 43. Kamera-Feedback erfand ein komplettes Outfit - unzuverlaessiges lokales Vision-Modell (2026-08-13)
+
+Leon zeigte einen Screenshot: auf "Wie sehe ich aus" beschrieb Jarvis einen
+"dunkel gefaerbten Pullover" bzw. "dunkles Oberteil plus silbernen Guertel"
+- Leon trug tatsaechlich nur Unterwaesche. Zwei aufeinanderfolgende Antworten
+mit unterschiedlichen, aber beide komplett erfundenen Outfits - kein
+Ausreisser, ein echtes Zuverlaessigkeitsproblem.
+
+**Root-Cause-Untersuchung:** Die Kamera-Pipeline selbst
+(`camera_helper.swift`: echte AVFoundation-Aufnahme mit 0.6s Belichtungs-
+Anlaufzeit; `local_vision_service.py::_ollama_generate()`: Bild wird korrekt
+als Base64 an Ollama gesendet) ist unauffaellig. Direkter Vergleichstest mit
+zwei einfarbigen Testbildern (reines Rot, reines Gruen) gegen beide auf
+Leons Mac installierten Vision-Modelle via `curl` an die echte Ollama-API:
+llava beschrieb das reine Rot als "Grau" (glatt falsch) und brauchte
+18-60 Sekunden; gemma3:4b (bereits installiert, kein Download noetig) traf
+beide Farben korrekt in 17-19 Sekunden. `_select_model()` waehlte bisher
+llava, weil es in `VISION_MODEL_CANDIDATES` vor gemma3:4b stand - reine
+Listenreihenfolge, kein qualitatives Kriterium. Betrifft nicht nur
+Kamera-Feedback: dieselbe `LocalVisionService`-Instanz mit derselben
+Modell-Auswahl wird auch fuer Foto-Suche (`describe_image()`) und
+Bildschirm-Beschreibung (`describe_screen()`) genutzt.
+
+**Fix (zwei Ebenen):**
+1. `VISION_MODEL_CANDIDATES` umsortiert: gemma3:4b jetzt vor llava/llava:7b,
+   mit Kommentar, der den Vergleichstest dokumentiert - live verifiziert,
+   `_select_model()` waehlt jetzt tatsaechlich "gemma3:4b" statt "llava".
+2. Beide Prompts gehaertet, unabhaengig davon, welches Modell laeuft: der
+   Vision-Prompt in `describe_camera_photo()` setzte bisher voraus, dass
+   Kleidung zu beschreiben ist ("was du siehst (Kleidung, Farben, Stil)")
+   - diese Praesupposition eingeladen foermlich zum Erfinden, wenn kaum
+   Kleidung zu sehen ist. Jetzt: "Beschreibe NUR, was tatsaechlich zu sehen
+   ist - erfinde nichts dazu", explizite Erlaubnis/Aufforderung, kaum oder
+   keine Kleidung genauso sachlich zu benennen wie ein vollstaendiges
+   Outfit, und bei Unschaerfe/Dunkelheit ehrlich Unsicherheit statt Raten.
+   `humanize_camera_feedback_via_llm()` in jarvis.py bekam dieselbe
+   Treue-Anweisung ("erfinde keine zusaetzlichen Kleidungsstuecke, Farben
+   oder Details, die dort nicht genannt sind"), damit auch dieser zweite
+   Umformulierungs-Schritt keine zusaetzliche Erfindungs-Quelle wird.
+
+**Wichtig - keine Erfolgsgarantie:** kein lokales Vision-Modell ist
+fehlerfrei, auch gemma3:4b nicht. Der Fix macht falsche Beschreibungen
+deutlich seltener (belegt durch den Vergleichstest) und aendert das
+Fehlerbild im verbleibenden Rest von "erfindet selbstbewusst ein falsches
+Detail" zu "gibt ehrlich Unsicherheit wieder" - das ist der eigentliche
+Kern des Fixes, nicht eine behauptete hundertprozentige Genauigkeit.
+
+**Nebenfund, noch offen:** bereits vor diesem Fix indizierte Fotos
+(`photos_index.json`, lokale Vision-Beschreibungen via `describe_image()`)
+koennen noch auf llava's schwaecheren Ergebnissen beruhen. Ob ein
+Neu-Indizieren mit gemma3:4b sich lohnt, ist eine separate, potenziell
+lang laufende Entscheidung - Leon noch nicht gefragt.
+
+8 neue Tests (`test_camera_vision_honesty.py`): Kandidaten-Reihenfolge,
+`_select_model()`-Auswahl mit/ohne gemma3:4b installiert, beide Prompts auf
+die neuen Anweisungen geprueft, End-to-End-Test dass eine ehrliche
+"kaum Kleidung"-Rohbeschreibung nicht zu einem erfundenen Kleidungsstueck
+in der finalen Antwort fuehrt. 416 Tests insgesamt, alle gruen. Ein
+Xcode-Build, Backend-Kopie synchronisiert. Live verifiziert nach Neustart:
+`LocalVisionService({}).status().model` liefert "gemma3:4b" (vorher
+"llava").

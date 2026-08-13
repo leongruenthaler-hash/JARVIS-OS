@@ -11,14 +11,24 @@ from typing import Any
 from model_manager import is_ollama_installed, is_ollama_running, list_installed_ollama_models, ollama_base_url
 
 
+# Reihenfolge = Praeferenz bei mehreren installierten Vision-Modellen (siehe
+# _select_model()). gemma3:4b steht bewusst vor llava/llava:7b: live auf Leons
+# Mac verglichen (zwei einfarbige Testbilder, eindeutige Farbe) - llava lag bei
+# 1 von 2 falsch ("Grau" statt "Rot" bei einem reinroten Bild) und brauchte
+# 18-60s, gemma3:4b traf beide korrekt in 17-19s. Ein Kamera-Feedback-Aufruf
+# mit llava beschrieb live einen frei erfundenen dunklen Pullover samt
+# silbernem Guertel bei einer Person in Unterwaesche - kein Ausreisser, echtes
+# Zuverlaessigkeitsproblem dieses konkreten Modells in dieser Umgebung, nicht
+# nur Kamera-Feedback betroffen (dieselbe Praeferenz gilt fuer Foto- und
+# Bildschirm-Beschreibung).
 VISION_MODEL_CANDIDATES = (
     "qwen2.5vl",
     "qwen2.5vl:7b",
+    "gemma3:4b",
     "llava",
     "llava:7b",
     "llama3.2-vision",
     "llama3.2-vision:11b",
-    "gemma3:4b",
 )
 
 
@@ -142,7 +152,14 @@ class LocalVisionService:
         (_parse_response() erwartet feste Schluessel) statt eigene Felder zu
         erfinden - die eigentliche Outfit-Einschaetzung steckt komplett in
         "description" als ein zusammenhaengender, gesprochener Satz. Das Bild
-        wird von jarvis.py nach dem Aufruf sofort geloescht, hier nur gelesen."""
+        wird von jarvis.py nach dem Aufruf sofort geloescht, hier nur gelesen.
+
+        Der Prompt setzt bewusst NICHT voraus, dass ein bestimmtes Kleidungsstueck
+        zu sehen ist ("Kleidung" als vorausgesetzte Kategorie hatte live dazu
+        gefuehrt, dass das Modell bei kaum bekleideten Aufnahmen ein freies
+        Outfit erfand statt die tatsaechliche Situation zu beschreiben - siehe
+        VISION_MODEL_CANDIDATES-Kommentar oben) und verlangt explizit Ehrlichkeit
+        bei Unsicherheit statt erfundener Details."""
         image_path = Path(image_url)
         status = self.status()
         if not status.available:
@@ -152,12 +169,18 @@ class LocalVisionService:
 
         prompt = (
             "Analysiere dieses Kamerabild lokal fuer Jarvis - Leon moechte eine kurze, ehrliche, "
-            "freundliche Einschaetzung zu seinem Erscheinungsbild/Outfit hoeren, wie ein guter "
-            "Freund sie geben wuerde. Keine Personennamen raten, keine Gesichter identifizieren, "
-            "keine Aussagen ueber Koerper/Aussehen jenseits von Kleidung/Stil/Farben. "
+            "freundliche Einschaetzung hoeren, wie ein guter Freund sie geben wuerde. Keine "
+            "Personennamen raten, keine Gesichter identifizieren, keine Aussagen ueber Koerper "
+            "jenseits von Kleidung/Stil/Farben. "
+            "Beschreibe NUR, was tatsaechlich zu sehen ist - erfinde nichts dazu. Falls kaum oder "
+            "keine Kleidung zu sehen ist (z.B. Unterwaesche, nackter Oberkoerper), sag das genauso "
+            "sachlich wie bei einem vollstaendigen Outfit, statt stattdessen ein Outfit zu erfinden. "
+            "Falls das Bild zu dunkel, unscharf oder die Sicht verdeckt ist, sag das ehrlich statt "
+            "zu raten. "
             "Antworte auf Deutsch als kompaktes JSON mit dem Schluessel description: "
-            "ein bis zwei fluessige, gesprochene Saetze - was du siehst (Kleidung, Farben, Stil) "
-            "plus eine kurze, konstruktive Einschaetzung. Keine Aufzaehlung, kein Aufsatz."
+            "ein bis zwei fluessige, gesprochene Saetze - was du tatsaechlich siehst, plus bei "
+            "erkennbarer Kleidung eine kurze, konstruktive Einschaetzung. Keine Aufzaehlung, kein "
+            "Aufsatz."
         )
         response_text = self._ollama_generate(status.model, prompt, image_path)
         parsed = self._parse_response(response_text)

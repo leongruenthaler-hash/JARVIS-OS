@@ -2577,7 +2577,15 @@ def humanize_camera_feedback_via_llm(llm: LLMClient, raw_description: str) -> st
     Leon bemaengelt ("das ist nicht die Antwort, die ich erwartet habe").
     Gibt None zurueck, wenn die LLM-Antwort leer war, damit der Aufrufer auf
     die rohe Beschreibung zurueckfallen kann statt ganz ohne Antwort
-    dazustehen."""
+    dazustehen.
+
+    Live von Leon entdeckter Bug: die rohe Bildbeschreibung (z.B. von einem
+    unzuverlaessigen lokalen Vision-Modell, siehe
+    local_vision_service.py::VISION_MODEL_CANDIDATES-Kommentar) kann selbst
+    schon falsch/erfunden sein - dieser Umformulierungs-Schritt darf das nicht
+    verschlimmern, indem er zusaetzliche, in der Roh-Beschreibung gar nicht
+    genannte Details (Kleidungsstuecke, Farben) dazuerfindet. Deshalb die
+    explizite Treue-Anweisung unten."""
     from core.personality_manager import salutation_instruction
 
     address_instruction = salutation_instruction(configured_user_name(), str(CONFIG.get("user_salutation", "sir")))
@@ -2590,6 +2598,11 @@ def humanize_camera_feedback_via_llm(llm: LLMClient, raw_description: str) -> st
                 "Du bekommst eine automatisch erzeugte, neutrale Bildbeschreibung in der dritten Person. "
                 f"Formuliere daraus eine kurze, persönliche Einschätzung, die {configured_user_name()} DIREKT anspricht "
                 "(nicht 'die Person', sondern 'Sie'/'Ihr Outfit'). "
+                "WICHTIG: Bleib strikt bei dem, was in der Bildbeschreibung tatsächlich steht - erfinde keine "
+                "zusätzlichen Kleidungsstücke, Farben oder Details, die dort nicht genannt sind. Beschreibt die "
+                "Vorlage kaum oder keine Kleidung, sag das genauso direkt und unaufgeregt wie bei einem "
+                "vollständigen Outfit. Beschreibt die Vorlage Unsicherheit (zu dunkel, unscharf, unklar), gib das "
+                "als Unsicherheit weiter statt etwas Konkretes zu behaupten. "
                 f"{address_instruction} "
                 "Ein bis zwei Sätze, mit dem üblichen trockenen, sarkastischen Jarvis-Unterton, aber freundlich und "
                 "nie abwertend. Kein Markdown, keine Aufzählung, kein Verweis darauf, dass du eine automatische "
