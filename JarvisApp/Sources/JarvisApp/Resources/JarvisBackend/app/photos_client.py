@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -447,13 +448,25 @@ class PhotoIndex:
         limit = int(max_items or self.config.get("local_photo_vision_max_per_run", 20))
         limit = max(1, min(limit, 200))
         preview_size = int(self.config.get("local_photo_vision_preview_size", 768))
-        pending = [
-            entry
-            for entry in entries
-            if str(entry.get("id") or "").strip()
-            and not str(entry.get("local_vision_analyzed_at") or "").strip()
-            and str(entry.get("mediaType") or "image") == "image"
-        ][:limit]
+        retry_after_days = float(self.config.get("local_photo_vision_unavailable_retry_days", 14))
+
+        def _is_pending(entry: dict[str, Any]) -> bool:
+            if not str(entry.get("id") or "").strip():
+                return False
+            if str(entry.get("mediaType") or "image") != "image":
+                return False
+            if str(entry.get("local_vision_analyzed_at") or "").strip():
+                return False
+            unavailable_since = str(entry.get("local_vision_unavailable_since") or "").strip()
+            if not unavailable_since:
+                return True
+            try:
+                marked_at = datetime.fromisoformat(unavailable_since)
+            except ValueError:
+                return True
+            return (datetime.now() - marked_at).total_seconds() / 86400 >= retry_after_days
+
+        pending = [entry for entry in entries if _is_pending(entry)][:limit]
 
         started_at = datetime.now().isoformat(timespec="seconds")
         total = len(pending)
@@ -471,18 +484,43 @@ class PhotoIndex:
         for index, entry in enumerate(pending, start=1):
             photo_id = str(entry.get("id") or "")
             filename = str(entry.get("filename") or photo_id)
-            preview_path = Path(tempfile.gettempdir()) / f"jarvis_local_photo_preview_{os.getpid()}_{time_safe_stamp()}.jpg"
-            try:
-                self._save_local_vision_progress(
-                    "indexing",
-                    f"Analysiere {filename}",
-                    current_item=index - 1,
-                    total_items=total,
-                    started_at=started_at,
-                    stats={"model": status.model, "errors": failed, "current_photo": filename},
-                )
-                self._export_preview(photo_id, preview_path, preview_size)
-                result = service.describe_image(preview_path)
+            self._save_local_vision_progress(
+                "indexing",
+                f"Analysiere {filename}",
+                current_item=index - 1,
+                total_items=total,
+                started_at=started_at,
+                stats={"model": status.model, "errors": failed, "current_photo": filename},
+            )
+
+            # Einmaliger Retry mit kurzer Pause statt sofort aufzugeben - live
+            # beobachtet (2026-08-16): ein Foto, das isoliert anstandslos
+            # exportierte, scheiterte im 200er-Batch reihenweise (bis zu 82%
+            # Fehlerquote trotz freiem Speicherplatz, kein Format-Unterschied
+            # zwischen JPG/DNG). Deutet auf kurzzeitige Ueberlastung der
+            # Foto-App-Hintergrunddienste unter Dauerlast hin, nicht auf ein
+            # Problem mit dem einzelnen Foto - genau das Symptom-Muster, das ein
+            # zweiter Versuch nach kurzer Pause behebt.
+            result: dict[str, Any] | None = None
+            last_exc: Exception | None = None
+            for attempt in range(2):
+                preview_path = Path(tempfile.gettempdir()) / f"jarvis_local_photo_preview_{os.getpid()}_{time_safe_stamp()}.jpg"
+                try:
+                    if attempt:
+                        time.sleep(2)
+                    self._export_preview(photo_id, preview_path, preview_size)
+                    result = service.describe_image(preview_path)
+                    last_exc = None
+                    break
+                except Exception as exc:
+                    last_exc = exc
+                finally:
+                    try:
+                        preview_path.unlink()
+                    except OSError:
+                        pass
+
+            if result is not None:
                 entry["local_vision_description"] = str(result.get("description") or "")
                 entry["local_vision_objects"] = list(result.get("objects") or [])
                 entry["local_vision_scene"] = str(result.get("scene") or "")
@@ -492,15 +530,22 @@ class PhotoIndex:
                 entry["local_vision_model"] = str(result.get("model") or status.model)
                 entry["local_vision_analyzed_at"] = datetime.now().isoformat(timespec="seconds")
                 entry["search_terms"] = sorted(entry_search_terms(entry))
+                entry.pop("local_vision_unavailable_since", None)
+                entry.pop("local_vision_last_error", None)
                 analyzed += 1
-            except Exception as exc:
+            else:
                 failed += 1
-                print(f"Lokale Fotoanalyse Fehler fuer ein Foto: {type(exc).__name__}")
-            finally:
-                try:
-                    preview_path.unlink()
-                except OSError:
-                    pass
+                # Als "aktuell nicht abrufbar" markieren statt endlos jede Nacht
+                # neu zu versuchen - live entdeckt (2026-08-17): manche Fotos
+                # scheitern zuverlaessig mit einer echten Zeitueberschreitung beim
+                # Laden aus iCloud (siehe exportPreview() in photos_helper.swift),
+                # kein kurzzeitiges Problem, das ein Retry beheben wuerde. Zeitstempel
+                # + konkrete Fehlermeldung statt eines dauerhaften stillen Ausschlusses,
+                # damit pending() unten nach local_photo_vision_unavailable_retry_days
+                # von selbst wieder einen neuen Versuch erlaubt.
+                entry["local_vision_unavailable_since"] = datetime.now().isoformat(timespec="seconds")
+                entry["local_vision_last_error"] = str(last_exc) if last_exc else "Unbekannter Fehler."
+                print(f"Lokale Fotoanalyse Fehler fuer ein Foto (nach Retry): {entry['local_vision_last_error']}")
 
             self._save_local_vision_progress(
                 "indexing",
@@ -526,6 +571,27 @@ class PhotoIndex:
         )
         return analyzed, failed
 
+    def local_vision_run_summary(self) -> dict[str, Any]:
+        """Liest den zuletzt gespeicherten Fortschritt/Abschluss der lokalen
+        Foto-Vision-Analyse fuer die Proactivity-Regel in proactivity_rules.py -
+        liefert nur ein aufbereitetes Dict, keine Rohdatei-Struktur, damit
+        proactivity_rules.py das Dateiformat von photos_client.py nicht kennen muss."""
+        if not self.local_vision_progress_path.exists():
+            return {}
+        try:
+            payload = json.loads(self.local_vision_progress_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        stats = payload.get("stats") or {}
+        return {
+            "status": str(payload.get("status") or ""),
+            "finished_at": str(payload.get("finishedAt") or ""),
+            "analyzed": int(stats.get("analyzed") or 0),
+            "errors": int(stats.get("errors") or 0),
+        }
+
     def reset_local_vision_descriptions(self) -> int:
         cache = self._load_cache()
         entries = list(cache.get("entries", []))
@@ -539,6 +605,8 @@ class PhotoIndex:
             "local_vision_search_terms",
             "local_vision_model",
             "local_vision_analyzed_at",
+            "local_vision_unavailable_since",
+            "local_vision_last_error",
         )
         for entry in entries:
             if any(entry.get(key) for key in keys):

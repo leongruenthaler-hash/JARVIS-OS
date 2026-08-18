@@ -166,10 +166,17 @@ def test_classify_domain_via_llm_swallows_exceptions():
 
 
 def test_maybe_ask_domain_clarification_stores_pending_state_and_asks(memory):
+    # Seit plans/2026-08-16-jarvis-stufe2-klassifikation-direkt-beantworten.md
+    # versucht eine eindeutige Ein-Domaenen-Klassifikation zuerst eine direkte
+    # Antwort (siehe test_stage2_direct_dispatch.py) - dieser Test isoliert
+    # bewusst weiterhin nur das reine Rueckfrage-Verhalten selbst, indem er das
+    # neue Verhalten explizit abschaltet.
     llm = _FakeLLM("mail")
     question = "kannst du das für mich checken"
 
-    answer = jarvis.maybe_ask_domain_clarification(llm, memory, question)
+    answer = jarvis.maybe_ask_domain_clarification(
+        llm, memory, question, config={"stage2_direct_dispatch_enabled": False}
+    )
 
     assert answer is not None
     assert "Mail" in answer or "mail" in answer.lower()

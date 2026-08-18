@@ -1792,3 +1792,228 @@ in der finalen Antwort fuehrt. 416 Tests insgesamt, alle gruen. Ein
 Xcode-Build, Backend-Kopie synchronisiert. Live verifiziert nach Neustart:
 `LocalVisionService({}).status().model` liefert "gemma3:4b" (vorher
 "llava").
+
+## 44. Proaktive Foto-Analyse-Meldung + Stufe-2-Klassifikation direkt beantworten (2026-08-16)
+
+Zwei CEO-GPT-Pläne umgesetzt, beide direkte Fortsetzung der Runde-2/3-
+Simulation: `plans/2026-08-16-jarvis-proaktive-abschluss-meldung.md` und
+`plans/2026-08-16-jarvis-stufe2-klassifikation-direkt-beantworten.md`.
+
+**A) Proaktive Abschluss-Meldung fuer Hintergrund-Aufgaben:** Jarvis meldete
+sich bisher nie von selbst, wenn ein lang laufender Foto-Vision-Lauf fertig
+war - der Nutzer musste aktiv nachfragen. Neue Funktion
+`PhotoIndex.local_vision_run_summary()` (photos_client.py) liest den
+zuletzt gespeicherten Lauf-Status auf; `_proactivity_context()`
+(local_server.py) reicht ihn unter dem neuen Schluessel `photo_vision_run`
+weiter (der bisherige Kommentar "Fotos liefert aktuell nichts in den
+Proaktivitaets-Feed" stimmte danach nicht mehr und wurde korrigiert); neue
+Regel `rule_photo_vision_analysis_completed()` (proactivity_rules.py) mit
+zeitstempel-basiertem `dedup_key` (gleiches Muster wie
+`rule_calendar_event_starting_soon`), damit derselbe Lauf nur einmal, ein
+SPAETERER neuer Lauf aber trotzdem wieder gemeldet wird. Registrierung lief
+einfacher als im Plan angenommen: die Regel muss nur in die vorhandene
+`DEFAULT_RULES`-Tupel-Liste eingetragen werden, `core/__init__.py` ruft
+`register_default_rules()` bereits automatisch als Modul-Ladeeffekt auf.
+
+**B) Stufe-2-Klassifikation direkt beantworten:** Ueberraschender Fund
+gleich zu Beginn der Recherche - die urspruenglich als "groesserer, riskanter
+Umbau" angefragte LLM-gestuetzte Absichtserkennung existierte in JARVIS-OS
+bereits vollstaendig (`classify_domain_via_llm()`,
+`plans/2026-08-08-jarvis-intelligenz-verbessern.md`), lief aber nur als
+Rueckfrage-Generator: bei einer eindeutigen Ein-Domaenen-Klassifikation
+fragte Jarvis nur "Meinten Sie gerade Ihren Kalender...?", statt die
+bereits vorhandene `_dispatch_confirmed_domain()` (die denselben Handler
+wie ein echter Stichwort-Treffer aufruft, bisher nur nach einer bestaetigten
+Rueckfrage genutzt) direkt zu nutzen. Fix in
+`maybe_ask_domain_clarification()`: bei genau einer erkannten Domaene wird
+jetzt zuerst `_dispatch_confirmed_domain()` versucht; liefert die eine
+echte Antwort, wird sie direkt zurueckgegeben (keine `pending_domain_
+clarification` gesetzt); liefert sie `None` (Handler konnte trotz
+erkannter Domaene nichts Konkretes machen), faellt der Code unveraendert
+auf die bisherige Rueckfrage zurueck. Der Zwei-Domaenen-Fall (echte
+Mehrdeutigkeit) bleibt komplett unveraendert eine Rueckfrage. Neuer
+Config-Schalter `stage2_direct_dispatch_enabled` (Standard `true`) fuer
+sofortigen Rollback ohne Code-Aenderung. Da der Klassifikations-Aufruf
+selbst bereits heute bei jedem durch Stufe 1 fallenden Satz passiert,
+entstehen durch diese Aenderung keine neuen Kosten oder Latenz - nur das
+Ergebnis wird jetzt konsequenter genutzt.
+
+**Live beim Implementieren entdeckt (kein Bug, aber ein Grenzfall):**
+`_dispatch_confirmed_domain("mail", ...)` ruft `handle_mail_command(...,
+force=True, ...)` auf - dieses `force=True` interpretiert auch vage
+Formulierungen als Mail-Anfrage. Bisher wurde das nur NACH einer vom Nutzer
+bestaetigten Rueckfrage ausgeloest, jetzt kann es direkt aus einer
+unbestaetigten Stufe-2-Vermutung passieren. Bewusst akzeptiert: Stufe 2 ist
+im eigenen Prompt konservativ trainiert (Aussagen ueber die Person selbst
+werden explizit als "keine" gelehrt), destruktive Aktionen bleiben ueber
+die jeweils eigene `pending_*`-Bestaetigung der Handler abgesichert - im
+schlimmsten Fall bekommt der Nutzer eine harmlose, leicht am Thema
+vorbeigehende Mail-Uebersicht statt einer Rueckfrage.
+
+19 neue Tests (`test_photo_vision_completion_proactivity.py`,
+`test_stage2_direct_dispatch.py`), ein bestehender Test in
+`test_domain_matching.py` an das neue, beabsichtigte Verhalten angepasst
+(pruefte bisher nur noch die alte Rueckfrage-Route, jetzt explizit mit
+`stage2_direct_dispatch_enabled: False` isoliert). 434 Tests insgesamt,
+alle gruen. Backend-Kopie synchronisiert, Xcode-Build von der neuen
+`~/Developer/JARVIS-OS`-Position (siehe unten) erfolgreich. Live
+verifiziert: die neue Foto-Analyse-Meldung ist waehrend der eigenen
+Hintergrund-Abfrage der App tatsaechlich erschienen ("Ich bin mit der
+Foto-Analyse durch, 58 neue Fotos beschrieben (142 davon nicht
+analysierbar).") und wurde bei einer erneuten Abfrage korrekt nicht noch
+einmal gemeldet (Dedup greift). Eine end-to-end-Live-Demonstration des
+direkten Stufe-2-Antwortpfads mit einer frei formulierten, neuen Anfrage
+gelang nicht zuverlaessig - das kleine lokale Klassifikations-Modell
+(phi4-mini) klassifiziert nicht jede plausible Formulierung zuverlaessig
+als genau eine Domaene (eigene, vorbestehende Grenze von Stufe 2, nicht
+Teil dieses Fixes); der Rueckfall-Pfad (Handler liefert `None`, weiterhin
+Rueckfrage) wurde dabei live bestaetigt. Die eigentliche Verzweigungslogik
+ist durch die Unit-Tests (gemockte `_dispatch_confirmed_domain()`)
+deterministisch und vollstaendig abgedeckt.
+
+## 45. JARVIS-OS aus dem iCloud-synchronisierten Schreibtisch verschoben (2026-08-16)
+
+Waehrend dieser Sitzung wiederholt haengende/abgebrochene Dateizugriffe
+(u. a. `git status`, `du`, `mv`) auf `~/Desktop/Projekte/JARVIS-OS`,
+teilweise mit "Resource deadlock avoided" oder "Operation canceled".
+Ursache: iCloud "Schreibtisch & Dokumente" synchronisiert den gesamten
+Ordner inklusive `.git`-Interna, `node_modules`, Xcode-`.build`-Ordnern und
+gebuendelten Ollama-Modellen - Dateiformate, fuer die iCloud-Sync nicht
+gedacht ist. Fast 2.000 "Resource deadlock avoided"-Fehler quer ueber den
+gesamten Schreibtisch gefunden (nicht nur JARVIS-OS betroffen), bei nur
+noch 12 GB freiem Speicherplatz (95 % voll) - dieselbe Ursachenklasse hatte
+bereits einmal eine doppelte, defekte Git-Referenz erzeugt (siehe
+Nebenfund weiter oben in dieser Sitzung).
+
+Mit Leons ausdruecklicher Erlaubnis nach `~/Developer/JARVIS-OS`
+verschoben, ausserhalb jeder iCloud-Synchronisierung. Ein direkter `mv`
+schlug mit "Operation canceled" fehl (iCloud blockierte den Rename aktiv);
+zweimaliger Versuch ueber den Finder-Papierkorb scheiterte ebenfalls
+("-8013"/AppleEvent-Zeitueberschreitung). Sicherer Ablauf letztlich: Snapshot
+per `ditto` als Zip (lokal, ausserhalb iCloud, verifizierbar), am neuen Ort
+entpackt, `git status`/`git log` als Integritaets-Nachweis geprueft, ERST
+danach der alte Ordner per `rm -rf` entfernt (kein Datenverlust-Risiko mehr,
+da die Kopie zu diesem Zeitpunkt bereits zweifach bestaetigt war). Ein
+Mac-Absturz mitten in diesem Ablauf hat dank der Zwischenschritte nichts
+beschaedigt. Frischer Xcode-Build von der neuen Position erfolgreich, App
+lief danach normal.
+
+Alle folgenden Aenderungen dieser Sitzung (Abschnitt 44) wurden bereits
+direkt in `~/Developer/JARVIS-OS` vorgenommen.
+
+## 46. Foto-Vision-Export scheiterte bei 71-82% der Fotos - PHImageManager-Falle gefunden und behoben (2026-08-17)
+
+Der Foto-Vision-Analyse-Lauf vom 2026-08-16 (Abschnitt 44/Plan
+`2026-08-16-jarvis-proaktive-abschluss-meldung.md`) zeigte 142 von 200
+gescheiterten Fotos - eine mehrstufige Untersuchung ueber den Tag verteilt:
+
+**Ausgeschlossen:** Speicherplatz (ein Lauf bei kritischem Speicherplatz UND
+ein Lauf bei komfortablem Speicherplatz hatten beide aehnlich hohe
+Fehlerquoten, letzterer sogar hoeher - 82,5% vs. 71%). Dateiformat (JPG ca.
+81%, DNG ca. 97% Fehlerquote, beide zu hoch fuer ein Einzelformat-Problem).
+Ein einfacher Einmal-Retry mit 2 Sekunden Pause (isoliert umgesetzt, live
+verifiziert wirkungslos - identische ~71% im direkten Vergleich).
+
+**Root Cause gefunden** (`plans/2026-08-17-jarvis-foto-export-phimagemanager-fix.md`):
+`app/photos_helper.swift::exportPreview()` und `cgImage(for:)` nutzten
+`PHImageManager.requestImage()` mit `isSynchronous = true` KOMBINIERT mit
+`isNetworkAccessAllowed = true` - eine bekannte PhotoKit-Falle. Bei
+`isSynchronous = true` liefert PHImageManager das Bild nur zurueck, wenn es
+schnell/lokal verfuegbar ist; fuer nicht lokal zwischengespeicherte
+iCloud-Fotos kann der synchrone Aufruf trotz `isNetworkAccessAllowed = true`
+sofort mit `nil` zurueckkehren statt auf den Download zu warten. Live-Beweis:
+ein isolierter Export gelang in 10,1s, derselbe Mechanismus fuer ein anderes
+Foto scheiterte waehrend eines laufenden Batches nach exakt 10,0s (deutlich
+unter dem 60s-Subprozess-Timeout) mit derselben generischen Meldung.
+
+**Fix:** beide Funktionen auf echtes asynchrones `PHImageManager.requestImage()`
+mit `DispatchSemaphore` umgestellt (45s Timeout, unterhalb des bestehenden
+60s-Subprozess-Timeouts in `_run_helper()`), plus drei unterscheidbare
+Fehlermeldungen statt einer generischen ("Foto lieferte kein Bild", "konnte
+nicht in ein verarbeitbares Format umgewandelt werden", "Zeitüberschreitung
+beim Laden aus iCloud").
+
+**Ergebnis der Live-Verifikation - Mechanismus bewiesen, aber Fehlerquote
+nicht gesenkt:** der Fix funktioniert nachweislich korrekt (die neue,
+praezise Fehlermeldung "Zeitüberschreitung beim Laden aus iCloud." erscheint
+jetzt nach echten 45+ Sekunden Warten statt sofort wie vorher), aber die
+Gesamt-Fehlerquote blieb in einem frischen 200er-Lauf bei ~71-82%. Das ist
+kein Fix-Fehler, sondern eine echte, zugrunde liegende Tatsache: ein
+erheblicher Teil der Fotobibliothek braucht laenger als 45 Sekunden zum Laden
+aus iCloud oder ist aktuell gar nicht abrufbar - vermutlich derselbe
+zugrunde liegende iCloud-Sync-Zustand, der bereits in Abschnitt 45 (defekte
+Git-Referenz, Schreibtisch-Aussetzer) sichtbar wurde.
+
+**Kleiner Folge-Fix** (direkt umgesetzt, ohne eigenen Plan, auf Wunsch des
+Geschaeftsfuehrers): `analyze_with_local_vision()` markiert ein Foto nach
+einem echten, gescheiterten Wartezyklus jetzt mit
+`local_vision_unavailable_since` (Zeitstempel) und `local_vision_last_error`
+(die jetzt aussagekraeftige Fehlermeldung), statt es jede Nacht erneut zu
+versuchen. Neuer Config-Schluessel
+`local_photo_vision_unavailable_retry_days` (Standard 14) bestimmt, nach wie
+vielen Tagen ein als nicht abrufbar markiertes Foto wieder in den naechsten
+Lauf darf - kein dauerhafter, stiller Ausschluss. Gelingt ein spaeterer
+Versuch doch, werden beide Felder automatisch wieder entfernt.
+`reset_local_vision_descriptions()` setzt auch diese beiden neuen Felder mit
+zurueck.
+
+6 Tests in `test_photo_vision_retry.py` (3 bestehend + 3 neu: Markierung
+nach endgueltigem Fehlschlag, Ausschluss innerhalb des Cooldowns,
+erneuter Versuch nach Ablauf des Cooldowns). 440 Tests insgesamt, alle
+gruen. Backend-Kopie synchronisiert, alter kompilierter Swift-Helfer vor dem
+Build geloescht (garantiert Neukompilierung), zwei Xcode-Builds (Export-Fix,
+dann Markierungs-Fix), beide erfolgreich. Live verifiziert nach Neustart.
+
+`plans/2026-08-17-jarvis-foto-export-phimagemanager-fix.md` als "Umgesetzt"
+markiert - der Fix selbst war notwendig und korrekt (siehe oben), hat die
+Fehlerquote aber nicht gesenkt, da die eigentliche Ursache eine echte
+iCloud-Ladezeit-Realitaet ist, kein Logikfehler mehr. Der Markierungs-Fix
+macht das Gesamtverhalten ehrlich (keine stillen, endlosen Fehlschlaege mehr
+in der proaktiven Abschluss-Meldung aus Abschnitt 44) statt das eigentliche
+iCloud-Sync-Thema zu loesen, das ausserhalb von Jarvis liegt.
+
+---
+
+## 47. Kalender/Erinnerungen: AppleScript-Start scheiterte mit Fehler -600 (2026-08-17)
+
+Live von Leon per Screenshot gemeldet: "Hab ich heute noch Termine" endete in
+`Kalender konnte nicht geschrieben werden: ... execution error: „Calendar"
+hat einen Fehler erhalten: Das Programm läuft nicht. (-600)`, gleichzeitig
+mit einer Speicherplatz-Warnung (6,1 GB frei) in der App sichtbar - beide
+Symptome wirkten zunaechst wie dieselbe Ursache.
+
+**Ausgeschlossen:** Speicherplatz (`df` zeigte 18 GB frei auf dem
+Data-Volume, unabhaengig von der App-eigenen Meldung - kein Zusammenhang).
+Automation-Berechtigung (sobald Calendar.app laeuft, funktioniert
+AppleScript-Zugriff sofort ohne Freigabe-Dialog - live geprueft).
+
+**Root Cause gefunden:** `_ensure_app_running()` in `app/calendar_client.py`
+nutzte `tell application "Calendar" to launch` per `osascript` als
+Vor-Start, bevor die eigentliche Abfrage laeuft. Live reproduziert: genau
+dieser Befehl scheitert inzwischen zuverlaessig mit -600, sobald Calendar.app
+komplett geschlossen ist, statt die App tatsaechlich zu starten (eine
+macOS-Verhaltensaenderung, keine Jarvis-Regression). `open -a Calendar` -
+der gleiche Weg wie ein Finder-Doppelklick - startete dagegen sofort
+zuverlaessig. Derselbe Start-Helfer wird auch von Erinnerungen genutzt
+(`create_reminder`/`list_open_reminders`), betraf also beide Bereiche still,
+nicht nur Kalender-Abfragen.
+
+**Fix:** `_ensure_app_running()` startet jetzt per `open -g -a
+<process_name>` statt per AppleScript. `-g` haelt die App im Hintergrund,
+damit ein stiller "was steht heute an"-Check nicht das Kalender-Fenster vor
+Leons aktuelle Arbeit reisst.
+
+2 neue Tests in `tests/test_calendar_client.py`
+(`test_ensure_app_running_launches_via_open_not_applescript`,
+`test_ensure_app_running_skips_launch_when_already_running`), die den
+exakten Subprozess-Befehl pruefen. 442 Tests insgesamt, alle gruen.
+
+**Live-Verifikation:** Calendar.app und Reminders.app komplett beendet, App
+neu gebaut und gestartet, dieselbe urspruenglich gescheiterte Frage direkt an
+`/api/chat` geschickt - "Für heute sehe ich keine Termine." statt der
+-600-Fehlermeldung, Calendar.app wurde dabei nachweislich automatisch (und
+unsichtbar im Hintergrund) gestartet. Gleiches Ergebnis fuer Erinnerungen
+("Was steht auf meiner Erinnerungsliste").
+
+Kleiner, klar umrissener Ein-Funktions-Fix - direkt umgesetzt, ohne eigenen
+Plan.

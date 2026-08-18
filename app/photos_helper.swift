@@ -166,13 +166,16 @@ func authorizePhotos() -> Bool {
 }
 
 func cgImage(for asset: PHAsset) -> CGImage? {
+    // Gleiche isSynchronous=false + DispatchSemaphore-Umstellung wie in
+    // exportPreview() - siehe Kommentar dort.
     let imageOptions = PHImageRequestOptions()
-    imageOptions.isSynchronous = true
+    imageOptions.isSynchronous = false
     imageOptions.deliveryMode = .fastFormat
     imageOptions.resizeMode = .fast
     imageOptions.isNetworkAccessAllowed = true
 
     var resultImage: NSImage?
+    let semaphore = DispatchSemaphore(value: 0)
     let targetSize = CGSize(width: 700, height: 700)
     PHImageManager.default().requestImage(
         for: asset,
@@ -181,6 +184,11 @@ func cgImage(for asset: PHAsset) -> CGImage? {
         options: imageOptions
     ) { image, _ in
         resultImage = image
+        semaphore.signal()
+    }
+
+    if semaphore.wait(timeout: .now() + 45) == .timedOut {
+        return nil
     }
 
     guard let image = resultImage else {
@@ -398,13 +406,23 @@ func exportPreview(assetId: String, destinationPath: String, maxSize: Int) throw
         fail("Foto nicht gefunden.")
     }
 
+    // isSynchronous = false ist hier bewusst: bei true liefert PHImageManager nur
+    // zurueck, wenn das Bild schnell/lokal verfuegbar ist - fuer Fotos, die erst
+    // aus iCloud nachgeladen werden muessen (z.B. durch "Fotos optimieren"),
+    // kam der synchrone Aufruf trotz isNetworkAccessAllowed=true oft sofort mit
+    // nil zurueck statt auf den Download zu warten (live beobachtet: ~71-82%
+    // Fehlschlagsquote). Der DispatchSemaphore unten wartet stattdessen wirklich
+    // auf den asynchronen Callback, mit eigenem Timeout unterhalb des
+    // 60s-Subprozess-Timeouts in photos_client.py::_run_helper().
     let imageOptions = PHImageRequestOptions()
-    imageOptions.isSynchronous = true
+    imageOptions.isSynchronous = false
     imageOptions.deliveryMode = .highQualityFormat
     imageOptions.resizeMode = .fast
     imageOptions.isNetworkAccessAllowed = true
 
     var resultImage: NSImage?
+    var requestError: Error?
+    let semaphore = DispatchSemaphore(value: 0)
     let size = max(300, maxSize)
     let targetSize = CGSize(width: size, height: size)
     PHImageManager.default().requestImage(
@@ -412,12 +430,25 @@ func exportPreview(assetId: String, destinationPath: String, maxSize: Int) throw
         targetSize: targetSize,
         contentMode: .aspectFit,
         options: imageOptions
-    ) { image, _ in
+    ) { image, info in
+        requestError = info?[PHImageErrorKey] as? Error
         resultImage = image
+        semaphore.signal()
     }
 
-    guard let image = resultImage, let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff) else {
-        fail("Foto konnte nicht exportiert werden.")
+    if semaphore.wait(timeout: .now() + 45) == .timedOut {
+        fail("Zeitüberschreitung beim Laden aus iCloud.")
+    }
+
+    if let requestError = requestError {
+        fail("Foto konnte nicht geladen werden: \(requestError.localizedDescription)")
+    }
+
+    guard let image = resultImage else {
+        fail("Foto lieferte kein Bild (evtl. nicht mehr vorhanden oder beschädigt).")
+    }
+    guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff) else {
+        fail("Foto konnte nicht in ein verarbeitbares Format umgewandelt werden.")
     }
 
     guard let jpeg = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.72]) else {

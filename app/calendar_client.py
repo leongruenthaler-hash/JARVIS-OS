@@ -275,8 +275,16 @@ def _ensure_app_running(process_name: str, timeout: float = 6.0) -> None:
         return
 
     try:
+        # "tell application X to launch" per osascript liefert bei geschlossener App
+        # inzwischen zuverlaessig -600 ("Programm laeuft nicht") statt tatsaechlich zu
+        # starten (live reproduziert am 2026-08-17, macOS-Verhaltensaenderung, keine
+        # Berechtigungsfrage - sobald die App laeuft, funktioniert AppleScript-Zugriff
+        # sofort ohne Freigabe-Dialog). "open" ist der gleiche Start-Weg wie ein
+        # Finder-Doppelklick und startet zuverlaessig; -g haelt die App im Hintergrund,
+        # damit ein stiller "was steht heute an"-Check nicht das Kalender-Fenster
+        # aufreisst.
         subprocess.run(
-            ["osascript", "-e", f'tell application "{process_name}" to launch'],
+            ["open", "-g", "-a", process_name],
             capture_output=True,
             text=True,
             timeout=8,

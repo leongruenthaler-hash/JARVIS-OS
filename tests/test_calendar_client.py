@@ -8,9 +8,9 @@ echte Skript liefert: ASCII-31-getrennte Felder, ASCII-30-getrennte Records).
 """
 
 from datetime import datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from calendar_client import _parse_calendar_items
+from calendar_client import _ensure_app_running, _parse_calendar_items
 import jarvis
 
 FS = chr(31)
@@ -115,3 +115,47 @@ def test_answer_calendar_query_not_today_is_unaffected():
         answer = jarvis.answer_calendar_query("welche termine habe ich", "welche termine habe ich")
 
     assert "Naechste-Woche" in answer
+
+
+def _fake_result(stdout="", returncode=0):
+    result = MagicMock()
+    result.returncode = returncode
+    result.stdout = stdout
+    result.stderr = ""
+    return result
+
+
+def test_ensure_app_running_launches_via_open_not_applescript():
+    """Regression fuer den am 2026-08-17 live gefundenen Bug: "tell application X to
+    launch" per osascript scheiterte zuverlaessig mit -600 ("Programm laeuft nicht"),
+    sobald Kalender/Erinnerungen komplett geschlossen waren - "Hab ich heute noch
+    Termine" endete in einer verwirrenden Fehlermeldung, obwohl weder Speicherplatz
+    noch Automation-Berechtigung das eigentliche Problem waren (einmal gestartet,
+    funktionierte der AppleScript-Zugriff sofort ohne Freigabe-Dialog). Fix: "open -g
+    -a" statt AppleScript zum Starten - der gleiche Weg wie ein Finder-Doppelklick,
+    -g haelt die App im Hintergrund."""
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        if cmd[0] == "osascript":
+            already_running = len(calls) > 2
+            return _fake_result(stdout="true" if already_running else "false")
+        return _fake_result()
+
+    with patch("calendar_client.subprocess.run", side_effect=fake_run), \
+         patch("calendar_client.time.sleep"):
+        _ensure_app_running("Calendar")
+
+    launch_calls = [c for c in calls if c[0] == "open"]
+    assert launch_calls == [["open", "-g", "-a", "Calendar"]]
+    assert not any(c[0] == "osascript" and "to launch" in " ".join(c) for c in calls)
+
+
+def test_ensure_app_running_skips_launch_when_already_running():
+    with patch("calendar_client.subprocess.run", return_value=_fake_result(stdout="true")) as fake_run, \
+         patch("calendar_client.time.sleep") as fake_sleep:
+        _ensure_app_running("Calendar")
+
+    assert fake_run.call_count == 1
+    fake_sleep.assert_not_called()

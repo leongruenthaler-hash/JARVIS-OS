@@ -1156,14 +1156,18 @@ class JarvisLocalServer:
                 pass
 
         # Nur den Worker starten (nächtlicher Fotoscan + lokale Vision-Analyse,
-        # siehe plans/2026-08-10-jarvis-foto-vision-lokal-aktivieren.md) - anders
-        # als Mail/News liefert Fotos aktuell nichts in den Proaktivitäts-Feed,
-        # dieselbe "beim ersten erlaubten Poll starten"-Stelle wird hier nur als
+        # siehe plans/2026-08-10-jarvis-foto-vision-lokal-aktivieren.md) - dieselbe
+        # "beim ersten erlaubten Poll starten"-Stelle wird hier auch als
         # Startpunkt mitgenutzt, exakt wie bei den Blöcken oben nur lesend, wenn
-        # die Berechtigung bereits erteilt ist.
+        # die Berechtigung bereits erteilt ist. Seit
+        # plans/2026-08-16-jarvis-proaktive-abschluss-meldung.md liefert der
+        # zuletzt gespeicherte Lauf-Status auch etwas in den Proaktivitäts-Feed
+        # (rule_photo_vision_analysis_completed in proactivity_rules.py).
+        photo_vision_run: dict[str, Any] = {}
         if self.permissions.is_allowed("photos"):
             try:
-                self._ensure_photo_worker()
+                worker = self._ensure_photo_worker()
+                photo_vision_run = worker.index.local_vision_run_summary()
             except Exception:
                 pass
 
@@ -1175,6 +1179,7 @@ class JarvisLocalServer:
             "upcoming_calendar_events": upcoming_calendar_events,
             "recurring_usage_patterns": recurring_usage_patterns,
             "important_news": important_news,
+            "photo_vision_run": photo_vision_run,
         }
 
     def proactivity_events(self) -> dict[str, Any]:

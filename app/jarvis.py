@@ -2976,21 +2976,55 @@ _DOMAIN_CLARIFICATION_PHRASES = {
 }
 
 
-def maybe_ask_domain_clarification(llm: LLMClient, memory: Memory, question: str) -> str | None:
+def maybe_ask_domain_clarification(
+    llm: LLMClient,
+    memory: Memory,
+    question: str,
+    *,
+    photo_worker: PhotoBackgroundWorker | None = None,
+    config: dict[str, Any] | None = None,
+) -> str | None:
     """Wird nur aufgerufen, wenn Stufe 1 nichts erkannt hat. Statt die Anfrage
-    stillschweigend in den werkzeuglosen Chat fallen zu lassen, fragt Jarvis aktiv
-    nach, wenn Stufe 2 eine plausible Faehigkeit vermutet - nie eine Vermutung
-    stillschweigend ausfuehren (siehe Leons ausdrueckliche Vorgabe: bei
-    Unsicherheit immer nachfragen, nie raten)."""
+    stillschweigend in den werkzeuglosen Chat fallen zu lassen, prueft Jarvis aktiv,
+    ob Stufe 2 eine plausible Faehigkeit vermutet.
+
+    Siehe plans/2026-08-16-jarvis-stufe2-klassifikation-direkt-beantworten.md: bei
+    GENAU EINER erkannten Domaene wird zuerst versucht, direkt ueber
+    _dispatch_confirmed_domain() zu antworten (denselben Handler, den auch ein
+    echter Stichwort-Treffer ausloesen wuerde) - liefert der eine echte Antwort,
+    wird die zurueckgegeben, keine Rueckfrage noetig. Nur wenn der Handler trotz
+    erkannter Domaene nichts Konkretes liefert (None), oder bei ZWEI erkannten
+    Domaenen (echte Mehrdeutigkeit), fragt Jarvis wie bisher nach - nie eine
+    Vermutung stillschweigend ausfuehren (Leons ausdrueckliche Vorgabe: bei
+    Unsicherheit nachfragen, nie raten)."""
     domains = classify_domain_via_llm(llm, question)
     if not domains:
         return None
 
     try:
         logger = PrivacyLogger(memory.base_path / "logs")
-        logger.log("intent_stage2", "domain_guessed", success=True, domain_count=len(domains))
     except Exception:
-        pass
+        logger = None
+
+    if len(domains) == 1 and bool((config or {}).get("stage2_direct_dispatch_enabled", True)):
+        direct_answer = _dispatch_confirmed_domain(domains[0], question, memory, photo_worker=photo_worker)
+        if direct_answer is not None:
+            if logger is not None:
+                try:
+                    logger.log("intent_stage2", "domain_dispatched_directly", success=True, domain=domains[0])
+                except Exception:
+                    pass
+            return direct_answer
+        # _dispatch_confirmed_domain() konnte trotz erkannter Domaene nichts
+        # Konkretes liefern (Handler gab None zurueck) - faellt bewusst auf die
+        # Rueckfrage unten zurueck statt weiter zu raten oder in generischen Chat
+        # zu fallen.
+
+    if logger is not None:
+        try:
+            logger.log("intent_stage2", "domain_guessed", success=True, domain_count=len(domains))
+        except Exception:
+            pass
 
     settings = memory.get("settings") or {}
     settings["pending_domain_clarification"] = {"domains": domains, "question": question}
@@ -6540,12 +6574,17 @@ def answer_message(
         return _result(music_answer, mail_followup=False)
 
     # Stufe 2 der Absichtserkennung (siehe plans/2026-08-08-jarvis-intelligenz-
-    # verbessern.md): keiner der obigen Stichwort-Treffer (auch nicht fuzzy) hat
-    # gegriffen - statt stillschweigend in den werkzeuglosen Chat zu fallen, fragt
-    # Jarvis aktiv nach, falls eine kurze Modell-Klassifikation eine Faehigkeit fuer
-    # plausibel haelt. Findet die Klassifikation nichts, faellt der Code normal
+    # verbessern.md, erweitert um plans/2026-08-16-jarvis-stufe2-klassifikation-
+    # direkt-beantworten.md): keiner der obigen Stichwort-Treffer (auch nicht
+    # fuzzy) hat gegriffen. Findet die Modell-Klassifikation GENAU EINE plausible
+    # Faehigkeit, antwortet Jarvis jetzt direkt darueber (statt nur nachzufragen),
+    # sofern der zustaendige Handler daraus etwas Konkretes machen kann - sonst,
+    # und bei zwei plausiblen Faehigkeiten (echte Mehrdeutigkeit), weiterhin eine
+    # Rueckfrage. Findet die Klassifikation gar nichts, faellt der Code normal
     # weiter in den Chat-Zweig unten.
-    domain_clarification = maybe_ask_domain_clarification(llm, memory, question)
+    domain_clarification = maybe_ask_domain_clarification(
+        llm, memory, question, photo_worker=workers.photo_worker, config=config
+    )
     if domain_clarification is not None:
         record_exchange(memory, question, domain_clarification)
         return _result(domain_clarification)

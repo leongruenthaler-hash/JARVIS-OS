@@ -143,6 +143,42 @@ def rule_new_unread_mail(context: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def rule_photo_vision_analysis_completed(context: dict[str, Any]) -> list[dict[str, Any]]:
+    """Siehe plans/2026-08-16-jarvis-proaktive-abschluss-meldung.md - meldet einen
+    abgeschlossenen lokalen Foto-Vision-Lauf, ohne dass der Nutzer aktiv nachfragen
+    muss. Der Zeitstempel im dedup_key (statt eines festen Strings) ist Absicht,
+    siehe rule_calendar_event_starting_soon oben: derselbe Lauf wird nur einmal
+    gemeldet, ein SPAETERER, neuer Abschluss (z.B. der naechste Nacht-Lauf) bekommt
+    einen neuen Key und wird trotzdem gemeldet, statt von der Cooldown-Logik der
+    Engine dauerhaft verschluckt zu werden."""
+    config = context.get("config") or {}
+    if not bool(config.get("proactivity_photo_vision_completion_enabled", True)):
+        return []
+
+    run = context.get("photo_vision_run") or {}
+    if run.get("status") != "completed":
+        return []
+    finished_at = str(run.get("finished_at") or "").strip()
+    if not finished_at:
+        return []
+    analyzed = int(run.get("analyzed") or 0)
+    if analyzed <= 0:
+        return []
+
+    count_phrase = "1 neues Foto" if analyzed == 1 else f"{analyzed} neue Fotos"
+    errors = int(run.get("errors") or 0)
+    error_note = f" ({errors} davon nicht analysierbar)" if errors else ""
+    return [
+        {
+            "priority": "information",
+            "message": f"Ich bin mit der Foto-Analyse durch, {count_phrase} beschrieben{error_note}.",
+            "reason": f"Lokale Foto-Vision-Analyse abgeschlossen um {finished_at}, {analyzed} Foto(s) neu analysiert.",
+            "data": {"analyzed": analyzed, "errors": errors, "finished_at": finished_at},
+            "dedup_key": f"photo_vision_completed:{finished_at}",
+        }
+    ]
+
+
 def rule_calendar_event_starting_soon(context: dict[str, Any]) -> list[dict[str, Any]]:
     config = context.get("config") or {}
     events = context.get("upcoming_calendar_events") or []
@@ -432,6 +468,7 @@ DEFAULT_RULES = (
     ("mail_matches_upcoming_event", rule_mail_matches_upcoming_event),
     ("recurring_usage_pattern", rule_recurring_usage_pattern),
     ("important_news", rule_important_news),
+    ("photo_vision_analysis_completed", rule_photo_vision_analysis_completed),
 )
 
 
