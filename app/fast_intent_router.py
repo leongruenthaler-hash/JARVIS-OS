@@ -120,7 +120,8 @@ class FastIntentRouter:
     # Erinnerungs-Auftrag, der die eigentliche Antwort-Kette (core.answer_message)
     # erreichen muss statt vom Fast-Intent abgefangen zu werden.
     _ACTION_CONTEXT_WORDS = (
-        "termin", "termine", "kalender", "erinnerung", "erinnere", "erinnern",
+        "termin", "termine", "termineintrag", "kalender", "kalendereintrag",
+        "erinnerung", "erinnere", "erinnern",
         "notiz", "notizen", "aufgabe", "aufgaben", "eintragen", "trage ein",
         "trag ein", "plane", "planen", "verschiebe", "verschieben", "lösche",
         "loesche",
@@ -128,6 +129,13 @@ class FastIntentRouter:
 
     def _looks_like_time_query(self, text: str) -> bool:
         if has_domain_fuzzy(text, self._ACTION_CONTEXT_WORDS):
+            return False
+        # "trag ein" oben deckt nur die exakte Zweiwort-Phrase ab - "trag DAS
+        # BITTE ein" (dazwischenliegende Fuellwoerter, ganz normale deutsche
+        # Wortstellung) fiel durch und ein Kalender-Erstell-Satz mit Uhrzeit
+        # landete dann faelschlich hier. Live beobachtet 2026-08-19: "Ich hab
+        # heute um 9 Uhr Zahnarzt, trag das bitte ein." -> "Es ist jetzt ... Uhr."
+        if re.search(r"\btrag\w*\b(?:\s+\w+){1,4}\s+ein\b", text):
             return False
         return has_domain_fuzzy(text, ("wie spaet", "uhrzeit", "uhr"))
 

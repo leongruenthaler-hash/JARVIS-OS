@@ -713,6 +713,25 @@ QUESTION_SHAPE_PREFIXES = (
     "wird ", "werden ", "gibt es",
 )
 
+# Imperativ-Verben, mit denen ein VOLLSTAENDIG NEUER, eigenstaendiger Befehl an
+# Jarvis typischerweise beginnt - anders als handle_pending_action_flow()s
+# eigene "explicit_new_command"-Liste (Zeile ~3585) wird das hier per
+# startswith() auf den SATZANFANG geprueft (nicht "irgendwo im Satz"), weil
+# reiner Notiz-INHALT diese Woerter durchaus enthalten darf, nur eben nicht als
+# erstes Wort. Ohne diese Liste hatte handle_pending_note_flow() nur den engeren
+# QUESTION_SHAPE_PREFIXES-Schutz und ein Nachfolgesatz wie "Zeig mir die Notiz
+# Urlaubsplanung." wurde als Titel einer laengst unabhaengigen offenen
+# Notiz-Rueckfrage uebernommen - live beobachtet 2026-08-19 in einem
+# 2266-Saetze-Testdurchlauf: mehrere komplett unabhaengige Test-Saetze wurden
+# so als Titel/Inhalt echter, ungewollter Notizen gespeichert.
+COMMAND_SHAPE_PREFIXES = (
+    "zeig ", "zeige ", "öffne ", "oeffne ", "erstelle ", "erstell ", "lösche ", "loesche ",
+    "lösch ", "loesch ", "spiel ", "spiele ", "ruf ", "rufe ", "suche ", "such ", "finde ",
+    "starte ", "kopiere ", "verschiebe ", "verschieb ", "pausier", "mach ", "mache ",
+    "schau ", "guck ", "lies ", "lese ", "trag ", "trage ", "sag ", "sag,", "sag mal",
+    "ergänze ", "ergaenze ", "füge ", "fuege ", "streich ", "entferne ", "vergiss ",
+)
+
 
 # Fuellwoerter, die ein Mensch beim Sprechen natuerlicherweise einstreut
 # ("Was steht EIGENTLICH auf..."), die aber eng gefasste Trigger-Phrasen wie
@@ -856,6 +875,21 @@ DOMAIN_TERMS = {
         "wiedergabe",
         "abspielen",
         "song spielen",
+        # Reine Status-Fragen ohne das Wort "Musik" fielen bisher komplett aus
+        # has_domain() heraus, obwohl handle_music_command() dafuer laengst einen
+        # echten now_playing()-Pfad hat (Zeile ~6484) - der wurde nie erreicht,
+        # weil das has_domain()-Gate schon vorher mit None aussteigt. Landete
+        # dann im werkzeuglosen Chat, der eine komplett erfundene Antwort gab.
+        # Live beobachtet 2026-08-19: "Was läuft gerade?" -> "Aktuell läuft auf
+        # ProSieben eine Reality-Show ...".
+        "was läuft",
+        "was laeuft",
+        "läuft gerade",
+        "laeuft gerade",
+        "aktueller titel",
+        "aktuelle musik",
+        "was wird gerade gespielt",
+        "was spielt gerade",
     ),
     "contacts": (
         "kontakt",
@@ -868,6 +902,16 @@ DOMAIN_TERMS = {
         "rufe",
         "telefonier",
         "telefoniere",
+        # "Wie ist die Nummer von X?" enthaelt keinen anderen Kontakte-Begriff
+        # und fiel deshalb komplett aus has_domain() heraus - landete dann nicht
+        # im echten find_contacts()-Lookup (handle_contact_command), sondern im
+        # werkzeuglosen Chat, der eine erfundene, aber plausibel klingende Nummer
+        # ausgab statt "nicht gefunden". Live beobachtet 2026-08-19: dieselbe
+        # erfundene Nummer "+49 30 12345678" tauchte bei mehreren komplett
+        # unterschiedlichen, nicht existierenden Namen identisch wieder auf.
+        # Mehrwort-Phrase (nicht blosses "nummer"), um keine Kollision mit
+        # Haus-/Konto-/Rechnungsnummer o.ae. zu riskieren.
+        "nummer von",
     ),
     "tasks": (
         "aufgabe",
@@ -2609,6 +2653,7 @@ def summarize_mail_digest_via_llm(
     digest: str,
     message_count: int,
     time_hint: str = "",
+    user_question: str = "",
 ) -> str | None:
     """Wandelt einen rohen Mail-Digest (build_mail_summary_digest()) in eine
     kurze, thematisch gebündelte, menschlich klingende Zusammenfassung um -
@@ -2620,7 +2665,16 @@ def summarize_mail_digest_via_llm(
     dieselbe Qualität wie hier soll jetzt an beiden Stellen gelten.
     Gibt None zurueck, wenn die LLM-Antwort leer/unbrauchbar war, damit der
     Aufrufer auf eine mechanische Zusammenfassung zurueckfallen kann, statt
-    ganz ohne Mail-Update dazustehen."""
+    ganz ohne Mail-Update dazustehen.
+
+    `user_question` (optional, leer beim Hintergrund-Scan) ist die tatsaechliche
+    Nutzeranfrage aus handle_mail_command() - frueher wurde sie hier nie
+    durchgereicht, wodurch JEDE Mail-Formulierung (Absendersuche, "wie viele
+    ungelesene", "sortier nach Wichtigkeit", ...) dieselbe generische
+    Themen-Zusammenfassung bekam, egal was tatsaechlich gefragt war. Live
+    beobachtet 2026-08-19 in einem 2266-Saetze-Testdurchlauf: "Gibt es eine Mail
+    von Julia?" und "Wie viele ungelesene Mails habe ich?" bekamen beide
+    identisch dieselbe 3-Themen-Zusammenfassung ohne jeden Bezug zur Frage."""
     from core.personality_manager import salutation_instruction
 
     address_instruction = salutation_instruction(configured_user_name(), str(CONFIG.get("user_salutation", "sir")))
@@ -2648,19 +2702,34 @@ def summarize_mail_digest_via_llm(
                 "Beispiel für den erwarteten Stil (Format, nicht Inhalt übernehmen): "
                 "\"Drei Themen, Sir: eine Rechnung von Ihrem Stromanbieter über 64 Euro, fällig Ende des Monats, "
                 "außerdem zwei Newsletter, die Sie vermutlich überspringen können, und eine Terminanfrage von "
-                "Julia für nächste Woche, auf die Sie noch antworten sollten.\""
+                "Julia für nächste Woche, auf die Sie noch antworten sollten.\"\n\n"
+                + (
+                    "WICHTIG: Es gibt eine konkrete Frage von Leon (siehe unten). Beantworte GENAU DIESE Frage "
+                    "zuerst und direkt (z.B. ja/nein bei einer Absendersuche, eine konkrete Zahl bei einer "
+                    "Mengenfrage), und ergänze erst danach bei Bedarf kurz Kontext aus der Übersicht. Wenn die "
+                    "Übersicht die Frage nicht eindeutig beantworten kann, sag das ehrlich statt zu raten oder "
+                    "die generische Themen-Zusammenfassung als Ausweichantwort zu geben."
+                    if user_question else
+                    "Es liegt keine konkrete Frage vor - gib die normale Themen-Zusammenfassung."
+                )
             ),
         },
         {
             "role": "user",
             "content": (
-                f"Ich habe {message_count} Mail(s) gelesen. "
+                (f"Meine Frage: \"{user_question}\"\n\n" if user_question else "")
+                + f"Ich habe {message_count} Mail(s) gelesen. "
                 f"{time_hint} "
-                "Bitte gib mir eine natürliche Zusammenfassung nach Themen, als einen einzigen Fließtext-Absatz "
-                "ohne Zeilenumbrüche und ohne Kategorie-Label am Zeilenanfang. "
-                "Nicht jede Mail einzeln, sondern die Kernthemen und was daran wichtig ist. "
-                "Wenn es mehrere ähnliche Nachrichten gibt, fasse sie gemeinsam zusammen:\n\n"
-                f"{digest}"
+                + (
+                    "Bitte beantworte meine obige Frage direkt, als einen einzigen Fließtext-Absatz "
+                    "ohne Zeilenumbrüche und ohne Kategorie-Label am Zeilenanfang:\n\n"
+                    if user_question else
+                    "Bitte gib mir eine natürliche Zusammenfassung nach Themen, als einen einzigen Fließtext-Absatz "
+                    "ohne Zeilenumbrüche und ohne Kategorie-Label am Zeilenanfang. "
+                    "Nicht jede Mail einzeln, sondern die Kernthemen und was daran wichtig ist. "
+                    "Wenn es mehrere ähnliche Nachrichten gibt, fasse sie gemeinsam zusammen:\n\n"
+                )
+                + f"{digest}"
             ),
         },
     ]
@@ -3031,6 +3100,19 @@ def handle_pending_note_flow(memory: Memory, text: str) -> str | None:
     # Titel X und dem Inhalt Y"-Anfrage wurde als Titel-Antwort auf eine laengst
     # ueberholte alte Rueckfrage genommen statt frisch verarbeitet zu werden.
     if has_domain(text, "notes") and extract_note_title(text):
+        settings.pop("pending_note", None)
+        memory.set("settings", settings)
+        return None
+
+    # Ergaenzender Schutz zum obigen Bail-out: der beginnt eine Rueckfrage NUR,
+    # wenn extract_note_title() etwas findet - Saetze wie "Zeig mir die Notiz X"
+    # oder "Lies mir meine letzte Mail vor" haben aber gar keinen extrahierbaren
+    # Notiz-Titel (kein "mit dem Titel..."-Muster) und rutschten deshalb bisher
+    # unbemerkt durch bis zur Zustands-Verarbeitung unten, wo der komplette Satz
+    # als Titel/Inhalt der laengst unabhaengigen alten Rueckfrage gespeichert
+    # wurde. COMMAND_SHAPE_PREFIXES faengt genau diese vollstaendigen,
+    # eigenstaendigen Befehle am Satzanfang ab (siehe deren Kommentar).
+    if normalize_text(text).startswith(COMMAND_SHAPE_PREFIXES):
         settings.pop("pending_note", None)
         memory.set("settings", settings)
         return None
@@ -3450,6 +3532,21 @@ def handle_pending_domain_clarification_flow(
         # nicht raten, stattdessen normal weiterverarbeiten lassen (die Antwort
         # koennte z.B. auch ein komplett neuer, unabhaengiger Satz sein).
         return None
+
+    # Wenn die Antwort selbst schon ein vollstaendiger, eigenstaendiger Satz ist
+    # (nicht nur ein blosses "ja"/"genau"), dann direkt SIE dispatchen statt sie
+    # mit der alten `original_question` zu verknuepfen - sonst "erbt" der naechste,
+    # eigentlich unabhaengige Befehl den Text der laengst beantworteten Rueckfrage.
+    # Live beobachtet 2026-08-19: "Kannst du Rechnung.pdf finden?" -> Rueckfrage
+    # "Meinten Sie Ihre Dateien?" -> naechster, davon unabhaengiger Satz "Suche die
+    # Datei Urlaubsfotos.jpg." durchsuchte faelschlich nach "Rechnung.pdf" aus der
+    # alten Rueckfrage, weil hier bedingungslos mit original_question verknuepft
+    # wurde. Nur echte blosse Bestaetigungen ("ja"/"genau"/...) tragen selbst
+    # keinen Inhalt und brauchen die alte Frage wirklich noch.
+    if normalized not in {"ja", "ja bitte", "ok", "okay", "genau", "richtig", "stimmt"}:
+        direct_answer = _dispatch_confirmed_domain(chosen, text, memory, photo_worker=photo_worker)
+        if direct_answer is not None:
+            return direct_answer
 
     canonical_term = DOMAIN_TERMS.get(chosen, ("",))[0]
     reformulated = f"{canonical_term} {original_question}".strip()
@@ -4237,8 +4334,21 @@ def extract_shopping_items(text: str) -> str:
     return ""
 
 
+_NOTE_TITLE_FILLER = r"(?:bitte|mal|neu|neue|notiz|zettel)"
+
+
 def clean_note_title(text: str) -> str:
-    title = re.sub(r"\b(?:bitte|mal|neu|neue|notiz|zettel)\b", " ", text, flags=re.IGNORECASE)
+    # Nur am Anfang/Ende der erfassten Titel-Gruppe strippen, nicht ueberall im
+    # Text - vorher wurde z.B. "notiz" auch aus der MITTE eines Titels entfernt,
+    # der das Wort legitim enthielt. Live beobachtet 2026-08-19: "Erstelle eine
+    # Notiz mit dem Titel 'Wichtige Notiz fuer Team'" wurde zu "Wichtige fuer
+    # Team" gespeichert - und der passende Loesch-Befehl mit dem urspruenglichen
+    # Titel fand die Notiz danach nicht mehr wieder. Diese Fuellwoerter leaken
+    # aus dem Befehlsrahmen realistischerweise nur an den Raendern der erfassten
+    # Gruppe herein, nie in der Mitte eines gewollten Titels.
+    title = text.strip()
+    title = re.sub(rf"^(?:{_NOTE_TITLE_FILLER}\s+)+", "", title, flags=re.IGNORECASE)
+    title = re.sub(rf"(?:\s+{_NOTE_TITLE_FILLER})+$", "", title, flags=re.IGNORECASE)
     title = re.sub(r"\s+", " ", title)
     return title.strip(" .,!?:;") or "Neue Notiz"
 
@@ -4707,6 +4817,43 @@ def execute_mail_document_export(data: dict) -> str:
 ACTION_ENGINE.register("mail_document_export", execute_mail_document_export)
 
 
+_MAIL_SENDER_SEARCH_HINTS = (
+    "gibt es", "ist eine", "stand in", "durchsuch", "hat sich", "hat mir",
+    "hat ihnen", "hat dir", "geantwortet", "gemeldet",
+)
+
+
+def _extract_mail_sender_query(text: str) -> str | None:
+    """Erkennt einen Absendernamen in einer Such-/Existenzfrage ("Gibt es eine
+    Mail von Julia?", "Hat sich der Chef schon gemeldet?", "Durchsuch mein
+    Postfach nach Julia."), damit handle_mail_command() gezielt in den bereits
+    geladenen `messages` filtern kann, statt jede Formulierung blind an die
+    generische Themen-Zusammenfassung durchzureichen."""
+    normalized = normalize_text(text)
+    if not any(hint in normalized for hint in _MAIL_SENDER_SEARCH_HINTS):
+        return None
+
+    match = re.search(r"\bvon\s+(?:dem\s+|der\s+|einem\s+|einer\s+)?(.+?)(?:[.?!]|$)", text, flags=re.IGNORECASE)
+    if match:
+        name = match.group(1).strip(" .,!?:;\"'")
+        if name and normalize_text(name) not in {"mir", "ihnen", "dir", "uns"}:
+            return name
+
+    match = re.search(r"hat\s+(?:sich\s+)?(.+?)\s+(?:mir\s+|ihnen\s+|dir\s+)?(?:schon\s+)?(?:gemeldet|geantwortet)", text, flags=re.IGNORECASE)
+    if match:
+        name = match.group(1).strip(" .,!?:;\"'")
+        if name:
+            return name
+
+    match = re.search(r"durchsuch\w*.*?\bnach\s+(.+?)[.?!]*$", text, flags=re.IGNORECASE)
+    if match:
+        name = match.group(1).strip(" .,!?:;\"'")
+        if name:
+            return name
+
+    return None
+
+
 def handle_mail_command(
     llm: LLMClient,
     text: str,
@@ -4931,6 +5078,43 @@ def handle_mail_command(
             "aber die Betreffzeilen sind gerade auf Tauchgang."
         )
 
+    # Deterministische Kurzschluesse fuer Fragen, die eine konkrete Antwort statt
+    # einer Themen-Zusammenfassung brauchen. Vorher liefen ALLE Mail-Formulierungen
+    # (Absendersuche, Mengenfrage, Sortierwunsch, ...) blind in dieselbe generische
+    # LLM-Zusammenfassung, egal was gefragt war - live beobachtet 2026-08-19 in
+    # einem 2266-Saetze-Testdurchlauf: "Wie viele ungelesene Mails habe ich?" und
+    # "Gibt es eine Mail von Julia?" bekamen beide dieselbe unbezogene Antwort.
+    if any(term in normalized for term in ("wie viele", "anzahl")):
+        try:
+            unread = unread_inbox_count(account_name=target_account, mailbox_name=target_mailbox)
+        except MailAccessError as exc:
+            return str(exc)
+        except Exception as exc:
+            print("Apple-Mail Anzahl Fehler:", type(exc).__name__)
+            unread = None
+        if "ungelesen" in normalized and unread is not None:
+            return f"Sie haben {unread} ungelesene Mail(s) in {target_account} {target_mailbox}, Sir."
+        if unread is not None:
+            return (
+                f"In {target_account} {target_mailbox} sind {unread} ungelesene Mail(s). "
+                f"Ich habe mir die letzten {len(messages)} Nachrichten insgesamt angesehen."
+            )
+
+    sender_query = _extract_mail_sender_query(text)
+    if sender_query:
+        normalized_query = normalize_text(sender_query)
+        sender_matches = [m for m in messages if normalized_query in normalize_text(m.sender or "")]
+        if sender_matches:
+            subjects = "; ".join(m.subject for m in sender_matches[:3] if m.subject)
+            return (
+                f"Ja, ich sehe {len(sender_matches)} Mail(s) von {sender_query} unter den letzten "
+                f"{len(messages)} Nachrichten: {subjects}."
+            )
+        return (
+            f"Unter den letzten {len(messages)} Nachrichten in {target_account} {target_mailbox} "
+            f"sehe ich keine Mail von {sender_query}."
+        )
+
     settings = memory.get("settings") or {}
     settings["last_mail_summary"] = {
         "account": target_account,
@@ -4952,7 +5136,7 @@ def handle_mail_command(
 
     mail_briefing = build_mail_summary_digest(messages, account_name=target_account, mailbox_name=target_mailbox)
 
-    summary = summarize_mail_digest_via_llm(llm, mail_briefing, len(messages), time_hint=time_hint)
+    summary = summarize_mail_digest_via_llm(llm, mail_briefing, len(messages), time_hint=time_hint, user_question=text)
     if summary is None:
         return "Ich habe Mails gefunden, aber daraus gerade keine saubere Zusammenfassung bauen können."
     return summary
@@ -6464,9 +6648,21 @@ def execute_promised_action_if_possible(
     return None
 
 
+_MUSIC_PLAY_REQUEST_RE = re.compile(r"\b(?:spiel|spiele)\b.*\b(?:von|an)\b", re.IGNORECASE)
+
+
 def handle_music_command(text: str) -> str | None:
     normalized = normalize_text(text)
-    if not has_domain(text, "music"):
+    # "Spiel <Songtitel> von <Interpret>" enthaelt oft kein einziges Wort aus
+    # DOMAIN_TERMS["music"] (Songtitel/Interpreten lassen sich nicht als feste
+    # Stichwortliste pflegen) und fiel deshalb komplett aus has_domain() heraus -
+    # landete im werkzeuglosen Chat, der frei erfand, die Wiedergabe laeuft schon.
+    # Live beobachtet 2026-08-19: "Spiel Bohemian Rhapsody von Queen." ->
+    # "Verstanden, Sir. 'Bohemian Rhapsody' läuft gerade." ohne dass Apple Music
+    # je angesprochen wurde. Eng gefasst (braucht "spiel(e)" UND "von"/"an" im
+    # selben Satz), um nicht mit "spielen" im Alltagssinn zu kollidieren.
+    looks_like_play_request = bool(_MUSIC_PLAY_REQUEST_RE.search(normalized))
+    if not has_domain(text, "music") and not looks_like_play_request:
         return None
 
     if not MUSIC_ENABLED:
