@@ -952,7 +952,7 @@ def extract_folder_name_from_command(text: str, root_hint: str | None = None) ->
             break
 
     cleaned = re.sub(
-        r"\b(?:bitte|mal|mir|einen|eine|neuen|neue|ordner|folder|erstelle|erstell|mach|mache|leg|lege|auf|am|in|unter|bei|meinem|meinen|meiner)\b",
+        r"\b(?:bitte|mal|mir|einen|eine|neuen|neue|ordner|folder|erstelle|erstell|mach|mache|leg|lege|auf|am|in|unter|bei|meinem|meinen|meiner|namens)\b",
         " ",
         cleaned,
         flags=re.IGNORECASE,
@@ -1015,7 +1015,7 @@ def extract_bulk_file_move(text: str) -> tuple[str, str] | None:
         return None
 
     target_match = re.search(
-        r"(?:in|nach|zu)\s+(?:den\s+|dem\s+|der\s+)?(?:ordner\s+)?(.+?)(?:\s+(?:auf|am|in|unter)\s+(?:meinem\s+|meinen\s+|meiner\s+)?(?:desktop|schreibtisch|dokumente|documents|downloads|download|home|benutzerordner|dateien|alle dateien|allen dateien|jarvis|projekt|code))?[.?!]*$",
+        r"(?:in|nach|zu)\s+(?:den\s+|dem\s+|der\s+)?(?:ordner\s+)?(.+?)(?:\s+(?:auf|am|in|unter)\s+(?:meinem\s+|meinen\s+|meiner\s+|dem\s+|der\s+)?(?:desktop|schreibtisch|dokumente|documents|downloads|download|home|benutzerordner|dateien|alle dateien|allen dateien|jarvis|projekt|code))?[.?!]*$",
         cleaned,
         flags=re.IGNORECASE,
     )
@@ -4043,11 +4043,52 @@ def handle_tasks_command(memory: Memory, text: str) -> str | None:
     Reminders) ueberhaupt keinen per Chat erreichbaren Lese-Pfad - eine Frage wie
     "was habe ich fuer offene Aufgaben" fiel komplett durch die Domaenen-Kette und
     landete im werkzeuglosen Chat, der dann frei erfundene, nicht mit den echten
-    (leeren oder gefuellten) Aufgaben uebereinstimmende Antworten gab. Rein lesend -
-    Aufgaben werden weiterhin nur ueber die App-Oberflaeche oder explizite
-    Backend-Aufrufe angelegt/geaendert, nicht ueber diesen Chat-Pfad."""
+    (leeren oder gefuellten) Aufgaben uebereinstimmende Antworten gab. Erstellen
+    ueber "Erstelle eine Aufgabe: X" ist seit 2026-08-19 ebenfalls angebunden -
+    TaskManager.create_task() existierte laut eigenem Docstring genau dafuer,
+    war aber nie verdrahtet."""
     if not has_domain(text, "tasks"):
         return None
+
+    # Erstell-Anfragen ("Erstelle eine Aufgabe: X") fielen bisher bis zur
+    # obigen Lese-Logik durch und bekamen faelschlich die leere/gefuellte
+    # Status-Antwort ("Sie haben aktuell keine offenen Aufgaben.") statt einer
+    # Rueckmeldung zur eigentlich gewuenschten Erstellung - obwohl
+    # TaskManager.create_task() laut eigenem Docstring genau fuer diesen Zweck
+    # gebaut wurde ("nur fuer explizite Nutzeranfragen"), war es nie an den
+    # Chat-Pfad angebunden. Live beobachtet 2026-08-19.
+    create_match = re.search(
+        r"(?:erstelle|erstell|lege|leg|neue)\s+(?:mir\s+)?(?:eine\s+)?aufgabe\s*:?\s*(?:namens\s+)?(.+?)[.?!]*$",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if create_match:
+        title = create_match.group(1).strip(" .,!?:;\"'")
+        title = re.sub(r"^(?:an|dass)\s+", "", title, flags=re.IGNORECASE)
+        if not title:
+            return "Wie soll die Aufgabe heißen?"
+        TaskManager(memory).create_task(title, source="chat")
+        return f"Erledigt. Aufgabe {title} steht."
+
+    # Gleiches Loesch-Defizit wie zuvor bei Notizen/Kalender behoben: ohne
+    # diesen Zweig fiel "Lösche die Aufgabe X" bis zur Lese-Logik unten durch
+    # und listete stattdessen alle offenen Aufgaben auf.
+    delete_match = re.search(
+        r"(?:lösche|loesche|entferne)\s+(?:die\s+)?aufgabe\s*:?\s*(.+?)[.?!]*$",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if delete_match:
+        title = delete_match.group(1).strip(" .,!?:;\"'")
+        manager = TaskManager(memory)
+        match = next(
+            (task for task in manager.list_tasks() if normalize_text(str(task.get("title") or "")) == normalize_text(title)),
+            None,
+        )
+        if not match:
+            return f"Ich habe keine Aufgabe mit dem Titel „{title}“ gefunden."
+        manager.delete_task(str(match.get("id")))
+        return f"Erledigt. Aufgabe {title} gelöscht."
 
     tasks = TaskManager(memory).list_tasks(status="offen") + TaskManager(memory).list_tasks(status="in_arbeit")
     if not tasks:
@@ -5614,7 +5655,7 @@ def handle_desktop_command(text: str, memory: Memory | None = None) -> str | Non
             )
 
         move_match = re.search(
-            r"(?:verschieb|verschiebe|pack|packe|leg|lege)\s+(.+?)\s+(?:in|nach|zu)\s+(?:den\s+|dem\s+|der\s+)?(?:ordner\s+)?(.+?)(?:\s+(?:auf|am|in)\s+(?:meinem\s+|meinen\s+)?(?:desktop|schreibtisch))?[.?!]*$",
+            r"(?:verschieb|verschiebe|pack|packe|leg|lege)\s+(.+?)\s+(?:in|nach|zu)\s+(?:den\s+|dem\s+|der\s+)?(?:ordner\s+)?(.+?)(?:\s+(?:auf|am|in)\s+(?:meinem\s+|meinen\s+|dem\s+|der\s+)?(?:desktop|schreibtisch))?[.?!]*$",
             text,
             flags=re.IGNORECASE,
         )
@@ -5655,7 +5696,7 @@ def handle_desktop_command(text: str, memory: Memory | None = None) -> str | Non
             return create_desktop_folder(folder_name)
 
         search_match = re.search(
-            r"(?:such|suche|finde|zeig|zeige).*(?:auf|am|in)\s+(?:meinem\s+|meinen\s+)?(?:desktop|schreibtisch)\s+(?:nach\s+)?(.+?)[.?!]*$",
+            r"(?:such|suche|finde|zeig|zeige).*(?:auf|am|in)\s+(?:meinem\s+|meinen\s+|dem\s+|der\s+)?(?:desktop|schreibtisch)\s+(?:nach\s+)?(.+?)[.?!]*$",
             text,
             flags=re.IGNORECASE,
         )
