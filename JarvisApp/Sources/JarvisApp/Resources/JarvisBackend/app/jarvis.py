@@ -174,6 +174,34 @@ MAIL_ENABLED = bool(CONFIG.get("mail_enabled", True))
 MAIL_MAX_MESSAGES = int(CONFIG.get("mail_max_messages", 8))
 MAIL_INBOX_ACCOUNT = CONFIG.get("mail_inbox_account")
 MAIL_INBOX_MAILBOX = CONFIG.get("mail_inbox_mailbox")
+_RESOLVED_MAIL_INBOX: tuple[str, str] | None = None
+
+
+def resolve_mail_inbox() -> tuple[str, str]:
+    """Liefert (account_name, mailbox_name) fuer das Haupt-Postfach. Faellt auf
+    Auto-Erkennung zurueck (erste Mailbox namens "INBOX", ueber alle Accounts),
+    wenn mail_inbox_account/mail_inbox_mailbox in der Config leer sind - das ist
+    genau der Standard in config.beta-template.json fuer frische Installationen.
+    Ohne diese Auto-Erkennung blieben Mail-Status, Mail-Zusammenfassung und die
+    Mail-Loesch-/Export-Befehle fuer JEDEN frischen Tester dauerhaft funktionslos,
+    obwohl Mail.app korrekt verbunden ist - live beobachtet 2026-08-18:
+    check_mail_status() meldete "iCloud INBOX macht Verstecken", obwohl die
+    iCloud-INBOX mit 370 Nachrichten nachweislich vorhanden war. Ergebnis wird
+    zwischengespeichert, damit nicht jede Mail-Anfrage erneut alle Mailboxen
+    abfragt."""
+    global _RESOLVED_MAIL_INBOX
+    if MAIL_INBOX_ACCOUNT and MAIL_INBOX_MAILBOX:
+        return MAIL_INBOX_ACCOUNT, MAIL_INBOX_MAILBOX
+    if _RESOLVED_MAIL_INBOX is not None:
+        return _RESOLVED_MAIL_INBOX
+    try:
+        for mailbox in list_mailboxes(max_mailboxes=50):
+            if mailbox.mailbox.strip().lower() == "inbox":
+                _RESOLVED_MAIL_INBOX = (mailbox.account, mailbox.mailbox)
+                return _RESOLVED_MAIL_INBOX
+    except Exception:
+        pass
+    return MAIL_INBOX_ACCOUNT, MAIL_INBOX_MAILBOX
 MUSIC_ENABLED = bool(CONFIG.get("music_enabled", True))
 CONTACTS_ENABLED = bool(CONFIG.get("contacts_enabled", True))
 NOTES_ENABLED = bool(CONFIG.get("notes_enabled", True))
@@ -425,11 +453,18 @@ def remove_wake_word(text: str) -> tuple[bool, str]:
         }
     )
 
-    words = re.findall(r"[\wäöüÄÖÜß]+", text, flags=re.UNICODE)
+    # Ueber Spans auf dem Original-Text arbeiten statt ueber re.findall() + " ".join():
+    # Letzteres zerlegt in reine Wort-Tokens und verliert dabei jede Interpunktion
+    # aus dem Rest des Satzes (z.B. wird aus "19:00 Uhr" "19 00 Uhr" - der
+    # Doppelpunkt verschwindet), was nachgelagerte Uhrzeit-/Datums-Regexe wie
+    # _extract_time() in mail_calendar_actions.py falsch parsen laesst. Live-Bug:
+    # "Jarvis erstell mir heute einen Termin um 19:00 Uhr telefonieren" wurde zu
+    # einem Termin um 00:00 Uhr.
+    matches = list(re.finditer(r"[\wäöüÄÖÜß]+", text, flags=re.UNICODE))
     found_index: int | None = None
 
-    for index, word in enumerate(words):
-        normalized_word = normalize_text(word)
+    for index, match in enumerate(matches):
+        normalized_word = normalize_text(match.group(0))
         if normalized_word in aliases or _looks_like_wake_word(normalized_word):
             found_index = index
             break
@@ -437,12 +472,14 @@ def remove_wake_word(text: str) -> tuple[bool, str]:
     if found_index is None:
         return False, text.strip(" ,.!?;:")
 
-    before_words = words[:found_index]
-    if before_words and normalize_text(before_words[-1]) in {"hallo", "hey", "hi"}:
-        before_words = before_words[:-1]
+    remove_from_index = found_index
+    if found_index > 0 and normalize_text(matches[found_index - 1].group(0)) in {"hallo", "hey", "hi"}:
+        remove_from_index = found_index - 1
 
-    remaining_words = before_words + words[found_index + 1 :]
-    cleaned = " ".join(remaining_words).strip(" ,.!?;:")
+    start = matches[remove_from_index].start()
+    end = matches[found_index].end()
+    cleaned = text[:start] + text[end:]
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned).strip(" ,.!?;:")
     if normalize_text(cleaned) in {"hallo", "hey", "hi"}:
         cleaned = ""
 
@@ -606,6 +643,14 @@ def route_fast_intent(question: str) -> str | None:
 
     if decision.intent == "model_status":
         return ModelManager(CONFIG).status_text()
+
+    if decision.intent == "user_identity":
+        name = configured_user_name()
+        fresh = _fresh_profile_config()
+        salutation = str(fresh.get("user_salutation") or "sir").strip().lower()
+        if salutation == "none":
+            return f"Du heißt {name}."
+        return f"Sie heißen {name}, {configured_user_address()}."
 
     if decision.intent == "status":
         return f"Alles läuft, {configured_user_address()}."
@@ -781,7 +826,20 @@ DOMAIN_TERMS = {
         "apple music",
         "lied",
         "song",
-        "titel",
+        # "titel" bewusst NICHT als bloßes Einzelwort hier (wie schon bei
+        # "nachricht"/mail weiter oben begruendet) - "Titel" ist im Alltagsdeutsch
+        # genauso der Titel einer Notiz/eines Dokuments wie ein Musiktitel. Ein
+        # einzelnes Wort haette z.B. "Notiz mit dem Titel X" faelschlich als
+        # Zwei-Domaenen-Satz (notes+music) erkannt und in einen kaputten
+        # Mehrschritt-Auftrag aufgeteilt, der den eigentlichen Titel verlor. Live
+        # beobachtet 2026-08-18. Stattdessen nur die spezifischeren, eindeutig
+        # musikbezogenen Mehrwort-Phrasen.
+        "naechster titel",
+        "nächster titel",
+        "titel wechseln",
+        "titel ueberspringen",
+        "titel überspringen",
+        "welcher titel",
         "playlist",
         "wiedergabe",
         "abspielen",
@@ -2255,6 +2313,46 @@ def strip_first_name_address(answer: str, creator_name: str) -> str:
     return re.sub(r"[ \t]{2,}", " ", cleaned).strip()
 
 
+_INVENTED_FORMAL_NAME = re.compile(
+    r"(?:Herr|Frau|Herrn)\s+[A-ZÄÖÜ][\wäöüß]*(?:\s+[A-ZÄÖÜ][\wäöüß]*)?",
+    flags=re.UNICODE,
+)
+
+
+def strip_invented_formal_address(answer: str, address: str) -> str:
+    """Deterministischer Rueckhalt dagegen, dass das kleine lokale Modell
+    (phi4-mini) sich einen Nachnamen ausdenkt und Leon damit anspricht (z.B.
+    "..., Herr Müller."), obwohl im Profil (config.json: creator_name/
+    user_salutation) nur Vorname + Anrede hinterlegt sind, kein Nachname.
+    Live beobachtet 2026-08-18. Leons Vorgabe: Jarvis darf ihn nie anders
+    nennen als in den Einstellungen (Vorname oder konfigurierte Anrede).
+    Wie strip_first_name_address() bewusst nur auf den typischen
+    Anrede-Fall beschraenkt (", Herr X!"/", Herr X."/", Herr X," oder
+    "Herr X, " am Satzanfang), nicht auf jedes Vorkommen von "Herr/Frau X"
+    im Text - eine legitime Erwaehnung eines Kontakts aus Mail/Kalender/
+    Notizen ("Ihr Meeting mit Herrn Schmidt") soll dadurch nicht beschaedigt
+    werden."""
+    if not answer:
+        return answer
+
+    def _replace_trailing(match: "re.Match[str]") -> str:
+        trailing = match.group(1)
+        return trailing if trailing in {"!", "."} else ""
+
+    pattern = re.compile(
+        rf",\s*{_INVENTED_FORMAL_NAME.pattern}\s*([!.,]|$)",
+        flags=re.UNICODE,
+    )
+    cleaned = pattern.sub(_replace_trailing, answer)
+    cleaned = re.sub(
+        rf"^{_INVENTED_FORMAL_NAME.pattern}\s*[,:]\s*",
+        f"{address}, ",
+        cleaned,
+        flags=re.UNICODE,
+    )
+    return re.sub(r"[ \t]{2,}", " ", cleaned).strip()
+
+
 def clean_ai_answer(answer: str) -> str:
     answer = clean_spoken_answer(answer)
     lowered = answer.lower()
@@ -2815,6 +2913,36 @@ def handle_memory_command(memory: Memory, text: str) -> str | None:
             return f"Erledigt, ich habe mir das nicht mehr gemerkt: {content}"
         return "Das konnte ich nicht mehr finden - vielleicht war es schon weg."
 
+    # Freies "vergiss/lösche/entferne <Beschreibung>" (im Unterschied zum obigen
+    # Block, der nur "vergiss Nummer X" aus einer zuvor gezeigten Liste abdeckt).
+    # Frueher lief dieses Muster ausschliesslich still im Hintergrund ueber
+    # auto_update_memory() mit, das zwar tatsaechlich den passenden Fakt loeschte,
+    # aber KEINE Rueckmeldung gab - der Nutzer sah stattdessen die unpassende
+    # Antwort des allgemeinen Chat-Pfads, wodurch das Loeschen unsichtbar blieb.
+    # Live beobachtet 2026-08-18. Hier vor den allgemeinen Chat-Pfad gezogen, damit
+    # der Nutzer eine klare Bestaetigung bekommt.
+    forget_free_text_match = re.match(
+        r"^(?:vergiss|lösche|loesche|streich|entferne)\s+(?:bitte\s+)?(?:dass\s+)?(.+)$",
+        lowered,
+        flags=re.IGNORECASE,
+    )
+    # Nicht abfangen, wenn der Satz eigentlich zu einer anderen Domaene gehoert
+    # ("lösche die Mail von X", "vergiss die Erinnerung ans Zahnarzt" -> Termin/
+    # Reminders-App, nicht Gedaechtnis-Fakt) - "erinnerung" ist im Deutschen fuer
+    # beides ueberladen (Erinnerung=Gedaechtnis UND Erinnerung=Reminder-App-Eintrag).
+    # In diesen Faellen None zurueckgeben, damit die eigentlich zustaendige
+    # Domaenen-Logik weiter unten in der Kette zum Zug kommt.
+    forget_other_domain = forget_free_text_match and any(
+        has_domain(text, domain) for domain in ("calendar", "mail", "photos", "files", "notes", "tasks")
+    )
+    if forget_free_text_match and not forget_other_domain:
+        query = forget_free_text_match.group(1).strip()
+        removed = memory_system.maybe_forget(query)
+        if removed:
+            plural = "e" if removed != 1 else ""
+            return f"Erledigt, ich habe {removed} passende Erinnerung{plural} nicht mehr gespeichert."
+        return "Dazu habe ich nichts Passendes gefunden, das ich vergessen könnte."
+
     remember_patterns = [
         r"^(?:merk dir|merke dir|erinnere dich daran),?\s*(?:dass\s+)?(.+)$",
         r"^(?:speicher|speichere),?\s*(?:dass\s+)?(.+)$",
@@ -2870,6 +2998,19 @@ def handle_pending_note_flow(memory: Memory, text: str) -> str | None:
         settings.pop("pending_note", None)
         memory.set("settings", settings)
         return "Alles klar, ich habe die offene Notiz verworfen."
+
+    # Neue, eigenstaendige Notiz-Anfrage waehrend eine alte Notiz-Rueckfrage noch
+    # offen war: nicht als Titel/Inhalt der alten Notiz uebernehmen, sondern die
+    # alte verwerfen und frisch neu parsen lassen (return None laesst die
+    # Handler-Kette bis zu handle_notes_command weiterlaufen). Gleiches Muster wie
+    # der analoge Kalender-Bug in handle_pending_action_flow() (siehe dort). Live
+    # beobachtet 2026-08-18: eine vollstaendige neue "erstelle eine Notiz mit dem
+    # Titel X und dem Inhalt Y"-Anfrage wurde als Titel-Antwort auf eine laengst
+    # ueberholte alte Rueckfrage genommen statt frisch verarbeitet zu werden.
+    if has_domain(text, "notes") and extract_note_title(text):
+        settings.pop("pending_note", None)
+        memory.set("settings", settings)
+        return None
 
     state = pending.get("state")
     title = str(pending.get("title") or "").strip()
@@ -3459,6 +3600,20 @@ def handle_pending_action_flow(
 
     pending_calendar_create = settings.get("pending_calendar_create")
     if isinstance(pending_calendar_create, dict):
+        if not is_confirm and not is_cancel and has_domain(text, "calendar"):
+            # Neue, eigenstaendige Kalender-/Erinnerungs-Anfrage waehrend noch eine
+            # alte Bestaetigung offen war: nicht pauschal mit "ich warte noch"
+            # abweisen, sondern die alte (moeglicherweise laengst ueberholte)
+            # Anfrage verwerfen und die neue frisch durchlaufen lassen. Sonst
+            # bestaetigt ein spaeteres "Ja" versehentlich die alte, ggf. falsch
+            # geparste Anfrage statt der neuen. Live beobachtet 2026-08-18: Leon
+            # stellte nach einem fehlgeschlagenen Versuch ("...19:00 Uhr..." wurde
+            # zu 00:00 geparst, siehe _extract_time-Fix in mail_calendar_actions.py)
+            # eine neue, korrekte Anfrage - die wurde ignoriert, und "Ja" hat
+            # stattdessen den alten 00:00-Eintrag angelegt.
+            settings.pop("pending_calendar_create", None)
+            memory.set("settings", settings)
+            return None
         result = ACTION_ENGINE.resolve(
             memory,
             "pending_calendar_create",
@@ -3885,7 +4040,12 @@ def wants_append_to_note(text: str) -> bool:
 
 def extract_note_title(text: str) -> str:
     patterns = (
-        r"(?:notiz|zettel)\s+(?:mit\s+)?(?:der\s+)?(?:überschrift|ueberschrift|titel)\s+(.+?)(?:\s+(?:und|mit|inhalt|rein|dazu)\s+|$)",
+        # "dem Titel" ist die grammatisch korrekte Form (Titel ist maskulin, Dativ
+        # "dem" nicht "der") - "der" alleine als einzige Alternative liess die
+        # natuerliche, korrekte Formulierung "mit dem Titel X" durchfallen. Live
+        # beobachtet 2026-08-18: "erstelle eine Notiz mit dem Titel X und dem
+        # Inhalt Y" fragte trotzdem "Wie soll die Notiz heißen?".
+        r"(?:notiz|zettel)\s+(?:mit\s+)?(?:der|dem)?\s*(?:überschrift|ueberschrift|titel)\s+(.+?)(?:\s+(?:und|mit|inhalt|rein|dazu)\s+|$)",
         r"(?:neue\s+notiz|notiz)\s+(?:namens|heißt|heisst)\s+(.+?)(?:\s+(?:mit|und|inhalt|rein)\s+|$)",
         r"(?:in|zur|zu der|auf den|auf die)\s+(?:notiz\s+)?(.+?)\s+(?:hinzufügen|hinzufuegen|ergänzen|ergaenzen|schreiben|setzen|packen)",
     )
@@ -3905,7 +4065,12 @@ def extract_note_title(text: str) -> str:
 
 def extract_note_body(text: str) -> str:
     patterns = (
-        r"(?:mit\s+(?:dem\s+)?(?:inhalt|text)\s+)(.+)$",
+        # "und dem Inhalt X" (nicht nur "mit dem Inhalt X") - haeufig in Kombination
+        # mit "... mit dem Titel X und dem Inhalt Y", siehe extract_note_title().
+        # Ohne "und" als Alternative fiel diese Formulierung auf das viel
+        # allgemeinere "erstelle ... notiz ..."-Muster weiter unten zurueck, das
+        # dann den ganzen Rest des Satzes inkl. "mit dem Titel ..." als Body nahm.
+        r"(?:mit|und)\s+(?:dem\s+)?(?:inhalt|text)\s+(.+)$",
         r"(?:notiz|notizen|zettel)\s+(?:über|ueber|zu|für|fuer|dass)\s+(.+)$",
         r"(?:mach|mache|erstelle|erstell)\s+(?:mir\s+)?(?:eine\s+)?(?:notiz|notizen|zettel)\s+(?:über|ueber|zu|für|fuer|dass)?\s*(.+)$",
         r"(?:schreib(?:e)?\s+(?:rein|dazu)?\s*)(.+)$",
@@ -4058,10 +4223,11 @@ def handle_mail_delete_command(text: str, memory: Memory | None = None) -> str |
             if memory is None:
                 return f"Ich würde Mails von {extracted_target} nur nach Ihrer Bestätigung löschen."
             try:
+                inbox_account, inbox_mailbox = resolve_mail_inbox()
                 matches = search_messages_by_terms(
                     [extracted_target],
-                    account_name=MAIL_INBOX_ACCOUNT,
-                    mailbox_name=MAIL_INBOX_MAILBOX,
+                    account_name=inbox_account,
+                    mailbox_name=inbox_mailbox,
                 )
             except MailAccessError as exc:
                 return str(exc)
@@ -4178,10 +4344,11 @@ def execute_mail_delete(data: dict) -> str:
     if message_ids:
         error_note = ""
         try:
+            inbox_account, inbox_mailbox = resolve_mail_inbox()
             moved_count = move_messages_to_trash(
                 message_ids,
-                account_name=MAIL_INBOX_ACCOUNT,
-                mailbox_name=MAIL_INBOX_MAILBOX,
+                account_name=inbox_account,
+                mailbox_name=inbox_mailbox,
             )
         except MailAccessError as exc:
             return str(exc)
@@ -4202,11 +4369,12 @@ def execute_mail_delete(data: dict) -> str:
                     fallback_terms.append(cleaned)
             if fallback_terms:
                 try:
+                    inbox_account, inbox_mailbox = resolve_mail_inbox()
                     moved_messages = move_matching_messages_to_trash(
                         fallback_terms,
                         max_messages=max(MAIL_MAX_MESSAGES, 50),
-                        account_name=MAIL_INBOX_ACCOUNT,
-                        mailbox_name=MAIL_INBOX_MAILBOX,
+                        account_name=inbox_account,
+                        mailbox_name=inbox_mailbox,
                     )
                     if moved_messages:
                         return f"Erledigt. Ich habe {len(moved_messages)} gelesene Mail(s) in den Papierkorb gelegt."
@@ -4227,11 +4395,12 @@ def execute_mail_delete(data: dict) -> str:
             )
         return f"Erledigt. Ich habe {moved_count} gelesene Mail(s) in den Papierkorb gelegt."
     try:
+        inbox_account, inbox_mailbox = resolve_mail_inbox()
         moved_messages = move_matching_messages_to_trash(
             search_terms,
             max_messages=max(MAIL_MAX_MESSAGES, 50),
-            account_name=MAIL_INBOX_ACCOUNT,
-            mailbox_name=MAIL_INBOX_MAILBOX,
+            account_name=inbox_account,
+            mailbox_name=inbox_mailbox,
         )
     except MailAccessError as exc:
         return str(exc)
@@ -4347,11 +4516,12 @@ def format_mail_document_categories(categories: list[str]) -> str:
 
 
 def run_mail_document_export(categories: list[str], max_messages: int = 80) -> str:
+    inbox_account, inbox_mailbox = resolve_mail_inbox()
     results = export_categorized_mail_documents(
         categories=categories,
         max_messages=max_messages,
-        account_name=MAIL_INBOX_ACCOUNT,
-        mailbox_name=MAIL_INBOX_MAILBOX,
+        account_name=inbox_account,
+        mailbox_name=inbox_mailbox,
     )
     if not results:
         return "Ich habe keine passenden Mail-Dokumente gefunden."
@@ -4580,8 +4750,7 @@ def handle_mail_command(
 
         return f"Ich sehe Mail-Ordner, aber ohne Nachrichten: {mailbox_lines}."
 
-    target_account = MAIL_INBOX_ACCOUNT
-    target_mailbox = MAIL_INBOX_MAILBOX
+    target_account, target_mailbox = resolve_mail_inbox()
     time_hint = ""
     if any(term in normalized for term in ("24 stunden", "vierundzwanzig stunden", "letzten tag", "heute")):
         time_hint = "Beruecksichtige in deiner Zusammenfassung besonders die letzten 24 Stunden."
@@ -4648,12 +4817,13 @@ def handle_mail_command(
 
 
 def check_mail_status() -> str:
+    inbox_account, inbox_mailbox = resolve_mail_inbox()
     try:
         mailboxes = list_mailboxes(max_mailboxes=25)
         messages = list_inbox_messages(
             max_messages=3,
-            account_name=MAIL_INBOX_ACCOUNT,
-            mailbox_name=MAIL_INBOX_MAILBOX,
+            account_name=inbox_account,
+            mailbox_name=inbox_mailbox,
         )
     except MailAccessError as exc:
         return str(exc)
@@ -4665,25 +4835,28 @@ def check_mail_status() -> str:
         (
             mailbox
             for mailbox in mailboxes
-            if mailbox.account == MAIL_INBOX_ACCOUNT and mailbox.mailbox == MAIL_INBOX_MAILBOX
+            if mailbox.account == inbox_account and mailbox.mailbox == inbox_mailbox
         ),
         None,
     )
 
+    # inbox_account/inbox_mailbox statt hartkodiert "iCloud INBOX" - resolve_mail_inbox()
+    # kann je nach Konfiguration/Auto-Erkennung auch ein anderes Konto liefern, die
+    # Meldung soll dann trotzdem stimmen statt faelschlich immer "iCloud" zu nennen.
     if inbox_summary is None:
-        return "Apple Mail antwortet, aber iCloud INBOX macht Verstecken."
+        return f"Apple Mail antwortet, aber {inbox_account} {inbox_mailbox} macht Verstecken."
 
     if not messages:
         return (
-            f"Apple Mail antwortet und iCloud INBOX ist sichtbar mit {inbox_summary.message_count} Nachrichten. "
-            "Die Betreffzeilen sind aber noch schüchtern."
+            f"Apple Mail antwortet und {inbox_account} {inbox_mailbox} ist sichtbar mit "
+            f"{inbox_summary.message_count} Nachrichten. Die Betreffzeilen sind aber noch schüchtern."
         )
 
     subjects = "; ".join(
         f"{message.sender or 'Unbekannt'}: {message.subject}" for message in messages[:3]
     )
     return (
-        f"Apple Mail funktioniert. iCloud INBOX ist sichtbar mit "
+        f"Apple Mail funktioniert. {inbox_account} {inbox_mailbox} ist sichtbar mit "
         f"{inbox_summary.message_count} Nachrichten. Erste Übersichten: {subjects}. Sauber."
     )
 
@@ -5152,8 +5325,15 @@ def handle_contact_command(text: str, memory: Memory | None = None) -> str | Non
         names = ", ".join(contact.name for contact in contacts[:5])
         return f"Ich sehe zum Beispiel: {names}."
 
+    # "von|für|fuer" bewusst optional gemacht - "suche den Kontakt Leon" oder
+    # "hast du einen Kontakt namens Leon" (ohne Praeposition zwischen "Kontakt"
+    # und dem Namen) fielen bisher komplett durch, obwohl has_domain() sie
+    # korrekt als Kontakte-Domaene erkannte - die Funktion gab am Ende None
+    # zurueck, was Jarvis in eine verwirrende "Meinten Sie gerade Ihre
+    # Kontakte?"-Rueckfrage schickte statt direkt zu suchen. Live beobachtet
+    # 2026-08-18.
     search_match = re.search(
-        r"(?:kontakt|kontakte|telefonnummer|nummer)\s+(?:von|für|fuer)\s+(.+)$",
+        r"(?:kontakt|kontakte|telefonnummer|nummer)\s+(?:von\s+|für\s+|fuer\s+|namens\s+)?(.+)$",
         text,
         flags=re.IGNORECASE,
     )
@@ -6355,7 +6535,14 @@ def answer_message(
         # Aufruf hier ist idempotent - Handler, die bereits selbst bereinigen
         # (Kamera-Feedback, Mail-Zusammenfassung), aendern sich dadurch nicht.
         # Siehe docs/current-system-assessment.md, Abschnitt 41.
-        cleaned_text = strip_first_name_address(str(text), configured_user_name())
+        # strip_invented_formal_address() greift hier aus demselben Grund zentral:
+        # erfundene Anreden wie "Herr Müller" (das kleine Modell dichtet sich einen
+        # Nachnamen dazu) sollen aus JEDEM Antwortpfad verschwinden, nicht nur aus
+        # dem allgemeinen Chat.
+        cleaned_text = strip_invented_formal_address(
+            strip_first_name_address(str(text), configured_user_name()),
+            configured_user_address(),
+        )
         return AnswerResult(text=cleaned_text, pending_mail_followup=mail_followup, provider=route.provider, model=route.model)
 
     if is_end_command(question):

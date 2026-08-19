@@ -22,6 +22,7 @@ memory/
 # laeuft - siehe app/data_dir.py)
 PhotosHelper/
 CameraHelper/
+CalendarHelper/
 
 # Editor / tooling caches
 .cache/

@@ -1,12 +1,264 @@
 from __future__ import annotations
 
+import json
+import os
 import subprocess
+import sys
+import tempfile
 import time
 from datetime import datetime
+from pathlib import Path
+
+from data_dir import data_root
 
 
 class CalendarAccessError(RuntimeError):
     pass
+
+
+CALENDAR_HELPER_BUNDLE_ID = "com.leon.jarvis.calendarhelper"
+
+
+def _macos_sdk_path() -> str:
+    """Siehe photos_client.py::_macos_sdk_path() - dieselbe Notwendigkeit, den
+    zum aktiven Xcode-Compiler passenden SDK-Pfad explizit anzugeben, sonst
+    greift auf diesem Mac faelschlich die (nicht passende) CommandLineTools-SDK."""
+    try:
+        result = subprocess.run(
+            ["xcrun", "--sdk", "macosx", "--show-sdk-path"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _time_safe_stamp() -> str:
+    return datetime.now().strftime("%Y%m%d%H%M%S%f")
+
+
+def _run_process(command: list[str], timeout: int) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        raise CalendarAccessError("Kalender-Helfer hat zu lange nicht geantwortet.") from exc
+
+
+def _read_and_remove(path: Path) -> str:
+    if not path.exists():
+        return ""
+    output = path.read_text(encoding="utf-8", errors="replace").strip()
+    try:
+        path.unlink()
+    except OSError:
+        pass
+    return output
+
+
+def _is_launch_services_error(result: subprocess.CompletedProcess[str]) -> bool:
+    error = f"{result.stderr or ''}\n{result.stdout or ''}".lower()
+    return any(
+        marker in error
+        for marker in (
+            "_lsopenurlswithcompletionhandler",
+            "error -10825",
+            "cannot be opened",
+            "konnte nicht geöffnet werden",
+            "kann nicht geöffnet werden",
+        )
+    )
+
+
+class CalendarHelper:
+    """Kompiliert/startet den EventKit-basierten Swift-Helfer (calendar_helper.swift)
+    fuer schnelle, datumsgefilterte Termin-/Erinnerungsabfragen - Ersatz fuer den
+    AppleScript-Weg in list_upcoming_calendar_items()/list_open_reminders(), der
+    JEDES einzelne Event per eigenem IPC-Aufruf abfragt und bei mehreren hundert
+    Terminen (mehrjaehrig wiederkehrende Feiertage etc.) zuverlaessig ueber die
+    35s-Toleranz lief (gemessen: 24s allein fuer die Startdatum-Eigenschaft aller
+    349 Termine, ganz ohne die weiteren ~13 Properties, die die volle Abfrage noch
+    zusaetzlich braucht). EventKit fragt dieselben Daten nativ/indiziert ab, ohne
+    Skript-Bridge-Overhead. Baut/registriert den Helfer nach demselben bewaehrten
+    Muster wie photos_client.py::PhotoIndex (siehe dort fuer die volle Begruendung
+    der einzelnen Schritte: stabiler Pfad gegen wiederholte Privacy-Prompts,
+    eingebettetes Info.plist per Linker-Flag fuer TCC-Bundle-Identitaet, Codesign,
+    LaunchServices-Registrierung, Fallback von App-Bundle-Start auf direkten
+    Binary-Aufruf)."""
+
+    def __init__(self) -> None:
+        self.app_dir = Path(__file__).resolve().parent
+        self.helper_source = self.app_dir / "calendar_helper.swift"
+        self.helper_bundle = data_root() / "CalendarHelper" / "Jarvis Calendar Helper.app"
+        self.helper_contents = self.helper_bundle / "Contents"
+        self.helper_macos = self.helper_contents / "MacOS"
+        self.helper_resources = self.helper_contents / "Resources"
+        self.helper_plist = self.helper_contents / "Info.plist"
+        self.helper_binary = self.helper_macos / "JarvisCalendarHelper"
+
+    def _ensure_helper_bundle(self) -> None:
+        self.helper_macos.mkdir(parents=True, exist_ok=True)
+        self.helper_resources.mkdir(parents=True, exist_ok=True)
+        plist_text = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>de</string>
+    <key>CFBundleDisplayName</key>
+    <string>Jarvis Calendar Helper</string>
+    <key>CFBundleExecutable</key>
+    <string>JarvisCalendarHelper</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.leon.jarvis.calendarhelper</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>Jarvis Calendar Helper</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>NSCalendarsUsageDescription</key>
+    <string>Jarvis braucht Zugriff, um Ihre Termine schnell abzufragen.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>Jarvis braucht Zugriff, um Ihre Termine schnell abzufragen.</string>
+    <key>NSRemindersUsageDescription</key>
+    <string>Jarvis braucht Zugriff, um Ihre offenen Erinnerungen schnell abzufragen.</string>
+    <key>NSRemindersFullAccessUsageDescription</key>
+    <string>Jarvis braucht Zugriff, um Ihre offenen Erinnerungen schnell abzufragen.</string>
+</dict>
+</plist>
+"""
+        if not self.helper_plist.exists() or self.helper_plist.read_text(encoding="utf-8") != plist_text:
+            self.helper_plist.write_text(plist_text, encoding="utf-8")
+
+    def _ensure_helper(self) -> Path:
+        self._ensure_helper_bundle()
+        needs_compile = not self.helper_binary.exists()
+        if not needs_compile:
+            binary_mtime = self.helper_binary.stat().st_mtime
+            needs_compile = (
+                self.helper_source.stat().st_mtime > binary_mtime
+                or self.helper_plist.stat().st_mtime > binary_mtime
+            )
+
+        if not needs_compile:
+            self._register_helper_bundle()
+            return self.helper_binary
+
+        command = [
+            "xcrun",
+            "swiftc",
+            str(self.helper_source),
+            "-o",
+            str(self.helper_binary),
+            "-target",
+            "arm64-apple-macosx14.0",
+        ]
+        sdk_path = _macos_sdk_path()
+        if sdk_path:
+            command += ["-sdk", sdk_path]
+        command += [
+            "-Xlinker",
+            "-sectcreate",
+            "-Xlinker",
+            "__TEXT",
+            "-Xlinker",
+            "__info_plist",
+            "-Xlinker",
+            str(self.helper_plist),
+            "-module-cache-path",
+            "/private/tmp/jarvis_calendar_swift_module_cache",
+            "-framework",
+            "EventKit",
+        ]
+        env = os.environ.copy()
+        env["CLANG_MODULE_CACHE_PATH"] = "/private/tmp/jarvis_calendar_clang_cache"
+        _run_process_checked(command, timeout=60, env=env)
+        self._codesign_helper()
+        self._register_helper_bundle()
+        return self.helper_binary
+
+    def _codesign_helper(self) -> None:
+        try:
+            subprocess.run(["xattr", "-cr", str(self.helper_bundle)], capture_output=True, text=True, timeout=20)
+        except Exception as exc:
+            print(f"Kalender-Helfer: xattr -cr fehlgeschlagen: {type(exc).__name__}", file=sys.stderr)
+
+        for command in (
+            ["codesign", "--force", "--sign", "-", "--identifier", CALENDAR_HELPER_BUNDLE_ID, str(self.helper_binary)],
+            ["codesign", "--force", "--deep", "--sign", "-", "--identifier", CALENDAR_HELPER_BUNDLE_ID, str(self.helper_bundle)],
+        ):
+            try:
+                subprocess.run(command, capture_output=True, text=True, timeout=30)
+            except Exception as exc:
+                print(f"Kalender-Helfer: codesign fehlgeschlagen: {type(exc).__name__}", file=sys.stderr)
+
+    def _register_helper_bundle(self) -> None:
+        try:
+            subprocess.run(
+                [
+                    "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
+                    "-f",
+                    str(self.helper_bundle),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except Exception as exc:
+            print(f"Kalender-Helfer: lsregister fehlgeschlagen: {type(exc).__name__}", file=sys.stderr)
+
+    def run(self, args: list[str], timeout: int = 30) -> str:
+        self._ensure_helper()
+        output_file = Path(tempfile.gettempdir()) / f"jarvis_calendar_helper_{os.getpid()}_{_time_safe_stamp()}.txt"
+
+        def _invoke(command: list[str]) -> tuple[subprocess.CompletedProcess[str], str]:
+            result = _run_process(command, timeout=timeout)
+            return result, _read_and_remove(output_file)
+
+        app_command = ["open", "-W", str(self.helper_bundle), "--args", *args, "--output", str(output_file)]
+        result, output = _invoke(app_command)
+
+        if result.returncode != 0 and _is_launch_services_error(result):
+            self._register_helper_bundle()
+            result, output = _invoke(app_command)
+
+        if result.returncode != 0 and _is_launch_services_error(result):
+            binary_command = [str(self.helper_binary), *args, "--output", str(output_file)]
+            result, output = _invoke(binary_command)
+
+        clean_output = output.strip()
+        if result.returncode != 0 or clean_output.startswith("ERROR:"):
+            error = clean_output.removeprefix("ERROR:").strip()
+            if not error:
+                error = (result.stderr or result.stdout).strip()
+            if "nicht erlaubt" in error.lower() or "denied" in error.lower() or "restricted" in error.lower():
+                raise CalendarAccessError(
+                    error
+                    + " Öffne Systemeinstellungen > Datenschutz & Sicherheit > Kalender/Erinnerungen "
+                    "und erlaube Jarvis Calendar Helper den Zugriff."
+                )
+            raise CalendarAccessError(error or "Kalender-Helfer konnte nicht antworten.")
+
+        return clean_output
+
+
+def _run_process_checked(command: list[str], timeout: int, env: dict[str, str]) -> None:
+    result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, env=env)
+    if result.returncode != 0:
+        raise CalendarAccessError(
+            f"Kalender-Helfer konnte nicht kompiliert werden: {(result.stderr or result.stdout).strip()}"
+        )
+
+
+_CALENDAR_HELPER = CalendarHelper()
 
 
 def create_calendar_event(
@@ -90,8 +342,111 @@ def create_reminder(
     return f"Erinnerung erstellt: {title}"
 
 
+_GERMAN_WEEKDAYS = ("Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag")
+_GERMAN_MONTHS = (
+    "Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August",
+    "September", "Oktober", "November", "Dezember",
+)
+
+
+def _german_datetime_string(value: datetime) -> str:
+    """Wie AppleScripts "date ... as string" (z.B. "Dienstag, 18. August 2026 um
+    19:00:00") - fuer Kompatibilitaet mit jarvis.py::_format_event_time(), das
+    genau dieses Format erwartet, unabhaengig davon ob die Daten ueber AppleScript
+    oder den EventKit-Helfer kamen."""
+    weekday = _GERMAN_WEEKDAYS[value.weekday()]
+    month = _GERMAN_MONTHS[value.month - 1]
+    return f"{weekday}, {value.day}. {month} {value.year} um {value:%H:%M:%S}"
+
+
+def _parse_iso(value: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        # ISO8601DateFormatter().string(from:) im Swift-Helfer liefert standardmaessig
+        # UTC mit "Z"-Suffix (z.B. "2026-08-19T08:30:00Z"), nicht mit numerischem
+        # Offset wie urspruenglich angenommen - live beim ersten Testlauf entdeckt
+        # (leere Startzeit-Anzeige, weil datetime.fromisoformat() auf Python 3.9,
+        # der Laufzeit dieser App, "Z" nicht versteht und eine ValueError wirft, die
+        # hier vorher still verschluckt wurde). "Z" -> "+00:00" macht es fuer 3.9
+        # verdaulich. Anschliessend in die lokale Zeitzone konvertieren und wieder
+        # tz-naiv machen, weil der Rest dieses Moduls (Vergleiche mit datetime.now())
+        # durchgehend tz-naive, lokale Zeit erwartet - sonst waeren alle Termine um
+        # den UTC-Offset (in Deutschland 1-2h) verschoben.
+        if value.endswith("Z"):
+            value = value[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone().replace(tzinfo=None)
+        return parsed
+    except ValueError:
+        return None
+
+
+def _events_from_helper_json(raw_json: str) -> list[dict[str, object]]:
+    records = json.loads(raw_json or "[]")
+    result: list[dict[str, object]] = []
+    for record in records:
+        start_dt = _parse_iso(str(record.get("start") or ""))
+        end_dt = _parse_iso(str(record.get("end") or ""))
+        result.append(
+            {
+                "calendar": record.get("calendar") or "",
+                "title": record.get("title") or "",
+                "start": _german_datetime_string(start_dt) if start_dt else "",
+                "end": _german_datetime_string(end_dt) if end_dt else "",
+                "start_dt": start_dt,
+                "end_dt": end_dt,
+                "all_day": bool(record.get("allDay")),
+            }
+        )
+    return result
+
+
+def _reminders_from_helper_json(raw_json: str) -> list[dict[str, str]]:
+    records = json.loads(raw_json or "[]")
+    return [
+        {
+            "list": record.get("list") or "",
+            "title": record.get("title") or "",
+            "due": record.get("due") or "",
+        }
+        for record in records
+    ]
+
+
 def list_upcoming_calendar_items(limit: int = 5, until: datetime | None = None) -> dict[str, list[dict[str, object]]]:
     limit = max(1, int(limit))
+
+    try:
+        helper_args = ["events", "--limit", str(limit)]
+        if until is not None:
+            # .isoformat() auf einem tz-naiven datetime liefert keinen Zeitzonen-
+            # Offset (z.B. "2026-08-18T23:59:59") - Swifts ISO8601DateFormatter
+            # verlangt aber standardmaessig einen (Z oder numerisch) und gibt bei
+            # dessen Fehlen still nil zurueck, wodurch "until" im Helfer komplett
+            # ignoriert wurde (live beobachtet: eine "heute"-Abfrage zeigte Termine
+            # bis in den Oktober). .astimezone() ohne Argument interpretiert ein
+            # naives datetime als System-Lokalzeit und haengt deren Offset an, ohne
+            # die Uhrzeit selbst zu veraendern.
+            helper_args += ["--until", until.astimezone().isoformat()]
+        raw_json = _CALENDAR_HELPER.run(helper_args, timeout=30)
+        return {"items": _events_from_helper_json(raw_json)}
+    except CalendarAccessError:
+        raise
+    except Exception as exc:
+        # Kompilier-/Laufzeitfehler des Helfers (z.B. fehlendes Xcode auf einer
+        # aelteren macOS-Version) duerfen die Kalenderabfrage nicht hart brechen -
+        # AppleScript-Fallback uebernimmt, nur langsamer. Siehe Kommentar an
+        # CalendarHelper fuer die Begruendung, warum der Helfer ueberhaupt existiert.
+        print(f"Kalender-Helfer fehlgeschlagen, Fallback auf AppleScript: {type(exc).__name__}: {exc}")
+
+    return _list_upcoming_calendar_items_applescript(limit=limit, until=until)
+
+
+def _list_upcoming_calendar_items_applescript(
+    limit: int = 5, until: datetime | None = None
+) -> dict[str, list[dict[str, object]]]:
     until_setup = ""
     until_check = ""
     if until is not None:
@@ -193,6 +548,19 @@ def events_on_date(items: list[dict[str, object]], on: datetime | None = None) -
 
 def list_open_reminders(limit: int = 5) -> dict[str, list[dict[str, str]]]:
     limit = max(1, int(limit))
+
+    try:
+        raw_json = _CALENDAR_HELPER.run(["reminders", "--limit", str(limit)], timeout=30)
+        return {"items": _reminders_from_helper_json(raw_json)}
+    except CalendarAccessError:
+        raise
+    except Exception as exc:
+        print(f"Kalender-Helfer (Erinnerungen) fehlgeschlagen, Fallback auf AppleScript: {type(exc).__name__}: {exc}")
+
+    return _list_open_reminders_applescript(limit=limit)
+
+
+def _list_open_reminders_applescript(limit: int = 5) -> dict[str, list[dict[str, str]]]:
     script = f"""
     set fieldSeparator to ASCII character 31
     set recordSeparator to ASCII character 30

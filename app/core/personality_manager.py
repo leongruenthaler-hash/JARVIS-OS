@@ -39,6 +39,28 @@ DEFAULT_JARVIS_SYSTEM_PROMPT = (
 )
 
 
+def memory_usage_instruction(memory_summary: str) -> str:
+    """Deterministischer Rueckhalt gegen das kleine lokale Modell (phi4-mini), das
+    injizierte Fakten trotz Erwaehnung im Prompt unzuverlaessig nutzte - live
+    beobachtet 2026-08-18: Auf "was ist mein Lieblingstier" (mit passendem, korrekt
+    injiziertem Fakt im Kontext) antwortete es trotzdem generisch "Als KI habe ich
+    keine persönlichen Vorlieben...", als ginge es um die eigenen Vorlieben des
+    Assistenten statt die gespeicherten des Nutzers. Die alte Formulierung
+    ("Relevant: {memory_summary}.") war ein einzeiliger Nebensatz ohne klare
+    Handlungsanweisung - nach demselben Muster wie salutation_instruction() unten
+    (die ebenfalls von einer abstrakten Regel auf ein konkretes NICHT/SONDERN-
+    Beispiel umgestellt werden musste, weil reine Prompt-Worte bei diesem Modell
+    nicht reichen) jetzt eine explizite Anweisung mit Gegenbeispiel."""
+    return (
+        f"Gespeicherte Fakten über den Nutzer: {memory_summary}. Nutze diese Fakten SOFORT und DIREKT, "
+        "wenn danach gefragt wird, auch bei Fragen nach Vorlieben, Namen oder persönlichen Details - "
+        "das sind Fakten über den NUTZER, nicht über dich selbst. "
+        "NICHT: \"Als KI habe ich keine persönlichen Vorlieben.\" SONDERN, falls ein passender Fakt oben "
+        "steht: die Antwort direkt aus dem Fakt geben. Nur wenn wirklich kein passender Fakt oben steht, "
+        "ehrlich sagen, dass dir dazu nichts gespeichert ist - nichts erfinden."
+    )
+
+
 COMPACT_JARVIS_SYSTEM_PROMPT = (
     "Du bist Jarvis, ein persönlicher Assistent. Antworte auf Deutsch, ruhig, direkt und natürlich. "
     "Antworte ausschließlich auf Deutsch, von der ersten bis zur letzten Silbe deiner Antwort - "
@@ -132,7 +154,7 @@ class JarvisPersonalityManager:
             "Wenn du eine Prüfung oder Aktion ankündigst, nenne direkt das konkrete Ergebnis.",
             "Vermeide Erklärungen über Promptstruktur, Rollen oder interne Entscheidungsketten.",
             f"Stil: Persönlichkeit={style.name}, Ton={style.tone}, Humor={style.humor}, Länge={style.answer_length}, Direktheit={style.directness}.",
-            f"Relevant: {memory_summary}.",
+            memory_usage_instruction(memory_summary),
         ]
         if mode_instruction:
             parts.append(mode_instruction)
@@ -223,7 +245,7 @@ def build_compact_jarvis_system_prompt(
         "höchstens ein kurzer Nebensatz sein - die eigentliche Ja/Nein-Frage muss glasklar und "
         "unmissverständlich bleiben.",
         f"Stil: Persönlichkeit={style.name}, Ton={style.tone}, Humor={style.humor}, Länge={style.answer_length}, Direktheit={style.directness}.",
-        f"Relevant: {memory_summary}.",
+        memory_usage_instruction(memory_summary),
     ]
     if mode_instruction:
         parts.append(mode_instruction)

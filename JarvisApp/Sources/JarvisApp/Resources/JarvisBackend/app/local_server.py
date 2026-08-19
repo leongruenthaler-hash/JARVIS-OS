@@ -1845,6 +1845,11 @@ class JarvisLocalServer:
             if hasattr(core, "is_end_command") and core.is_end_command(question):
                 return "Alles klar. Ich bin wieder still, bis Sie Jarvis sagen."
 
+            if hasattr(core, "route_fast_intent"):
+                fast_intent = core.route_fast_intent(question)
+                if fast_intent is not None:
+                    return self._finalize_answer(core, question, fast_intent)
+
             fast = self._handle_fast_commands(question)
             if fast is not None:
                 return self._finalize_answer(core, question, fast)
