@@ -159,6 +159,21 @@ class FastIntentRouter:
                 return app_name
         return None
 
+    # Woerter fuer andere, spezifische Domaenen ("Status meiner Mails", "Status
+    # meiner Fotos") - ohne diesen Schutz griff dasselbe Kollisionsmuster wie
+    # beim Kalender-Fix weiter oben: "status" allein reichte, um JEDE
+    # domaenenspezifische Statusfrage mit dem hartkodierten "Alles läuft,
+    # {Anrede}." abzufangen, bevor die echte Domaenen-Logik (z.B. Mail-Postfach-
+    # Pruefung) je zum Zug kam. Live beobachtet 2026-08-19: "Wie ist der Status
+    # meiner Mails?" ergab trotz ungelesener Mails "Alles läuft, Sir.".
+    _OTHER_DOMAIN_WORDS = (
+        "mail", "mails", "email", "emails", "e mail", "posteingang", "postfach",
+        "kalender", "termin", "termine", "erinnerung", "erinnerungen",
+        "notiz", "notizen", "zettel", "foto", "fotos", "bild", "bilder",
+        "datei", "dateien", "ordner", "musik", "song", "lied",
+        "aufgabe", "aufgaben", "kontakt", "kontakte",
+    )
+
     def _looks_like_small_system_query(self, text: str) -> bool:
         # "was steht" und "was ist los" bewusst NICHT hier - beide sind in
         # jarvis.py::CALENDAR_QUERY_PHRASES bereits als Kalenderabfrage-Muster
@@ -169,4 +184,6 @@ class FastIntentRouter:
         # komplett - die echte Terminliste wurde nie erreicht. Live beobachtet
         # 2026-08-18: "was steht heute bei mir an" (ein echter Termin um 19 Uhr
         # war eingetragen) ergab trotzdem "Alles läuft, Sir.".
+        if has_domain_fuzzy(text, self._OTHER_DOMAIN_WORDS):
+            return False
         return has_domain_fuzzy(text, ("status", "ueberblick", "was geht", "zusammenfassung"))

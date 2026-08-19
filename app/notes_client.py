@@ -112,6 +112,77 @@ def append_to_note(title: str, text: str, folder_name: str | None = None) -> str
     return f"Notiz aktualisiert: {title}"
 
 
+def delete_note(title: str, folder_name: str | None = None) -> str:
+    """Sucht eine Notiz per Titel (bevorzugt im angegebenen Ordner, sonst ueber
+    alle Accounts/Ordner) und loescht sie. Bisher gab es ueberhaupt keinen
+    Loesch-Pfad: jede "Loesche die Notiz X"-Anfrage landete in
+    handle_notes_command() bei der Titel-Extraktion, fand kein "mit dem
+    Titel"-Muster und startete faelschlich den Erstellen-Flow ("Wie soll die
+    Notiz heissen?"). Live beobachtet 2026-08-19.
+
+    Nutzt bewusst einen "whose"-Filter statt eines manuell mitgefuehrten
+    repeat-Loop-Verweises (wie bei append_to_note/create_note) - eine Notiz-
+    Referenz aus "repeat with noteRef in notes of folderRef" ueberlebt
+    zuverlaessig genug fuer Lesezugriffe (name of noteRef), aber nicht bis zu
+    einem nachfolgenden "delete noteRef": das schlug reproduzierbar mit
+    "-1728: kann nicht gelesen werden" fehl, obwohl dieselbe Suche isoliert
+    (ohne delete) fehlerfrei lief. "delete (notes whose name is X)" umgeht das,
+    da es die Auswahl und den Loeschvorgang in einem einzigen AppleScript-
+    Ausdruck haelt statt eine Referenz ueber Anweisungsgrenzen hinweg
+    wiederzuverwenden. Live beobachtet und verifiziert 2026-08-19."""
+    safe_title = _escape_applescript_text(title)
+    safe_folder = _escape_applescript_text(folder_name or "")
+
+    script = f"""
+    set noteTitle to "{safe_title}"
+    set configuredFolder to "{safe_folder}"
+    set didDelete to false
+
+    tell application "Notes"
+        if configuredFolder is not "" then
+            repeat with accountRef in accounts
+                repeat with folderRef in folders of accountRef
+                    if name of folderRef as string is configuredFolder then
+                        set matchingNotes to (notes of folderRef whose name is noteTitle)
+                        if (count of matchingNotes) > 0 then
+                            delete item 1 of matchingNotes
+                            set didDelete to true
+                        end if
+                    end if
+                    if didDelete then exit repeat
+                end repeat
+                if didDelete then exit repeat
+            end repeat
+        end if
+
+        if not didDelete then
+            repeat with accountRef in accounts
+                repeat with folderRef in folders of accountRef
+                    set matchingNotes to (notes of folderRef whose name is noteTitle)
+                    if (count of matchingNotes) > 0 then
+                        delete item 1 of matchingNotes
+                        set didDelete to true
+                        exit repeat
+                    end if
+                end repeat
+                if didDelete then exit repeat
+            end repeat
+        end if
+
+        if didDelete then
+            return "deleted"
+        else
+            return "not_found"
+        end if
+    end tell
+    """
+
+    result = _run_applescript(script, capture=True)
+    if str(result or "").strip() != "deleted":
+        raise NotesAccessError(f"Ich habe keine Notiz mit dem Titel „{title}“ gefunden.")
+    return f"Notiz gelöscht: {title}"
+
+
 def list_recent_notes(limit: int = 5) -> list[dict]:
     """Liest Titel + Änderungsdatum aller Notizen ueber alle Accounts/Ordner (kein
     Textinhalt - reine Uebersicht, siehe handle_notes_command in jarvis.py, das

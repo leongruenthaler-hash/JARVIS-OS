@@ -99,7 +99,7 @@ from music_client import (
     play_search,
     previous_track,
 )
-from notes_client import NotesAccessError, append_to_note, create_note, list_recent_notes
+from notes_client import NotesAccessError, append_to_note, create_note, delete_note, list_recent_notes
 from permission_manager import PermissionManager
 from privacy_dashboard import PrivacyDashboard
 from privacy_logger import PrivacyLogger
@@ -2922,7 +2922,7 @@ def handle_memory_command(memory: Memory, text: str) -> str | None:
     # Live beobachtet 2026-08-18. Hier vor den allgemeinen Chat-Pfad gezogen, damit
     # der Nutzer eine klare Bestaetigung bekommt.
     forget_free_text_match = re.match(
-        r"^(?:vergiss|lösche|loesche|streich|entferne)\s+(?:bitte\s+)?(?:dass\s+)?(.+)$",
+        r"^(?:vergiss|lösche|loesche|streich|entferne),?\s+(?:bitte\s+)?(?:dass\s+)?(.+)$",
         lowered,
         flags=re.IGNORECASE,
     )
@@ -3895,6 +3895,33 @@ _NOTES_CREATE_VERBS = (
     "ergaenze",
 )
 
+_NOTES_DELETE_VERBS = (
+    "lösche",
+    "loesche",
+    "löschen",
+    "loeschen",
+    "entferne",
+    "entfernen",
+    "lösch",
+    "loesch",
+)
+
+
+def _extract_note_title_for_delete(text: str) -> str | None:
+    """Extrahiert den Notiz-Titel aus einer Loesch-Anfrage ("Lösche die Notiz X",
+    "Entferne den Zettel X") - im Unterschied zu extract_note_title() braucht es
+    hier KEIN "mit dem Titel"-Anschlusswort, da Loesch-Anfragen den Titel direkt
+    nach "Notiz"/"Zettel" nennen."""
+    normalized = normalize_text(text)
+    match = re.search(
+        r"(?:notiz|zettel)\s+(?:mit\s+dem\s+titel\s+|namens\s+|mit\s+namen\s+)?(?:(?:der|die|den)\s+)?(.+?)(?:\s+(?:aus\s+(?:den\s+)?notizen)\s*)?$",
+        normalized,
+    )
+    if not match:
+        return None
+    title = match.group(1).strip(" .,!?:;")
+    return title or None
+
 
 def _looks_like_notes_read_request(text: str) -> bool:
     """Erkennt eine Lese-/Uebersichts-Anfrage ("was steht in meinen Notizen",
@@ -3936,6 +3963,15 @@ def handle_notes_command(memory: Memory, text: str) -> str | None:
             f"{note['title']} ({note['modified'].strftime('%d.%m.%Y')})" for note in notes
         )
         return f"Ihre letzten Notizen: {items}."
+
+    if any(verb in normalized for verb in _NOTES_DELETE_VERBS):
+        delete_title = _extract_note_title_for_delete(text)
+        if not delete_title:
+            return "Welche Notiz soll ich löschen?"
+        try:
+            return delete_note(delete_title)
+        except NotesAccessError as exc:
+            return str(exc)
 
     title = extract_note_title(text)
     body = extract_note_body(text)
