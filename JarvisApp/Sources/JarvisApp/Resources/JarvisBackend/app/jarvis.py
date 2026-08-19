@@ -3373,7 +3373,17 @@ def looks_like_multistep_request(text: str) -> bool:
     padded = f" {normalized} "
     if not any(connector in padded for connector in _MULTISTEP_CONNECTOR_WORDS):
         return False
-    matched_domains = [domain for domain in DOMAIN_TERMS if has_domain(text, domain)]
+    matched_domains = {domain for domain in DOMAIN_TERMS if has_domain(text, domain)}
+    # "camera" und "photos" teilen sich absichtlich das Stichwort "foto" (siehe
+    # Kommentar bei DOMAIN_TERMS["camera"]) - ein einzelner, zusammenhaengender
+    # Kamera-Wunsch wie "Mach ein Foto von mir und sag mir wie ich aussehe."
+    # matcht dadurch BEIDE Domaenen und wurde faelschlich als
+    # Zwei-Domaenen-Mehrschritt-Auftrag geplant, obwohl es nur eine einzige
+    # Bitte ist. Live beobachtet 2026-08-19: die Planung erfand daraufhin
+    # unabhaengige, nie angeforderte Zusatzschritte (Mail, Notiz). Das
+    # ueberlappende Wortpaar zaehlt hier deshalb nur als EINE Domaene.
+    if {"camera", "photos"} <= matched_domains:
+        matched_domains = matched_domains - {"photos"}
     return len(matched_domains) >= 2
 
 
