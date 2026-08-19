@@ -4546,7 +4546,13 @@ def handle_mail_document_export_command(text: str, memory: Memory | None = None)
         "abonnements",
     )
     mail_context = any(term in normalized for term in ("mail", "mails", "email", "emails", "posteingang", "mailfach"))
-    desktop_context = any(term in normalized for term in ("desktop", "schreibtisch", "ordner"))
+    # "desktop"/"schreibtisch"/"ordner" war frueher PFLICHT, obwohl das
+    # Zielverzeichnis in export_categorized_mail_documents() ohnehin immer fest
+    # auf den Schreibtisch zeigt (nie aus dem Text geparst) - eine ganz
+    # natuerliche Anfrage wie "Kopiere meine Rechnungen aus den Mails" (ohne
+    # das Wort "Schreibtisch" zu nennen) fiel dadurch komplett durch und landete
+    # im werkzeuglosen Chat, der stattdessen nur eine allgemeine Mail-
+    # Zusammenfassung gab. Live beobachtet 2026-08-19.
     action_context = any(
         term in normalized
         for term in (
@@ -4564,7 +4570,7 @@ def handle_mail_document_export_command(text: str, memory: Memory | None = None)
             "ablege",
         )
     )
-    if not (mail_context and desktop_context and action_context):
+    if not (mail_context and action_context):
         return None
     if not any(term in normalized for term in document_terms):
         return None
