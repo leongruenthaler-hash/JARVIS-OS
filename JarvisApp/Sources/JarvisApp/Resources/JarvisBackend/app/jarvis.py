@@ -743,6 +743,14 @@ DOMAIN_TERMS = {
         "termine",
         "kalendereintrag",
         "termineintrag",
+        # "kalender"/"termin" zaehlen laut has_domain_fuzzy() nur als
+        # EIGENSTAENDIGES Wort (bewusst, siehe Kommentar dort - sonst matcht
+        # z.B. "bild" in "bildschirm" faelschlich). Ein natuerliches deutsches
+        # Kompositum wie "Terminkalender" enthaelt "kalender" aber ohne
+        # Wortgrenze dazwischen und faellt dadurch sonst komplett durch. Live
+        # beobachtet 2026-08-19: "Was hatte ich heute in meinem Terminkalender
+        # stehen" wurde nicht erkannt und landete in der Domaenen-Rueckfrage.
+        "terminkalender",
         "erinnerung",
         "erinnerungen",
         "erinnere mich",

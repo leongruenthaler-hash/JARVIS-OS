@@ -82,13 +82,25 @@ class ModelRouter:
             )
 
         if selected == "gemma3:4b":
+            # gemma3:4b hat keine Reasoning-/Denk-Faehigkeit (im Gegensatz zu
+            # qwen3:4b, siehe llm_client.py::_THINKING_CAPABLE_MODELS) - es
+            # generiert direkt die sichtbare Antwort, ohne teuren Denk-Vorlauf.
+            # Deshalb ist ein groesseres Budget hier NICHT mit der gleichen
+            # dramatischen Latenz verbunden wie bei qwen3:4b. Von 220 auf 500
+            # angehoben, damit auch etwas ausfuehrlichere, natuerlichere
+            # Antworten nicht mitten im Satz abgeschnitten werden - Leons
+            # Wunsch nach einem "mitdenkenden", ChatGPT-aehnlichen Gespraechs-
+            # partner bei tatsaechlich nutzbarer Geschwindigkeit
+            # (2026-08-19: qwen3:4b brauchte 30-55s/Antwort durch erzwungenes
+            # Nachdenken, das sich API-seitig nicht abschalten liess -
+            # gemma3:4b als schneller, weiterhin lokaler Ersatz gewaehlt).
             return ModelRoute(
                 provider="ollama",
                 model=selected,
-                max_output_tokens=220,
-                num_ctx=max(1536, int(self.config.get("ollama_num_ctx", 1024)) * 2),
-                temperature=0.25,
-                recent_context_limit=3,
+                max_output_tokens=500,
+                num_ctx=max(3072, int(self.config.get("ollama_num_ctx", 1024)) * 2),
+                temperature=0.3,
+                recent_context_limit=6,
                 compact_prompt=False,
                 stream=True,
                 mode="quality",
