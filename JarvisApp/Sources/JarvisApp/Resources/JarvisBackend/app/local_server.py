@@ -2429,8 +2429,26 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
 
+def _warm_up_contacts_app() -> None:
+    """Contacts.app braucht offenbar einen ersten AppleScript-Zugriff, um intern
+    zu synchronisieren, bevor es zuegig antwortet - der ALLERERSTE echte
+    Kontakt-Lookup nach einem App-/Prozessneustart hing dadurch reproduzierbar
+    29-45 Sekunden (teils bis zum kompletten Timeout). Live beobachtet
+    2026-08-19 in einem 2266-Saetze-Testdurchlauf: die ersten drei
+    Kontakt-Anfragen brauchten 29s/45s/45s, alle 117 folgenden < 2s. Ein
+    beilaeufiger Warmlauf-Ping in einem Hintergrund-Thread beim Serverstart
+    bezahlt diese Kosten schon vorher statt beim ersten echten Nutzer-Request -
+    gleiches Prinzip wie prewarm_voice_pipeline() fuer die STT-Engine."""
+    try:
+        from contacts_client import list_contacts
+        list_contacts(limit=1)
+    except Exception:
+        pass
+
+
 def run(host: str = "127.0.0.1", port: int = 8765):
     _generate_auth_token()
+    threading.Thread(target=_warm_up_contacts_app, daemon=True).start()
     httpd = ThreadingHTTPServer((host, port), Handler)
     print(f"Jarvis Local Server läuft auf http://{host}:{port}")
     httpd.serve_forever()
