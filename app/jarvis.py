@@ -912,6 +912,11 @@ DOMAIN_TERMS = {
         # Mehrwort-Phrase (nicht blosses "nummer"), um keine Kollision mit
         # Haus-/Konto-/Rechnungsnummer o.ae. zu riskieren.
         "nummer von",
+        # "kontaktdaten" ist ein Kompositum und zaehlt laut has_domain_fuzzy()
+        # nicht als Teilstring-Treffer von "kontakt" (bewusst, siehe Kommentar
+        # dort) - "Zeig mir die Kontaktdaten von X" fiel deshalb komplett aus
+        # has_domain() heraus. Gleiche Luecke wie "Terminkalender"/"kalender".
+        "kontaktdaten",
     ),
     "tasks": (
         "aufgabe",
@@ -5772,8 +5777,32 @@ def handle_contact_command(text: str, memory: Memory | None = None) -> str | Non
     # zurueck, was Jarvis in eine verwirrende "Meinten Sie gerade Ihre
     # Kontakte?"-Rueckfrage schickte statt direkt zu suchen. Live beobachtet
     # 2026-08-18.
+    # "X in meinem Adressbuch" nennt den Namen VOR dem Domaenen-Wort, anders als
+    # alle anderen Muster hier ("Kontakt von X", "Kontaktdaten von X", ...) - live
+    # beobachtet 2026-08-19: "Hast du Julia in meinem Adressbuch?" wurde von
+    # keinem bestehenden Muster erfasst und landete in der generischen
+    # Domaenen-Rueckfrage, obwohl has_domain() "Adressbuch" laengst korrekt
+    # erkannt hatte.
+    adressbuch_match = re.search(
+        r"(?:hast du|haben sie)\s+(.+?)\s+in\s+(?:meinem|meinen|ihrem|ihren)\s+adressbuch",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if adressbuch_match:
+        name_query = adressbuch_match.group(1).strip(" .,!?:;")
+        try:
+            matches = find_contacts(name_query)
+        except ContactAccessError as exc:
+            return str(exc)
+
+        if not matches:
+            return f"Ich finde keinen Kontakt mit dem Namen {name_query} in Ihrem Adressbuch."
+
+        names = ", ".join(contact.name for contact in matches[:3])
+        return f"Ja, ich finde: {names}."
+
     search_match = re.search(
-        r"(?:kontakt|kontakte|telefonnummer|nummer)\s+(?:von\s+|für\s+|fuer\s+|namens\s+)?(.+)$",
+        r"(?:kontakt|kontakte|telefonnummer|nummer|kontaktdaten)\s+(?:von\s+|für\s+|fuer\s+|namens\s+)?(.+)$",
         text,
         flags=re.IGNORECASE,
     )
