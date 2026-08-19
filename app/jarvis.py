@@ -51,6 +51,7 @@ from files_client import (
     copy_item,
     create_folder,
     detect_root_hint,
+    find_item,
     list_cleanup_candidates,
     move_item,
     move_items_matching,
@@ -5846,6 +5847,45 @@ def handle_file_command(text: str, memory: Memory | None = None) -> str | None:
     root_hint = detect_root_hint(text)
 
     try:
+        # Datei-Loeschen gab es bisher gar nicht: "Lösche die Datei X" fiel
+        # bis zum fallback_query-Zweig weiter unten durch, der den kompletten
+        # Rohsatz (inkl. "Lösche") als Suchbegriff an search_files() gab - eine
+        # erkennbar kaputte "nichts gefunden"-Antwort statt einer echten
+        # Loeschung. Live beobachtet 2026-08-19. move_to_trash() existierte
+        # bereits (genutzt vom Speicherplatz-Aufraeumen), war aber nie an eine
+        # gezielte Einzeldatei-Loeschung per Namen angebunden. Verschiebt in
+        # den Papierkorb (rueckgaengig machbar), loescht nie endgueltig.
+        delete_match = re.search(
+            r"(?:lösche|loesche|entferne)\s+(?:die\s+|den\s+|das\s+)?(?:datei\s+)?(.+?)"
+            r"(?:\s+(?:auf|am|in|unter|von|vom)\s+(?:meinem\s+|meinen\s+|meiner\s+|dem\s+|der\s+)?"
+            r"(?:desktop|schreibtisch|dokumente|documents|downloads|download|home|benutzerordner|dateien|jarvis|projekt|code))?[.?!]*$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if delete_match:
+            file_name = clean_file_name(delete_match.group(1))
+            if not file_name:
+                return "Welche Datei soll ich löschen?"
+            if memory is None:
+                return f"Ich würde {file_name} in den Papierkorb legen."
+            return ACTION_ENGINE.propose(
+                memory,
+                "pending_file_action",
+                ActionProposal(
+                    action_type="file_action",
+                    execution_data={
+                        "action": "delete",
+                        "source": file_name,
+                        "target": "",
+                        "root": root_hint,
+                    },
+                    confirm_prompt=(
+                        f"Ich habe noch nichts gelöscht. Soll ich {file_name} wirklich in den "
+                        "Papierkorb legen? Sag ja oder abbrechen."
+                    ),
+                ),
+            )
+
         bulk_move = extract_bulk_file_move(text)
         if bulk_move and not any(term in normalized for term in ("kopier", "kopiere", "kopieren")):
             query, target_folder = bulk_move
@@ -5962,10 +6002,23 @@ def execute_file_action(data: dict) -> str:
     query = str(data.get("query") or "").strip()
     target = str(data.get("target") or "").strip()
     root_hint = str(data.get("root") or "").strip()
-    if not action or not target or (action != "move_matching" and not source) or (action == "move_matching" and not query):
+    if (
+        not action
+        or (action not in ("move_matching", "delete") and not target)
+        or (action != "move_matching" and not source)
+        or (action == "move_matching" and not query)
+    ):
         return "Mir fehlt noch ein Baustein. Ich ändere nichts."
 
     try:
+        if action == "delete":
+            path = find_item(source, root_hint=root_hint, config=CONFIG)
+            if path is None:
+                return f"Ich habe {source} nicht eindeutig gefunden. Ich habe nichts gelöscht."
+            moved, skipped = move_to_trash([path])
+            if moved:
+                return f"Erledigt. Ich habe {source} in den Papierkorb gelegt."
+            return f"Ich konnte {source} nicht in den Papierkorb legen."
         if action == "copy":
             return copy_item(source, target, root_hint=root_hint, config=CONFIG)
         if action == "move":
