@@ -337,26 +337,60 @@ func scan(limit: Int) throws {
         startedAt: startedText
     )
 
-    assets.enumerateObjects { asset, index, _ in
-        let label = filename(for: asset)
-        let currentModifiedAt = modifiedAt(for: asset)
-        if !currentModifiedAt.isEmpty, knownMetadata[asset.localIdentifier] == currentModifiedAt {
-            records.append(metadataOnlyRecord(asset: asset))
-        } else {
-            records.append(analyze(asset: asset))
+    // Vorher komplett sequenziell (ein Foto nach dem anderen: Laden - inkl.
+    // iCloud-Download bei nicht lokal gespeicherten Originalen, bis zu 45s
+    // Timeout - dann 3 Vision-Requests, dann erst das naechste Foto). Bei
+    // Bibliotheken mit "Optimiere Mac-Speicher" (viele Fotos nur in iCloud)
+    // ergab das ~46s/Foto, was einen vollstaendigen Scan auf >40 Stunden
+    // gestreckt haette. Live beobachtet 2026-08-19 (141 von 3798 Fotos nach
+    // fast 2 Stunden). PHImageManager.requestImage() und Vision-Requests sind
+    // fuer nebenlaeufige Aufrufe mit unabhaengigen CGImage/Handler-Instanzen
+    // dokumentiert sicher - workQueue.concurrent macht mehrere Foto-Ladevorgaenge
+    // gleichzeitig, waehrend eine serielle resultQueue nur die guenstige
+    // Buchfuehrung (Array-Append, Fortschritts-Datei) serialisiert, damit dort
+    // keine Nebenlaeufigkeits-Probleme entstehen. Ein Semaphore begrenzt die
+    // gleichzeitig laufenden Analysen auf maxConcurrent, damit nicht
+    // Tausende Tasks auf einmal Speicher/Threads belegen.
+    let maxConcurrent = 4
+    let workQueue = DispatchQueue(label: "photoscan.work", attributes: .concurrent)
+    let resultQueue = DispatchQueue(label: "photoscan.results")
+    let concurrencyLimiter = DispatchSemaphore(value: maxConcurrent)
+    let group = DispatchGroup()
+    var completedCount = 0
+    let totalCount = assets.count
+
+    for index in 0..<assets.count {
+        let asset = assets.object(at: index)
+        concurrencyLimiter.wait()
+        workQueue.async(group: group) {
+            let label = filename(for: asset)
+            let currentModifiedAt = modifiedAt(for: asset)
+            let record: PhotoRecord
+            if !currentModifiedAt.isEmpty, knownMetadata[asset.localIdentifier] == currentModifiedAt {
+                record = metadataOnlyRecord(asset: asset)
+            } else {
+                record = analyze(asset: asset)
+            }
+
+            resultQueue.sync {
+                records.append(record)
+                labelsRecognized += record.labels.count
+                completedCount += 1
+                writeProgress(
+                    status: "indexing",
+                    current: completedCount,
+                    total: totalCount,
+                    label: label,
+                    photosFound: allImages.count,
+                    videosFound: allVideos.count,
+                    labelsRecognized: labelsRecognized,
+                    startedAt: startedText
+                )
+            }
+            concurrencyLimiter.signal()
         }
-        labelsRecognized += records.last?.labels.count ?? 0
-        writeProgress(
-            status: "indexing",
-            current: index + 1,
-            total: assets.count,
-            label: label,
-            photosFound: allImages.count,
-            videosFound: allVideos.count,
-            labelsRecognized: labelsRecognized,
-            startedAt: startedText
-        )
     }
+    group.wait()
 
     if let first = records.first {
         FileHandle.standardError.write(Data((

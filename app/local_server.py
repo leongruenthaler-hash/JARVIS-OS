@@ -2016,7 +2016,13 @@ class JarvisLocalServer:
         # weit ist der Fotoindex?" antwortete mit "Lokale Fotoanalyse
         # fehlgeschlagen. Lokal analysiert: 0 Bilder." statt dem echten
         # Index-Fortschritt.
-        if "fotoindex" in normalized or ("foto" in normalized and ("index" in normalized or "scan" in normalized)):
+        # "scann"/"scan" bewusst NICHT allein als Ausloeser - "Scanne meine
+        # Fotos im Hintergrund" (ein Befehl, kein Statuscheck) enthaelt als
+        # Teilstring "scan" und wurde dadurch faelschlich hier als
+        # Statusabfrage abgefangen statt den eigentlichen Scan zu starten
+        # (photo_worker.request_scan() in handle_photos_command). Live
+        # beobachtet 2026-08-19, direkt beim Testen dieses Fixes.
+        if "fotoindex" in normalized or ("foto" in normalized and ("wie weit" in normalized or "fortschritt" in normalized or "prozent" in normalized or ("index" in normalized and "scan" not in normalized))):
             status = self._photos_status()
             stats = dict(status.get("stats") or {})
             label = str(status.get("currentLabel") or "Fotoindex bereit.")
