@@ -170,6 +170,7 @@ class FastIntentRouter:
         "mail", "mails", "email", "emails", "e mail", "posteingang", "postfach",
         "kalender", "termin", "termine", "erinnerung", "erinnerungen",
         "notiz", "notizen", "zettel", "foto", "fotos", "bild", "bilder",
+        "vision", "fotoindex", "dateiindex",
         "datei", "dateien", "ordner", "musik", "song", "lied",
         "aufgabe", "aufgaben", "kontakt", "kontakte",
     )

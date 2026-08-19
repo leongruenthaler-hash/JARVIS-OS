@@ -2005,6 +2005,29 @@ class JarvisLocalServer:
             if total > 0 and status.get("status") in {"preparing", "scanning", "indexing"}:
                 return f"Der Dateiindex ist bei {percentage:.0f} Prozent. {indexed} von {total} Einträgen sind verarbeitet."
             return f"{label} Ich sehe im Index {files} Dateien und {folders} Ordner."
+        # "fotoindex" bewusst als eigener, VOR _handle_local_photo_vision_command
+        # geprueft und daher vorrangiger Zweig: dessen is_photo_context-
+        # Gate matcht schon auf das blosse Teilwort "foto" in "fotoindex" und
+        # dessen "wie weit"-Zweig lieferte bisher immer den Fortschritt der
+        # LOKALEN VISION-ANALYSE (ein separates Feature) statt des eigentlich
+        # gefragten Such-Fotoindex-Fortschritts (_photos_status(), analog zu
+        # _files_status() oben) - zwei unterschiedliche Konzepte, die durch das
+        # gemeinsame Wort "Foto" kollidierten. Live beobachtet 2026-08-19: "Wie
+        # weit ist der Fotoindex?" antwortete mit "Lokale Fotoanalyse
+        # fehlgeschlagen. Lokal analysiert: 0 Bilder." statt dem echten
+        # Index-Fortschritt.
+        if "fotoindex" in normalized or ("foto" in normalized and ("index" in normalized or "scan" in normalized)):
+            status = self._photos_status()
+            stats = dict(status.get("stats") or {})
+            label = str(status.get("currentLabel") or "Fotoindex bereit.")
+            percentage = float(status.get("percentage") or 0.0)
+            indexed = int(status.get("currentItem") or stats.get("photos_indexed") or 0)
+            total = int(status.get("totalItems") or indexed)
+            photos = int(stats.get("photos_found") or 0)
+            videos = int(stats.get("videos_found") or 0)
+            if total > 0 and status.get("status") in {"preparing", "scanning", "indexing"}:
+                return f"Der Fotoindex ist bei {percentage:.0f} Prozent. {indexed} von {total} Einträgen sind verarbeitet."
+            return f"{label} Ich sehe im Index {photos} Fotos und {videos} Videos."
         if "welches modell" in normalized or "modell nutzt" in normalized:
             return self.models.status_text()
         if "standardmodell" in normalized or "standard modell" in normalized or "phi4" in normalized or "phi 4" in normalized or "phi-4" in normalized:
