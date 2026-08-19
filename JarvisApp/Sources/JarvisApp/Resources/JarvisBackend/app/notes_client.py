@@ -158,12 +158,14 @@ def delete_note(title: str, folder_name: str | None = None) -> str:
         if not didDelete then
             repeat with accountRef in accounts
                 repeat with folderRef in folders of accountRef
-                    set matchingNotes to (notes of folderRef whose name is noteTitle)
-                    if (count of matchingNotes) > 0 then
-                        delete item 1 of matchingNotes
-                        set didDelete to true
-                        exit repeat
+                    if name of folderRef as string is not "Recently Deleted" and name of folderRef as string is not "Kürzlich gelöscht" then
+                        set matchingNotes to (notes of folderRef whose name is noteTitle)
+                        if (count of matchingNotes) > 0 then
+                            delete item 1 of matchingNotes
+                            set didDelete to true
+                        end if
                     end if
+                    if didDelete then exit repeat
                 end repeat
                 if didDelete then exit repeat
             end repeat
@@ -195,16 +197,22 @@ def list_recent_notes(limit: int = 5) -> list[dict]:
         set output to {}
         repeat with accountRef in accounts
             repeat with folderRef in folders of accountRef
-                repeat with noteRef in notes of folderRef
-                    set noteTitle to name of noteRef as string
-                    set modDate to modification date of noteRef
-                    set y to year of modDate as string
-                    set mo to (month of modDate as integer) as string
-                    set d to day of modDate as string
-                    set h to hours of modDate as string
-                    set mi to minutes of modDate as string
-                    set end of output to noteTitle & "\t" & y & "\t" & mo & "\t" & d & "\t" & h & "\t" & mi
-                end repeat
+                -- "Kürzlich gelöscht"/"Recently Deleted" ist Notizens Papierkorb
+                -- (30 Tage Aufbewahrung) - ohne diesen Ausschluss tauchten gerade
+                -- geloeschte Notizen weiterhin in "Zeig mir meine Notizen" auf, als
+                -- waeren sie nie geloescht worden. Live beobachtet 2026-08-19.
+                if name of folderRef as string is not "Recently Deleted" and name of folderRef as string is not "Kürzlich gelöscht" then
+                    repeat with noteRef in notes of folderRef
+                        set noteTitle to name of noteRef as string
+                        set modDate to modification date of noteRef
+                        set y to year of modDate as string
+                        set mo to (month of modDate as integer) as string
+                        set d to day of modDate as string
+                        set h to hours of modDate as string
+                        set mi to minutes of modDate as string
+                        set end of output to noteTitle & "\t" & y & "\t" & mo & "\t" & d & "\t" & h & "\t" & mi
+                    end repeat
+                end if
             end repeat
         end repeat
         set AppleScript's text item delimiters to return

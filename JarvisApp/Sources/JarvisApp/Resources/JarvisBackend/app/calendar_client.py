@@ -342,6 +342,113 @@ def create_reminder(
     return f"Erinnerung erstellt: {title}"
 
 
+def delete_calendar_event(title: str, calendar_name: str | None = None) -> str:
+    """Sucht einen Kalendereintrag per Titel und loescht ihn - bisher gab es
+    ueberhaupt keinen Loesch-Pfad fuer Kalendereintraege (nur Erstellen), jede
+    "Lösche den Termin X"-Anfrage landete stattdessen bei der Datum/Uhrzeit-
+    Extraktion und scheiterte mit "brauche ich noch Datum oder Uhrzeit". Live
+    beobachtet 2026-08-19. Nutzt bewusst einen "whose"-Filter statt einer ueber
+    eine Repeat-Schleife gemerkten Referenz - siehe notes_client.py::delete_note()
+    fuer die Begruendung (dort reproduzierbar mit Notes-Fehler -1728
+    fehlgeschlagen, wenn eine gemerkte Referenz statt eines whose-Ausdrucks an
+    "delete" uebergeben wurde)."""
+    safe_title = _escape_applescript_text(title)
+    safe_calendar = _escape_applescript_text(calendar_name or "")
+
+    script = f"""
+    set eventTitle to "{safe_title}"
+    set configuredCalendar to "{safe_calendar}"
+    set didDelete to false
+
+    tell application "Calendar"
+        if configuredCalendar is not "" then
+            repeat with calendarRef in calendars
+                if name of calendarRef as string is configuredCalendar then
+                    set matchingEvents to (events of calendarRef whose summary is eventTitle)
+                    if (count of matchingEvents) > 0 then
+                        delete item 1 of matchingEvents
+                        set didDelete to true
+                    end if
+                    exit repeat
+                end if
+            end repeat
+        end if
+
+        if not didDelete then
+            repeat with calendarRef in calendars
+                set matchingEvents to (events of calendarRef whose summary is eventTitle)
+                if (count of matchingEvents) > 0 then
+                    delete item 1 of matchingEvents
+                    set didDelete to true
+                    exit repeat
+                end if
+            end repeat
+        end if
+
+        if didDelete then
+            return "deleted"
+        else
+            return "not_found"
+        end if
+    end tell
+    """
+
+    result = _run_applescript(script, app_name="Kalender")
+    if str(result or "").strip() != "deleted":
+        raise CalendarAccessError(f"Ich habe keinen Termin mit dem Titel „{title}“ gefunden.")
+    return f"Kalendereintrag gelöscht: {title}"
+
+
+def delete_reminder(title: str, list_name: str | None = None) -> str:
+    """Analog zu delete_calendar_event(), fuer Erinnerungen. Gleiches vorher
+    komplett fehlendes Loesch-Verhalten, gleicher whose-Filter-Ansatz."""
+    safe_title = _escape_applescript_text(title)
+    safe_list = _escape_applescript_text(list_name or "")
+
+    script = f"""
+    set reminderTitle to "{safe_title}"
+    set configuredList to "{safe_list}"
+    set didDelete to false
+
+    tell application "Reminders"
+        if configuredList is not "" then
+            repeat with listRef in lists
+                if name of listRef as string is configuredList then
+                    set matchingReminders to (reminders of listRef whose name is reminderTitle)
+                    if (count of matchingReminders) > 0 then
+                        delete item 1 of matchingReminders
+                        set didDelete to true
+                    end if
+                    exit repeat
+                end if
+            end repeat
+        end if
+
+        if not didDelete then
+            repeat with listRef in lists
+                set matchingReminders to (reminders of listRef whose name is reminderTitle)
+                if (count of matchingReminders) > 0 then
+                    delete item 1 of matchingReminders
+                    set didDelete to true
+                    exit repeat
+                end if
+            end repeat
+        end if
+
+        if didDelete then
+            return "deleted"
+        else
+            return "not_found"
+        end if
+    end tell
+    """
+
+    result = _run_applescript(script, app_name="Erinnerungen")
+    if str(result or "").strip() != "deleted":
+        raise CalendarAccessError(f"Ich habe keine Erinnerung mit dem Titel „{title}“ gefunden.")
+    return f"Erinnerung gelöscht: {title}"
+
+
 _GERMAN_WEEKDAYS = ("Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag")
 _GERMAN_MONTHS = (
     "Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August",

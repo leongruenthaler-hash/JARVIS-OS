@@ -30,6 +30,8 @@ from calendar_client import (
     CalendarAccessError,
     create_calendar_event,
     create_reminder,
+    delete_calendar_event,
+    delete_reminder,
     events_on_date,
     list_open_reminders,
     list_upcoming_calendar_items,
@@ -93,6 +95,7 @@ from music_client import (
     MusicAccessError,
     list_playlists,
     next_track,
+    now_playing,
     pause_music,
     play_music,
     play_playlist,
@@ -997,7 +1000,7 @@ def extract_file_search_query(text: str) -> str:
     else:
         cleaned = remove_domain_words(text, "files")
 
-    cleaned = re.sub(r"\b(?:nach|datei|dateien|ordner|bitte|mal|mir)\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b(?:nach|datei|dateien|ordner|bitte|mal|mir|namens|eine|einen|einer)\b", " ", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\s+", " ", cleaned)
     return cleaned.strip(" .,!?:;\"'")
 
@@ -2756,6 +2759,7 @@ def has_pending_action(memory: Memory) -> bool:
         "pending_desktop_move",
         "pending_desktop_move_many",
         "pending_calendar_create",
+        "pending_calendar_delete",
         "pending_mail_document_export",
         "pending_file_action",
         "pending_domain_clarification",
@@ -2808,6 +2812,7 @@ def pending_action_matches_text(settings: dict, normalized_text: str) -> bool:
         "pending_desktop_move": ("desktop", "schreibtisch", "verschieb", "ordner", "datei"),
         "pending_desktop_move_many": ("desktop", "schreibtisch", "verschieb", "ordner", "datei"),
         "pending_calendar_create": ("kalender", "termin", "erinnerung", "erstelle", "morgen", "heute", "uhr"),
+        "pending_calendar_delete": ("kalender", "termin", "erinnerung", "lösch", "loesch", "entferne"),
         "pending_mail_document_export": ("mail", "mails", "rechnung", "versicherung", "abo", "kopier"),
         "pending_file_action": ("datei", "ordner", "kopier", "verschieb", "lösch", "loesch", "schreibtisch", "desktop"),
         "pending_mail_delete": ("mail", "mails", "papierkorb", "lösch", "loesch", "verschieb"),
@@ -3626,6 +3631,30 @@ def handle_pending_action_flow(
         )
         if is_confirm or is_cancel:
             return _continue_multistep_chain_if_pending(memory, "pending_calendar_create", result, aborted=is_cancel, photo_worker=photo_worker)
+        return result
+
+    pending_calendar_delete = settings.get("pending_calendar_delete")
+    if isinstance(pending_calendar_delete, dict):
+        if not is_confirm and not is_cancel and has_domain(text, "calendar"):
+            # Gleicher Schutz wie bei pending_calendar_create weiter oben: eine
+            # neue, eigenstaendige Kalender-Anfrage waehrend noch eine alte
+            # Loesch-Bestaetigung offen war soll diese nicht stillschweigend
+            # uebernehmen.
+            settings.pop("pending_calendar_delete", None)
+            memory.set("settings", settings)
+            return None
+        result = ACTION_ENGINE.resolve(
+            memory,
+            "pending_calendar_delete",
+            pending_calendar_delete,
+            action_type="calendar_delete",
+            is_confirm=is_confirm,
+            is_cancel=is_cancel,
+            cancel_message="Alles klar, ich lösche nichts.",
+            waiting_message="Ich warte noch auf Ihre Bestätigung. Sagen Sie ja zum Löschen oder abbrechen.",
+        )
+        if is_confirm or is_cancel:
+            return _continue_multistep_chain_if_pending(memory, "pending_calendar_delete", result, aborted=is_cancel, photo_worker=photo_worker)
         return result
 
     # Sammel-Bestaetigung/-Ablehnung der aus Mails erkannten Kalender-Vorschlaege,
@@ -5070,6 +5099,41 @@ def answer_calendar_query(text: str, normalized: str) -> str:
         return "Ich konnte Ihren Kalender gerade nicht lesen."
 
 
+_CALENDAR_DELETE_VERBS = (
+    "lösche",
+    "loesche",
+    "löschen",
+    "loeschen",
+    "entferne",
+    "entfernen",
+    "lösch",
+    "loesch",
+    "sage ab",
+    "sag ab",
+    "storniere",
+)
+
+
+def _extract_calendar_title_for_delete(text: str) -> tuple[str | None, bool]:
+    """Extrahiert Titel + Art (Erinnerung vs. Termin/Kalendereintrag) aus einer
+    Loesch-Anfrage ("Lösche den Termin X", "Entferne die Erinnerung Y") - im
+    Gegensatz zu extract_calendar_title() (auf Erstell-Saetze zugeschnitten,
+    strippt nur Erstell-Verben) wird hier gezielt nach dem Nomen direkt nach
+    "termin"/"kalendereintrag"/"erinnerung" gesucht. Analog zu
+    _extract_note_title_for_delete()."""
+    normalized = normalize_text(text)
+    is_reminder = "erinnerung" in normalized and "termin" not in normalized and "kalender" not in normalized
+    noun_pattern = "erinnerung" if is_reminder else "(?:termin|kalendereintrag)"
+    match = re.search(
+        rf"{noun_pattern}\s+(?:namens\s+|mit\s+dem\s+titel\s+)?(?:(?:der|die|den)\s+)?(.+?)$",
+        normalized,
+    )
+    if not match:
+        return None, is_reminder
+    title = match.group(1).strip(" .,!?:;")
+    return (title or None), is_reminder
+
+
 def handle_calendar_command(text: str, memory: Memory | None = None) -> str | None:
     normalized = normalize_text(text)
     domain_match = has_domain(text, "calendar")
@@ -5141,6 +5205,26 @@ def handle_calendar_command(text: str, memory: Memory | None = None) -> str | No
             "Bei klaren Mails mit Rechnung, Frist oder Termin lege ich automatisch etwas an. Ziemlich fleißig, ich weiß."
         )
 
+    if any(term in normalized for term in _CALENDAR_DELETE_VERBS):
+        delete_title, delete_is_reminder = _extract_calendar_title_for_delete(text)
+        if not delete_title:
+            return "Erinnerung" if delete_is_reminder else "Welchen Termin soll ich löschen?"
+        if memory is None:
+            return None
+        target = "Erinnerung" if delete_is_reminder else "Termin"
+        return ACTION_ENGINE.propose(
+            memory,
+            "pending_calendar_delete",
+            ActionProposal(
+                action_type="calendar_delete",
+                execution_data={"kind": "reminder" if delete_is_reminder else "calendar", "title": delete_title},
+                confirm_prompt=(
+                    f"Soll ich {'die' if delete_is_reminder else 'den'} {target} {delete_title} wirklich löschen? "
+                    "Sag ja oder abbrechen."
+                ),
+            ),
+        )
+
     parsed = _extract_datetime(text, CONFIG)
     if parsed is None:
         return "Für Kalender oder Erinnerung brauche ich noch Datum oder Uhrzeit."
@@ -5152,7 +5236,12 @@ def handle_calendar_command(text: str, memory: Memory | None = None) -> str | No
 
     is_reminder = "erinner" in normalized and "termin" not in normalized and "kalender" not in normalized
     if memory is not None:
+        # "die Erinnerung" (feminin) vs. "den Kalendereintrag" (maskulin,
+        # Akkusativ) - vorher hartkodiert "die {target}" fuer beide Faelle,
+        # was bei Kalendereintraegen grammatikalisch falsch war ("Soll ich die
+        # Kalendereintrag ... erstellen?"). Live beobachtet 2026-08-19.
         target = "Erinnerung" if is_reminder else "Kalendereintrag"
+        article = "die" if is_reminder else "den"
         return ACTION_ENGINE.propose(
             memory,
             "pending_calendar_create",
@@ -5165,7 +5254,7 @@ def handle_calendar_command(text: str, memory: Memory | None = None) -> str | No
                     "has_time": has_time,
                 },
                 confirm_prompt=(
-                    f"Ich habe noch nichts angelegt. Soll ich die {target} {title} "
+                    f"Ich habe noch nichts angelegt. Soll ich {article} {target} {title} "
                     f"für {when.strftime('%d.%m.%Y %H:%M')} erstellen?"
                 ),
             ),
@@ -5234,6 +5323,30 @@ def execute_calendar_create(data: dict) -> str:
 ACTION_ENGINE.register("calendar_create", execute_calendar_create)
 
 
+def execute_calendar_delete(data: dict) -> str:
+    kind = str(data.get("kind") or "calendar")
+    title = str(data.get("title") or "").strip()
+    try:
+        if kind == "reminder":
+            delete_reminder(title, list_name=CONFIG.get("reminders_list_name"))
+            privacy_log("reminders", "delete", success=True)
+            return f"Erledigt. Ich habe die Erinnerung {title} gelöscht."
+
+        delete_calendar_event(title, calendar_name=CONFIG.get("calendar_name"))
+        privacy_log("calendar", "delete", success=True)
+        return f"Erledigt. Ich habe den Termin {title} gelöscht."
+    except CalendarAccessError as exc:
+        privacy_log("calendar", "delete", success=False)
+        return str(exc)
+    except Exception as exc:
+        privacy_log("calendar", "delete", success=False)
+        print("Kalender Loesch-Fehler:", type(exc).__name__)
+        return "Ich konnte den Termin oder die Erinnerung nicht löschen."
+
+
+ACTION_ENGINE.register("calendar_delete", execute_calendar_delete)
+
+
 def extract_calendar_title(text: str) -> str:
     cleaned = strip_wake_word_from_text(text)
     normalized = normalize_text(cleaned)
@@ -5255,7 +5368,7 @@ def extract_calendar_title(text: str) -> str:
             return title
 
     cleaned = re.sub(
-        r"\b(?:kalender|kalendereintrag|termin|termineintrag|erinnerung|erinnerungen|erinnere mich|bitte|mal|mir|einen|eine|kurz|kurze|kurzen|den|die|das|für mich|fuer mich)\b",
+        r"\b(?:kalender|kalendereintrag|termin|termineintrag|erinnerung|erinnerungen|erinnere mich|bitte|mal|mir|einen|eine|kurz|kurze|kurzen|den|die|das|für mich|fuer mich|namens)\b",
         " ",
         cleaned,
         flags=re.IGNORECASE,
@@ -6201,6 +6314,22 @@ def handle_music_command(text: str) -> str | None:
         return "Apple-Music-Steuerung ist in der Konfiguration deaktiviert."
 
     try:
+        # Reine Status-/Lese-Frage ("Was läuft gerade?", "Welche Musik läuft?")
+        # wurde bisher gar nicht erkannt und fiel bis zum fallback_query-Zweig
+        # durch, der sie faelschlich als Suchbegriff fuer play_search()
+        # interpretierte - eine Frage loeste damit eine Wiedergabe-Aktion aus
+        # statt beantwortet zu werden. Live beobachtet 2026-08-19: "Welche
+        # Musik läuft gerade?" ergab "Ich habe den Titel ... nicht gefunden."
+        # statt einer Statusantwort. now_playing() existierte bereits fuer die
+        # Dashboard-Musik-Karte, war aber nie an den Chat-Pfad angebunden.
+        if any(term in normalized for term in ("was läuft", "was laeuft", "welche musik läuft", "welche musik laeuft", "läuft gerade", "laeuft gerade", "aktueller titel", "aktuelle musik", "was wird gerade gespielt", "was spielt gerade")):
+            track = now_playing()
+            if not track:
+                return "Gerade läuft keine Musik."
+            artist_part = f" von {track['artist']}" if track.get("artist") else ""
+            state = "läuft gerade" if track.get("is_playing") else "ist gerade pausiert"
+            return f"{track['title']}{artist_part} {state}."
+
         if "playlist" in normalized and any(term in normalized for term in ("welche", "liste", "auflisten", "zeig", "zeige")):
             playlists = list_playlists()
             if not playlists:

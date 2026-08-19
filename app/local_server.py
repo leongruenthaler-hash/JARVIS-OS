@@ -2007,7 +2007,7 @@ class JarvisLocalServer:
             return f"{label} Ich sehe im Index {files} Dateien und {folders} Ordner."
         if "welches modell" in normalized or "modell nutzt" in normalized:
             return self.models.status_text()
-        if "standardmodell" in normalized or "standard modell" in normalized:
+        if "standardmodell" in normalized or "standard modell" in normalized or "phi4" in normalized or "phi 4" in normalized or "phi-4" in normalized:
             return self.models.use_standard_model()
         if "gemma" in normalized:
             return self.models.use_local_model("gemma3:4b")
