@@ -21,6 +21,18 @@ from typing import Any
 
 PHOTOS_HELPER_BUNDLE_ID = "com.leon.jarvis.photoshelper"
 
+# Verhindert ueberlappende Fotos-Freigabe-Dialoge: PhotoIndex-Instanzen werden
+# an vielen Stellen frisch erzeugt (z.B. _photos_status() im Dashboard-Poll),
+# ein instanzgebundener Lock haette sie also nicht serialisiert. Live
+# beobachtet 2026-08-19: zwei sich zeitlich ueberlappende "Fordere
+# Fotos-Freigabe an"-Anfragen (die zweite kam, waehrend die AppleScript-
+# Zeitueberschreitung der ersten den 'open'-Wrapper-Prozess bereits beendet,
+# den davon gestarteten Helfer-Prozess aber - macOS-Eigenheit, siehe
+# _kill_stray_authorize_processes() - noch NICHT beendet hatte) fuehrten dazu,
+# dass macOS die Fotos-Berechtigung am Ende faelschlich auf "denied" statt
+# "authorized" setzte, obwohl der Nutzer zustimmen wollte.
+_AUTHORIZE_LOCK = threading.Lock()
+
 
 def _macos_sdk_path() -> str:
     """Ermittelt den SDK-Pfad, der tatsaechlich zum aktiven Xcode-Compiler passt
@@ -205,39 +217,90 @@ class PhotoIndex:
         output = self._run_helper(["status"], timeout=20)
         return output.strip() or "unknown"
 
-    def request_permission(self) -> str:
+    def _kill_stray_authorize_processes(self) -> None:
+        """Sicherheitsnetz gegen Prozess-Leichen: '_run_helper_app()' startet den
+        Helfer ueber 'open -W bundle --args authorize ...' - laeuft dabei ein
+        Python-seitiges Timeout ab, killt subprocess.run() nur den 'open'-
+        Wrapper-Prozess. Die davon ueber LaunchServices gestartete App laeuft
+        als eigenstaendiger Prozess unabhaengig weiter (macOS-Eigenheit: 'open'
+        ist kein normaler Elternprozess im Unix-Sinn, ein Kill-Signal an 'open'
+        propagiert nicht zur gestarteten App). Ohne dieses Aufraeumen blieb ein
+        abgelaufener 'authorize'-Aufruf minutenlang im Hintergrund haengen und
+        konkurrierte mit jedem weiteren Freigabe-Versuch um denselben
+        System-Dialog - genau das fuehrte live dazu, dass macOS die
+        Fotos-Berechtigung am Ende faelschlich auf "denied" setzte statt die
+        Zustimmung des Nutzers zu uebernehmen. Live beobachtet 2026-08-19.
+        Matcht bewusst auf "JarvisPhotosHelper authorize" (Binaryname + Argument),
+        NICHT auf den blossen Binary-Pfad - sonst wuerde ein parallel laufender
+        Scan (gleiche Binary, anderes Argument) faelschlich mitgetroffen."""
         try:
-            current_status = self.permission_status()
-        except PhotosAccessError:
-            current_status = "unknown"
+            subprocess.run(
+                ["pkill", "-f", "JarvisPhotosHelper authorize"],
+                capture_output=True,
+                timeout=5,
+            )
+        except Exception:
+            pass
 
-        if current_status == "restricted":
+    def request_permission(self) -> str:
+        # Serialisiert ALLE Freigabe-Anfragen prozessweit (nicht nur pro
+        # PhotoIndex-Instanz, da an vielen Stellen frische Instanzen erzeugt
+        # werden - siehe _AUTHORIZE_LOCK-Kommentar oben). Eine bereits laufende
+        # Anfrage wird nicht durch eine zweite gestoert, die sonst denselben
+        # System-Dialog doppelt anstossen und macOS' Berechtigungsstatus
+        # durcheinanderbringen wuerde.
+        if not _AUTHORIZE_LOCK.acquire(blocking=False):
             return (
-                "macOS blockiert den Fotos-Zugriff gerade grundsätzlich. "
-                "Das ist kein normaler Ablehnen-Status, sondern eine Einschränkung durch das System."
+                "Es läuft gerade schon eine Fotos-Freigabe-Anfrage. Falls ein Systemdialog "
+                "auf dich wartet, bestätige ihn dort - sonst kurz warten und erneut fragen."
             )
 
-        if current_status == "denied":
-            reset_ok, reset_error = self._reset_permission()
-            if not reset_ok:
+        try:
+            self._kill_stray_authorize_processes()
+
+            try:
+                current_status = self.permission_status()
+            except PhotosAccessError:
+                current_status = "unknown"
+
+            if current_status == "restricted":
                 return (
-                    "Der Fotos-Zugriff ist aktuell von macOS abgelehnt, und ich konnte den Reset nicht selbst ausführen. "
-                    "Bitte beende Jarvis kurz und führe im normalen Terminal aus: "
-                    f"tccutil reset Photos {PHOTOS_HELPER_BUNDLE_ID}. "
-                    "Starte Jarvis danach neu und sag: Jarvis, fordere Fotos-Freigabe an."
-                    + (f" Technische Meldung: {reset_error}" if reset_error else "")
+                    "macOS blockiert den Fotos-Zugriff gerade grundsätzlich. "
+                    "Das ist kein normaler Ablehnen-Status, sondern eine Einschränkung durch das System."
                 )
 
-        try:
-            output = self._run_helper(["authorize"], timeout=35)
-        except PhotosAccessError as exc:
-            return (
-                "Ich konnte den Fotos-Freigabe-Dialog gerade nicht sauber auslösen. "
-                "Beende Jarvis kurz und führe im normalen Terminal aus: "
-                f"tccutil reset Photos {PHOTOS_HELPER_BUNDLE_ID}. "
-                "Starte Jarvis danach neu und sag: Jarvis, fordere Fotos-Freigabe an. "
-                f"Technische Meldung: {exc}"
-            )
+            if current_status == "denied":
+                reset_ok, reset_error = self._reset_permission()
+                if not reset_ok:
+                    return (
+                        "Der Fotos-Zugriff ist aktuell von macOS abgelehnt, und ich konnte den Reset nicht selbst ausführen. "
+                        "Bitte beende Jarvis kurz und führe im normalen Terminal aus: "
+                        f"tccutil reset Photos {PHOTOS_HELPER_BUNDLE_ID}. "
+                        "Starte Jarvis danach neu und sag: Jarvis, fordere Fotos-Freigabe an."
+                        + (f" Technische Meldung: {reset_error}" if reset_error else "")
+                    )
+
+            try:
+                # 70s statt vorher 35s: der Swift-Helfer wartet intern bis zu 60s
+                # auf die Nutzer-Antwort im System-Dialog (siehe authorizePhotos()
+                # in photos_helper.swift) - das vorherige 35s-Timeout schnitt
+                # jede Freigabe, die laenger als 35s zum Anklicken brauchte,
+                # zwangslaeufig verfrueht ab und war die eigentliche Ursache der
+                # oben beschriebenen Prozess-Leichen.
+                output = self._run_helper(["authorize"], timeout=70)
+            except PhotosAccessError as exc:
+                self._kill_stray_authorize_processes()
+                return (
+                    "Ich konnte den Fotos-Freigabe-Dialog gerade nicht sauber auslösen. "
+                    "Beende Jarvis kurz und führe im normalen Terminal aus: "
+                    f"tccutil reset Photos {PHOTOS_HELPER_BUNDLE_ID}. "
+                    "Starte Jarvis danach neu und sag: Jarvis, fordere Fotos-Freigabe an. "
+                    f"Technische Meldung: {exc}"
+                )
+            finally:
+                self._kill_stray_authorize_processes()
+        finally:
+            _AUTHORIZE_LOCK.release()
 
         status = output.strip()
         if status in {"authorized", "limited"}:

@@ -2191,9 +2191,23 @@ final class AppState: ObservableObject {
     }
 
     private func startScanPolling() {
+        // Vorher fest auf 720 Iterationen a 750ms begrenzt (= 9 Minuten), dann
+        // brach die Schleife bedingungslos ab - unabhaengig davon, ob noch ein
+        // Scan lief. Ein Fotoindex-Scan kann (selbst mit paralleler
+        // Verarbeitung) mehrere Stunden dauern, das Dashboard fror die
+        // Fortschrittsanzeige also nach 9 Minuten einfach ein, obwohl der Scan
+        // im Hintergrund weiterlief. Live beobachtet 2026-08-19: "die Anzeige
+        // hat sich nicht richtig aktualisiert". Die stillActive-Pruefung war
+        // bereits korrekt und haette selbst zuverlaessig abgebrochen, sobald
+        // wirklich nichts mehr lief - die zusaetzliche feste Obergrenze war
+        // unnoetig und schaedlich. Jetzt eine grosszuegige, aber nicht
+        // unbegrenzte Sicherheitsgrenze (24 Stunden bei 750ms-Intervall) statt
+        // 9 Minuten, damit ein haengender Task theoretisch trotzdem irgendwann
+        // endet, falls stillActive aus irgendeinem Grund nie greift.
+        let maxIterations = 24 * 60 * 60 * 1000 / 750
         scanPollingTask?.cancel()
         scanPollingTask = Task { [weak self] in
-            for _ in 0..<720 {
+            for _ in 0..<maxIterations {
                 if Task.isCancelled { return }
                 try? await Task.sleep(for: .milliseconds(750))
                 guard let self else { return }

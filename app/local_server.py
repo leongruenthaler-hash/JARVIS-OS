@@ -1270,6 +1270,21 @@ class JarvisLocalServer:
         status_name = str(progress.get("status") or ("completed" if cache.get("last_scan_at") else "idle"))
         current = int(progress.get("currentItem") or len(entries))
         total_items = int(progress.get("totalItems") or max(total + videos, len(entries), 0))
+        # cache["last_error"] blieb bisher stehen, bis der naechste Scan
+        # VOLLSTAENDIG durchgelaufen war, und wurde hier unbedingt vor dem
+        # frischen progress.get("errorMessage") geprueft - waehrend ein neuer,
+        # erfolgreich laufender Scan (status "scanning"/"indexing", kein
+        # aktueller Fehler) noch nicht fertig war, zeigte das Dashboard also
+        # weiterhin den ALTEN Fehler eines frueheren, laengst ueberholten
+        # Versuchs an ("Fotoindex fehlgeschlagen"), obwohl der aktuelle Scan
+        # tatsaechlich fehlerfrei voranschritt. Live beobachtet 2026-08-19:
+        # ein Scan lief sichtbar bei Item 28/3798 ohne Fehler, das Dashboard
+        # zeigte trotzdem "Fehler: Fotos-Freigabe wurde noch nicht angefragt"
+        # von einem Versuch Minuten zuvor. Der alte last_error ist nur noch
+        # relevant, wenn gerade NICHT aktiv gescannt wird.
+        live_error = progress.get("errorMessage")
+        is_actively_running = status_name in {"scanning", "indexing"}
+        error_message = live_error if (live_error or is_actively_running) else cache.get("last_error")
         payload = self._scan_progress(
             status_name,
             str(progress.get("currentLabel") or ("Fotoindex bereit." if entries else "Noch kein Fotoindex.")),
@@ -1277,7 +1292,7 @@ class JarvisLocalServer:
             total_items=total_items,
             started_at=progress.get("startedAt") or cache.get("scan_started_at"),
             finished_at=progress.get("finishedAt") or cache.get("last_scan_at"),
-            error_message=cache.get("last_error") or progress.get("errorMessage"),
+            error_message=error_message,
             stats={
                 "photos_found": total,
                 "photos_indexed": len([entry for entry in entries if str(entry.get("mediaType") or "image") == "image"]),
