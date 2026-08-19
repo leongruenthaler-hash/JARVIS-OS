@@ -5445,13 +5445,17 @@ def extract_calendar_title(text: str) -> str:
             return title
 
     cleaned = re.sub(
-        r"\b(?:kalender|kalendereintrag|termin|termineintrag|erinnerung|erinnerungen|erinnere mich|bitte|mal|mir|einen|eine|kurz|kurze|kurzen|den|die|das|für mich|fuer mich|namens)\b",
+        r"\b(?:kalender|kalendereintrag|termin|termineintrag|erinnerung|erinnerungen|erinnere mich|bitte|mal|mir|einen|eine|kurz|kurze|kurzen|den|die|das|für mich|fuer mich|namens|kannst du|könntest du|koenntest du|kannst|könntest|koenntest)\b",
         " ",
         cleaned,
         flags=re.IGNORECASE,
     )
     cleaned = re.sub(
-        r"\b(?:erstelle|erstell|mach|mache|setz|setze|trag|trage|schreib|schreibe|ein|an)\b",
+        # "erstelle/erstell" (Imperativ) UND "erstellen" (Infinitiv, z.B. "...
+        # Termin fuer heute erstellen") - Live beobachtet 2026-08-19: die
+        # Infinitiv-Form fehlte, "Kannst du mir einen Termin fuer heute
+        # erstellen" ergab dadurch den unsinnigen Titel "Kannst du fuer".
+        r"\b(?:erstelle|erstell|erstellen|anlegen|anzulegen|eintragen|einzutragen|mach|mache|machen|setz|setze|setzen|trag|trage|schreib|schreibe|ein|an|du)\b",
         " ",
         cleaned,
         flags=re.IGNORECASE,
@@ -5471,8 +5475,34 @@ def clean_calendar_title(text: str) -> str:
     cleaned = re.sub(r"^\s*(?:ich|mich|mir|daran|dass)\s+", " ", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\bteste\b", "testen", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\s+muss\s*$", "", cleaned, flags=re.IGNORECASE)
+    # extract_calendar_title()'s purpose_match-Regex ("für/an/wegen/zu X")
+    # faengt bei Saetzen ohne echten Titel manchmal ein am Satzende
+    # haengengebliebenes Erstell-Verb als vermeintliche Absicht ein - "Termin
+    # fuer heute erstellen" ergab nach dem Entfernen von "heute" sonst den
+    # Titel "erstellen", sichtbar in der kaputten Bestaetigung "Kalendereintrag
+    # erstellen fuer ... erstellen?" (das Wort doppelt). Live beobachtet
+    # 2026-08-19. Nach dem Entfernen faellt der Titel korrekt leer aus und die
+    # bestehende Fallback-Logik in handle_calendar_command() nutzt "Termin".
+    cleaned = re.sub(
+        r"\b(?:erstelle|erstell|erstellen|anlegen|anzulegen|eintragen|einzutragen|machen|setzen)\s*$",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
     cleaned = re.sub(r"\s+", " ", cleaned)
-    return cleaned.strip(" .,!?:;\"'")
+    cleaned = cleaned.strip(" .,!?:;\"'")
+    # Generisches Sicherheitsnetz statt weiterer Einzelwort-Ausnahmen: bleibt
+    # nach allen obigen Bereinigungen nur noch eine blosse Praeposition/
+    # Fuellwort ohne echtes Inhaltswort uebrig (z.B. "für", "zu", "an" allein),
+    # ist das kein sinnvoller Titel, sondern ein Extraktions-Artefakt. Leerer
+    # Rueckgabewert laesst die Fallback-Logik in handle_calendar_command()
+    # sauber "Termin"/"Erinnerung" einsetzen, statt einer kaputten
+    # Praeposition als Titel. Live beobachtet 2026-08-19: "Kannst du mir einen
+    # Termin fuer heute erstellen" hinterliess nach dem Entfernen von "heute"/
+    # "erstellen" noch das einzelne Wort "für" als vermeintlichen Titel.
+    if normalize_text(cleaned) in {"für", "fuer", "zu", "an", "wegen", "mit", "bei", "um", "am", "im"}:
+        return ""
+    return cleaned
 
 
 def handle_contact_command(text: str, memory: Memory | None = None) -> str | None:
