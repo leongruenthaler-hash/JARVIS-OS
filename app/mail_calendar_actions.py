@@ -229,11 +229,26 @@ def _combined_text(message: MailMessage) -> str:
 
 def _extract_datetime(text: str, config: dict[str, Any]) -> tuple[datetime, bool] | None:
     now = datetime.now()
+    normalized_text = _normalize_umlauts(text).lower()
+
+    # "in X Minuten/Stunden" wurde bisher gar nicht erkannt - _extract_time()
+    # findet dabei kein "HH:MM"/"HH Uhr"-Muster, also fiel die Anfrage komplett
+    # durch ("Für Kalender oder Erinnerung brauche ich noch Datum oder
+    # Uhrzeit."), obwohl der Nutzer eine vollkommen eindeutige relative
+    # Zeitangabe gemacht hat. Live beobachtet 2026-08-19. Muss VOR der
+    # regulaeren _extract_time()-Ermittlung geprueft werden, da diese sonst nur
+    # die Standard-Uhrzeit (z.B. 09:00) einsetzen wuerde statt "jetzt + Delta".
+    relative_offset = re.search(r"\bin\s+(\d+)\s*(minuten?|min|stunden?|std|h)\b", normalized_text)
+    if relative_offset:
+        amount = int(relative_offset.group(1))
+        unit = relative_offset.group(2)
+        delta = timedelta(hours=amount) if unit in ("stunden", "stunde", "std", "h") else timedelta(minutes=amount)
+        return now + delta, True
+
     default_hour, default_minute = _parse_default_time(
         str(config.get("auto_calendar_default_time", "09:00"))
     )
     hour, minute, has_time = _extract_time(text, default_hour, default_minute)
-    normalized_text = _normalize_umlauts(text).lower()
 
     relative_date = _extract_relative_date(normalized_text, now, hour, minute)
     if relative_date is not None:
