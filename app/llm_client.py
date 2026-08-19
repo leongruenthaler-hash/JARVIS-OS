@@ -12,6 +12,14 @@ from model_router import ModelRoute, ModelRouter
 from model_manager import ModelManager, ollama_hint_for_model, ollama_base_url
 from jarvis_personality import normalize_jarvis_messages
 
+# Modelle, die Ollamas "thinking"-Feature unterstuetzen (per "ollama show <model>"
+# verifiziert, 2026-08-19). "think": True bei einem nicht-faehigen Modell
+# (phi4-mini, gemma3:4b) schlaegt mit einem harten API-Fehler fehl ("does not
+# support thinking"), "think": False bei einem faehigen Modell unterdrueckt das
+# Nachdenken nicht wirklich, sondern vermischt es unmarkiert mit der
+# eigentlichen Antwort - siehe Kommentar in _ask_ollama().
+_THINKING_CAPABLE_MODELS = {"qwen3:4b"}
+
 
 class LLMClient:
     def __init__(self, config: dict[str, Any]):
@@ -38,9 +46,26 @@ class LLMClient:
         user_text: str | None = None,
         route: ModelRoute | None = None,
         force_local: bool = False,
+        raw_system_prompt: bool = False,
     ) -> str:
         self._refresh_model_state()
         route = route or self.plan(messages, user_text=user_text, force_local=force_local)
+        # Ein explizit uebergebenes max_output_tokens muss die vom Router
+        # berechnete Standard-Budgetierung ueberschreiben - ask_stream() macht
+        # das bereits korrekt (siehe dort), ask() ignorierte es bisher fuer den
+        # Ollama-Pfad komplett und nutzte immer route.max_output_tokens. Live
+        # beobachtet 2026-08-19: classify_domain_via_llm() bat explizit um nur
+        # 20 Token fuer eine knappe Ein-Wort-Klassifikation, bekam aber
+        # tatsaechlich das volle Standardbudget des aktiven Modells (z.B. 160
+        # bei qwen3:4b) - das gab dem Modell genug Raum, um ueber die geforderte
+        # knappe Antwort hinauszugehen und dabei zufaellig Domaenen-Woerter in
+        # eine laengere, nicht als Ein-Wort-Antwort gedachte Ausgabe einzustreuen,
+        # die dann faelschlich als Kategorie geparst wurde - z.B. stufte das
+        # reine "Wie geht es dir, Jarvis?" faelschlich als Kalender/Erinnerung
+        # ein, obwohl derselbe Prompt bei tatsaechlich 20 Token sauber "keine"
+        # antwortete.
+        if max_output_tokens is not None:
+            route.max_output_tokens = int(max_output_tokens)
         # "Privater Modus": dispatch on the effective provider, not the user's
         # configured default - route.provider already reflects force_local via plan(),
         # but the actual network call below must too, or a stale/explicitly-passed
@@ -49,7 +74,7 @@ class LLMClient:
         if effective_provider == "openai":
             return self._ask_openai(messages, max_output_tokens=max_output_tokens, route=route)
         if effective_provider == "ollama":
-            return self._ask_ollama(messages, route=route)
+            return self._ask_ollama(messages, route=route, raw_system_prompt=raw_system_prompt)
         raise ValueError(f"Unbekannter KI-Anbieter: {effective_provider}")
 
     def ask_stream(
@@ -102,15 +127,26 @@ class LLMClient:
         route: ModelRoute | None = None,
         stream: bool = False,
         on_chunk: Any | None = None,
+        raw_system_prompt: bool = False,
     ) -> str:
         route = route or self.plan(messages)
         model = os.getenv("OLLAMA_MODEL", route.model or self.model_manager.active_model)
+        # "think": False schaltet bei reasoning-faehigen Modellen (aktuell nur
+        # qwen3:4b unter den installierten) das Nachdenken NICHT wirklich ab -
+        # es unterdrueckt nur die saubere Kennzeichnung als eigenes "thinking"-
+        # Feld, der Denkprozess landet dann unmarkiert direkt im "content"-Feld,
+        # das an den Nutzer geht. Live beobachtet 2026-08-19: "Wie geht es dir,
+        # Jarvis?" ergab damit die rohe Gedankenkette ("Okay, let's see. The
+        # user asked...") als sichtbare Antwort statt einer echten. Bei
+        # Modellen OHNE thinking-Fähigkeit (phi4-mini, gemma3:4b) wuerde
+        # "think": True dagegen einen harten API-Fehler ausloesen ("does not
+        # support thinking") - deshalb pro Modell entscheiden statt pauschal.
         payload = {
             "model": model,
-            "messages": self._prepare_messages(messages, route=route),
+            "messages": self._prepare_messages(messages, route=route, raw_system_prompt=raw_system_prompt),
             "stream": bool(stream or route.stream),
             "keep_alive": route.keep_alive,
-            "think": False,
+            "think": model in _THINKING_CAPABLE_MODELS,
             "options": {
                 "num_ctx": int(route.num_ctx),
                 "num_predict": int(route.max_output_tokens),
@@ -135,8 +171,33 @@ class LLMClient:
 
         return str(data.get("message", {}).get("content", "")).strip()
 
-    def _prepare_messages(self, messages: list[dict[str, str]], route: ModelRoute | None = None) -> list[dict[str, str]]:
+    def _prepare_messages(
+        self,
+        messages: list[dict[str, str]],
+        route: ModelRoute | None = None,
+        raw_system_prompt: bool = False,
+    ) -> list[dict[str, str]]:
         recent_limit = route.recent_context_limit if route is not None else min(int(self.config.get("recent_context_messages", 4)), 4)
+        if raw_system_prompt:
+            # normalize_jarvis_messages() haengt jedem System-Prompt, der nicht
+            # bereits woertlich DEFAULT_JARVIS_SYSTEM_PROMPT enthaelt, dieses
+            # komplette Persoenlichkeits-Prompt VORAN - sinnvoll fuer normale
+            # Chat-Antworten, aber falsch fuer schmale Werkzeug-Aufrufe wie
+            # classify_domain_via_llm(), deren strikte "du bist NUR ein
+            # Klassifikator"-Anweisung dadurch faktisch von der viel laengeren,
+            # widersprechenden Jarvis-Rollenbeschreibung ueberschrieben wurde.
+            # Live beobachtet 2026-08-19: das Modell bekam zwei kollidierende
+            # Rollen ("hilfsbereiter Assistent mit Tool-Zugriff" UND "reiner
+            # Klassifikator") und folgte eher der ersten, laengeren - dadurch
+            # stufte es reinen Smalltalk ("Wie geht es dir, Jarvis?")
+            # faelschlich als Kalender/Erinnerung ein. raw_system_prompt=True
+            # gibt den vom Aufrufer gebauten System-Prompt unveraendert weiter.
+            trimmed = [message for message in messages if str(message.get("role") or "") != "system"]
+            trimmed = trimmed[-max(0, recent_limit):] if recent_limit > 0 else []
+            system_messages = [message for message in messages if str(message.get("role") or "") == "system"]
+            system_content = str(system_messages[0].get("content") or "") if system_messages else ""
+            return [{"role": "system", "content": system_content}, *trimmed]
+
         prepared = normalize_jarvis_messages(messages, recent_limit=recent_limit)
         if route is not None and route.system_prompt_suffix and prepared and prepared[0]["role"] == "system":
             prepared[0]["content"] = f"{prepared[0]['content']}\n\n{route.system_prompt_suffix}"

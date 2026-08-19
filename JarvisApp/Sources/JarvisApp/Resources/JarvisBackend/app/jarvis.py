@@ -1555,7 +1555,13 @@ def _run_llm_memory_extraction(user_text: str, memory: Memory, user_name: str, f
         llm = LLMClient(CONFIG)
         route = llm.plan([], user_text=user_text, force_local=force_local)
         messages = _build_memory_extraction_messages(user_text, user_name)
-        raw = llm.ask(messages, max_output_tokens=80, user_text=user_text, route=route, force_local=force_local)
+        # 600 statt vorher 80: reasoning-faehige Modelle (aktuell qwen3:4b)
+        # brauchen oft 300-500+ Token allein zum "Nachdenken", bevor die
+        # eigentliche extrahierte Antwort kommt (siehe
+        # llm_client.py::_THINKING_CAPABLE_MODELS) - mit 80 Token kam bei
+        # solchen Modellen oft eine leere Antwort zurueck, das Nachdenken
+        # allein sprengte das Budget.
+        raw = llm.ask(messages, max_output_tokens=600, user_text=user_text, route=route, force_local=force_local, raw_system_prompt=True)
         fact = _parse_llm_fact_response(raw)
     except Exception as exc:
         logger.log("auto_memory_llm", "extraction_failed", success=False, error=type(exc).__name__)
@@ -2716,7 +2722,10 @@ def humanize_camera_feedback_via_llm(llm: LLMClient, raw_description: str) -> st
             "content": f"Automatische Bildbeschreibung: {raw_description}",
         },
     ]
-    answer = llm.ask(prompt, max_output_tokens=90, user_text="kamera outfit feedback umformulieren")
+    # 600 statt vorher 90 - reasoning-faehige Modelle (aktuell qwen3:4b)
+    # bauchen oft 300-500+ Token allein zum Nachdenken, sonst kaeme eine leere
+    # Antwort zurueck (siehe llm_client.py::_THINKING_CAPABLE_MODELS).
+    answer = llm.ask(prompt, max_output_tokens=600, user_text="kamera outfit feedback umformulieren")
     answer = answer.strip()
     if not answer:
         return None
@@ -3085,10 +3094,18 @@ def classify_domain_via_llm(llm: LLMClient, question: str) -> list[str]:
                 "Beruf, Eigenschaften) ist KEINE der obigen Faehigkeiten, auch wenn sie "
                 "Woerter wie Jahre, Datum oder einen Ortsnamen enthaelt - solche Saetze "
                 "beantwortest du immer mit 'keine'.\n"
+                "Smalltalk, Begruessungen, Fragen nach deinem Befinden/deiner Meinung/deinen "
+                "Faehigkeiten als Gespraechspartner, Witze oder allgemeines Plaudern sind "
+                "ebenfalls IMMER 'keine' - auch wenn ein Wort zufaellig an eine Faehigkeit "
+                "erinnert (z.B. 'geht' in 'wie geht es dir').\n"
                 "Beispiele:\n"
                 "'Ich lebe schon seit 18 Jahren in Amberg in Deutschland' -> keine\n"
                 "'Ich mag lieber kurze Antworten' -> keine\n"
                 "'Wie ist das Wetter heute' -> keine\n"
+                "'Wie geht es dir, Jarvis?' -> keine\n"
+                "'Was machst du gerade so?' -> keine\n"
+                "'Erzaehl mir einen Witz' -> keine\n"
+                "'Was haeltst du davon?' -> keine\n"
                 "'Trag morgen um 9 Uhr einen Termin beim Arzt ein' -> calendar\n"
                 "'Hast du neue Mails fuer mich' -> mail"
             ),
@@ -3096,7 +3113,11 @@ def classify_domain_via_llm(llm: LLMClient, question: str) -> list[str]:
         {"role": "user", "content": question},
     ]
     try:
-        raw = llm.ask(messages, max_output_tokens=20, user_text=question)
+        # 600 statt vorher 20 - gleicher Grund wie bei
+        # _run_llm_memory_extraction(): reasoning-faehige Modelle brauchen oft
+        # 300-500+ Token allein zum Nachdenken, sonst kommt die eigentliche
+        # Ein-Wort-Klassifikation nie an. Live beobachtet 2026-08-19.
+        raw = llm.ask(messages, max_output_tokens=600, user_text=question, raw_system_prompt=True)
     except Exception:
         return []
 

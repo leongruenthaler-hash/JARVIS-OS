@@ -94,6 +94,30 @@ class ModelRouter:
                 mode="quality",
             )
 
+        if selected == "qwen3:4b":
+            # qwen3:4b ist ein reasoning-faehiges Modell (siehe
+            # llm_client.py::_THINKING_CAPABLE_MODELS) - es "denkt" vor jeder
+            # Antwort ausfuehrlich nach (typischerweise 300-500+ Token allein
+            # fuers Nachdenken, auch bei einfachen Fragen wie "Wie geht es
+            # dir?"), bevor die eigentliche Antwort kommt. Das bisherige
+            # generische Budget (160 Token, 2048-2304 Kontext) reichte oft
+            # nicht mal fuers Nachdenken - die Antwort kam dann leer zurueck.
+            # Grosszuegig bemessen, da explizit als das leistungsfaehigste
+            # lokale Modell fuer entsprechend potente Hardware gedacht (Leons
+            # MacBook Pro M5 Pro/24GB) - Antwortqualitaet und natuerliches
+            # Mitdenken haben hier bewusst Vorrang vor minimaler Latenz.
+            return ModelRoute(
+                provider="ollama",
+                model=selected,
+                max_output_tokens=5000,
+                num_ctx=12000,
+                temperature=0.4,
+                recent_context_limit=8,
+                compact_prompt=False,
+                stream=True,
+                mode="quality",
+            )
+
         return ModelRoute(
             provider="ollama",
             model=selected,
