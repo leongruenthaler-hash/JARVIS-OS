@@ -2946,7 +2946,14 @@ def _memory_overview_answer(memory: Memory, memory_system: "JarvisMemorySystem")
     if fact_summary == "Keine wichtigen Langzeitnotizen.":
         return "Ich habe mir bisher noch keine Langzeit-Erinnerungen gespeichert."
 
-    facts = memory.all_facts()[-10:]
+    # Noch unbestaetigte, automatisch extrahierte Fakten (status="pending_confirmation",
+    # z.B. aus Screen-Vision/LLM-Auto-Extraktion) sollen hier NICHT als bereits
+    # feststehend vorgelesen werden - genau dieselbe Ausschluss-Regel wie
+    # ContextEngine.select_facts() (app/core/context_engine.py) fuer den
+    # Prompt-Kontext, hier aber bisher gefehlt. Live beobachtet 2026-08-20 im
+    # Mehrfach-Audit: ein falsch erkannter, nie vom Nutzer geprueften Fakt wurde
+    # auf "Was weißt du über mich" hin als Tatsache praesentiert.
+    facts = [f for f in memory.all_facts() if f.get("status", "confirmed") != "pending_confirmation"][-10:]
     settings = memory.get("settings") or {}
     settings["pending_memory_list"] = [item.get("content", "") for item in facts]
     memory.set("settings", settings)
@@ -3085,7 +3092,11 @@ def handle_memory_command(memory: Memory, text: str) -> str | None:
         if topic.lower().rstrip("?!. ") in {"mich", "mir"}:
             return _memory_overview_answer(memory, memory_system)
 
-        results = memory.search_facts(topic)
+        # Gleiche Ausschluss-Regel wie oben in _memory_overview_answer() - ein
+        # unbestaetigter Fakt soll nicht als feststehend praesentiert werden.
+        results = [
+            f for f in memory.search_facts(topic) if f.get("status", "confirmed") != "pending_confirmation"
+        ]
         if not results:
             return f"Dazu habe ich noch nichts im Langzeitgedächtnis: {topic}"
 
@@ -5330,7 +5341,16 @@ def handle_background_mail_command(
     wants_overnight = any(term in normalized for term in ("über nacht", "ueber nacht", "nachts", "nacht"))
     wants_background = any(term in normalized for term in ("hintergrund", "vorbereiten", "vorbereit", "automatisch"))
     wants_morning = any(term in normalized for term in ("morgen", "früh", "frueh", "morgen update", "morgenbriefing"))
-    wants_update = any(term in normalized for term in ("update", "was ist neu", "neue mails", "neues"))
+    # "neue mails"/"neues" traf faelschlich auch gezielte Fragen wie "Gibt es was
+    # Neues von Julia im Postfach?" oder "Wie viele ungelesene Mails habe ich?" -
+    # diese Funktion laeuft im Dispatch VOR handle_mail_command() (siehe
+    # answer_message()) und blockierte dessen Absendersuche/Mengenfrage-Logik
+    # komplett mit dem generischen, gecachten Hintergrund-Update. Live
+    # beobachtet 2026-08-20 beim Verifizieren des Mehrfach-Audits.
+    looks_like_specific_question = bool(_extract_mail_sender_query(text)) or "wie viele" in normalized or "anzahl" in normalized
+    wants_update = not looks_like_specific_question and any(
+        term in normalized for term in ("update", "was ist neu", "neue mails", "neues")
+    )
     wants_scan = any(term in normalized for term in ("scann", "scan", "lies", "lese", "prüf", "pruef", "schau"))
 
     if wants_overnight and wants_scan:

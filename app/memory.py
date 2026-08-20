@@ -21,6 +21,30 @@ def _new_fact_id() -> str:
     return uuid.uuid4().hex[:12]
 
 
+# forget_facts_matching() verglich bisher nur die Wortlaenge (>2 Zeichen), nicht
+# ob ein Wort ueberhaupt bedeutungstragend ist - deutsche Fuellwoerter wie
+# "ich"/"bin"/"hat"/"war"/"mein" sind alle laenger als 2 Zeichen und zaehlten
+# damit als echtes Treffersignal. Bei einer kurzen Vergiss-Anfrage (<=6
+# Inhaltswoerter) reichte dann oft schon EIN gemeinsames Fuellwort, um einen
+# komplett unabhaengigen Fakt versehentlich mitzuloeschen (z.B. "Vergiss, dass
+# ich Vegetarier bin" loeschte auch einen unabhaengigen "Ich bin bei der
+# Techniker Krankenkasse versichert"-Fakt, weil beide "ich"/"bin" teilen).
+# Live beobachtet 2026-08-20 im Mehrfach-Audit.
+_MEMORY_FORGET_STOPWORDS = frozenset(
+    {
+        "ich", "du", "er", "sie", "es", "wir", "ihr", "mich", "dich", "sich", "uns", "euch",
+        "mir", "dir", "ihm", "ihr", "ihnen",
+        "mein", "meine", "meiner", "meinem", "meinen", "meins",
+        "dein", "deine", "deiner", "deinem", "deinen",
+        "bin", "bist", "ist", "sind", "seid", "war", "warst", "waren", "wart",
+        "hab", "habe", "hast", "hat", "haben", "habt", "hatte", "hatten",
+        "und", "oder", "aber", "doch", "auch", "noch", "nur", "schon", "dass",
+        "der", "die", "das", "den", "dem", "des", "ein", "eine", "einer", "einem", "einen",
+        "für", "fuer", "von", "vor", "bei", "aus", "auf", "mit", "zum", "zur", "als",
+    }
+)
+
+
 def _new_fact_entry(
     content: str,
     category: str,
@@ -331,6 +355,22 @@ class Memory:
                     item["confidence"] = confidence
                     if sensitivity in SENSITIVITY_LEVELS:
                         item["sensitivity"] = sensitivity
+                    # Fehlte bisher: ein bereits als "pending_confirmation"
+                    # gespeicherter Fakt (z.B. aus Screen-Vision/LLM-Auto-
+                    # Extraktion) blieb dauerhaft unbestaetigt, selbst wenn der
+                    # Nutzer denselben Inhalt danach explizit bestaetigte ("Merk
+                    # dir, dass ...") - der "updated"-Zweig schrieb den vom
+                    # Aufrufer uebergebenen status/user_confirmed nie auf den
+                    # bestehenden Eintrag. Live beobachtet 2026-08-20 im
+                    # Mehrfach-Audit.
+                    # Nur "aufwerten", nie stillschweigend abwerten: eine
+                    # explizite Bestaetigung (status="confirmed") gewinnt immer,
+                    # aber ein bereits bestaetigter Fakt soll nicht durch eine
+                    # spaetere, ggf. niedrig-confidente Auto-Extraktion mit
+                    # status="pending_confirmation" wieder zurueckgestuft werden.
+                    if status == "confirmed" or item.get("status") != "confirmed":
+                        item["status"] = status
+                        item["user_confirmed"] = status == "confirmed"
                     self.save("long_memory")
                     return "updated"
 
@@ -356,7 +396,7 @@ class Memory:
         query_words = {
             word
             for word in re_split_words(query)
-            if len(word) > 2
+            if len(word) > 2 and word not in _MEMORY_FORGET_STOPWORDS
         }
         if not query_words:
             return 0
@@ -370,7 +410,9 @@ class Memory:
                     kept = []
                     for item in values:
                         content = str(item.get("content", "")) if isinstance(item, dict) else str(item)
-                        content_words = set(re_split_words(content))
+                        content_words = {
+                            word for word in re_split_words(content) if word not in _MEMORY_FORGET_STOPWORDS
+                        }
                         score = len(query_words & content_words)
                         if score >= max(1, min(3, len(query_words) // 2)):
                             removed += 1
@@ -565,7 +607,17 @@ class Memory:
                         return True
         return False
 
-    def search_facts(self, topic: str) -> list[dict[str, str]]:
+    def search_facts(
+        self, topic: str, *, include_expired: bool = False, include_rejected: bool = False
+    ) -> list[dict[str, str]]:
+        # War bisher fest auf all_facts()s Standardwerte (beide False) verdrahtet -
+        # anders als die Memory-Verwaltungsansicht, deren nicht-durchsuchte
+        # Browse-Liste bewusst include_expired=True/include_rejected=True nutzt,
+        # damit abgelehnte/abgelaufene Fakten sichtbar und erneut bestaetigbar
+        # bleiben ("nichts davon ist versteckt"). Ohne Parameter verschwand ein
+        # abgelehnter Fakt aus den Ergebnissen, sobald der Nutzer etwas in das
+        # Suchfeld tippte - inkonsistent mit der eigenen Zusage der Ansicht.
+        # Live beobachtet 2026-08-20 im Mehrfach-Audit.
         topic_words = {
             word
             for word in re_split_words(topic)
@@ -576,7 +628,7 @@ class Memory:
             return []
 
         scored_results = []
-        for fact in self.all_facts():
+        for fact in self.all_facts(include_expired=include_expired, include_rejected=include_rejected):
             content = fact.get("content", "")
             content_words = set(re_split_words(content))
             score = len(topic_words & content_words)

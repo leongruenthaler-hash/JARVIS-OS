@@ -232,7 +232,7 @@ class JarvisLocalServer:
         limit = max(1, min(int(query.get("limit") or 200), 500))
 
         if search:
-            facts = self.memory.search_facts(search)
+            facts = self.memory.search_facts(search, include_expired=include_expired, include_rejected=include_rejected)
         else:
             facts = self.memory.all_facts(include_expired=include_expired, include_rejected=include_rejected)
 
@@ -1190,7 +1190,12 @@ class JarvisLocalServer:
         # plans/2026-08-13-jarvis-kalender-vorschlaege-per-chat-bestaetigen.md.
         # handle_pending_action_flow() in jarvis.py liest/loescht diesen Schluessel.
         for event in events:
-            if event.dedup_key == "pending_calendar_actions":
+            # dedup_key ist seit dem Mehrfach-Audit-Fix (2026-08-20) nicht mehr
+            # die reine Konstante "pending_calendar_actions", sondern traegt die
+            # betroffenen action_keys als Suffix (siehe
+            # rule_pending_calendar_actions_waiting in proactivity_rules.py) -
+            # deshalb hier startswith() statt exaktem Vergleich.
+            if event.dedup_key.startswith("pending_calendar_actions"):
                 action_keys = event.data.get("action_keys") or []
                 if action_keys:
                     settings = self.memory.get("settings") or {}

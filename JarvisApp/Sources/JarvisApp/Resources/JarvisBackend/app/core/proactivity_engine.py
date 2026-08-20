@@ -131,9 +131,21 @@ class ProactivityEngine:
                         )
                     )
 
+            # "kritisch" darf ueberall durchbrechen (siehe _apply_quiet_hours/
+            # _apply_throttle unten, die das schon tun) - dismissed_forever/
+            # cooldown taten das bisher NICHT. Eine Regel wie
+            # rule_low_disk_space nutzt fuer "wichtig" UND "kritisch" denselben
+            # dedup_key - ein zuvor abgewiesenes/gerade gezeigtes "wichtig"-
+            # Ereignis unterdrueckte dann das nachfolgende, tatsaechlich
+            # kritische Ereignis fuer bis zu cooldown_minutes oder dauerhaft.
+            # Live beobachtet 2026-08-20 im Mehrfach-Audit.
             dismissed_forever = set(state.get("dismissed_forever", []))
             snoozed_until = state.get("snoozed_until", {})
-            candidates = [event for event in candidates if event.dedup_key not in dismissed_forever]
+            candidates = [
+                event
+                for event in candidates
+                if event.priority == "kritisch" or event.dedup_key not in dismissed_forever
+            ]
             candidates = [
                 event
                 for event in candidates
@@ -145,7 +157,8 @@ class ProactivityEngine:
             candidates = [
                 event
                 for event in candidates
-                if not self._within_cooldown(event.dedup_key, last_shown, now, cooldown_minutes)
+                if event.priority == "kritisch"
+                or not self._within_cooldown(event.dedup_key, last_shown, now, cooldown_minutes)
             ]
 
             candidates = self._apply_quiet_hours(candidates, config, now)

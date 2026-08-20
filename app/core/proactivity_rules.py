@@ -84,6 +84,16 @@ def rule_pending_calendar_actions_waiting(context: dict[str, Any]) -> list[dict[
     count = len(old_enough)
     noun = "Vorschlag" if count == 1 else "Vorschläge"
     sample = old_enough[0].get("title") or "ein Termin"
+    action_keys = [action.get("action_key") for action in old_enough if action.get("action_key")]
+    # Ein konstanter dedup_key ignorierte, WELCHE Vorschlaege gerade offen sind -
+    # kam innerhalb des Cooldown-Fensters ein neuer/anderer Vorschlag hinzu,
+    # wurde das Ereignis trotzdem als Duplikat unterdrueckt und der gespeicherte
+    # action_keys-Schnappschuss nie aktualisiert. Ausserdem behandelte
+    # pending_action_matches_text() (jarvis.py) diesen veralteten Schnappschuss
+    # dann als "wartet noch auf Antwort" und schluckte spaeter voellig
+    # unabhaengige Kalender-Nachrichten. Live beobachtet 2026-08-20 im
+    # Mehrfach-Audit.
+    dedup_key = "pending_calendar_actions:" + ",".join(sorted(action_keys)) if action_keys else "pending_calendar_actions"
     return [
         {
             "priority": "relevant",
@@ -94,11 +104,9 @@ def rule_pending_calendar_actions_waiting(context: dict[str, Any]) -> list[dict[
             ),
             "data": {
                 "count": count,
-                "action_keys": [
-                    action.get("action_key") for action in old_enough if action.get("action_key")
-                ],
+                "action_keys": action_keys,
             },
-            "dedup_key": "pending_calendar_actions",
+            "dedup_key": dedup_key,
         }
     ]
 
