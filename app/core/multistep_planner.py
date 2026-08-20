@@ -22,13 +22,17 @@ _PLANNER_DOMAINS = {
     "files": "Dateien und Schreibtisch",
     "music": "Apple Music",
     "contacts": "Kontakte und Anrufe",
-    "tasks": "interne Aufgabenliste (nur lesen)",
+    # War faelschlich als "nur lesen" beschrieben - handle_tasks_command()
+    # unterstuetzt seit 2026-08-19 auch Erstellen/Loeschen per Chat. Der Planer
+    # bekam damit eine falsche Grundlage fuer Teilauftraege wie "erstelle eine
+    # Aufgabe". Live beobachtet 2026-08-20 im Mehrfach-Audit.
+    "tasks": "interne Aufgabenliste (lesen, erstellen, löschen)",
 }
 
 _JSON_ARRAY_PATTERN = re.compile(r"\[.*\]", re.DOTALL)
 
 
-def _build_prompt(question: str) -> list[dict[str, str]]:
+def _build_prompt(question: str, *, max_steps: int = 4) -> list[dict[str, str]]:
     domains_text = "\n".join(f"- {key}: {desc}" for key, desc in _PLANNER_DOMAINS.items())
     system = (
         "Du zerlegst einen Nutzerauftrag in eine geordnete Liste einzelner Schritte, "
@@ -38,9 +42,9 @@ def _build_prompt(question: str) -> list[dict[str, str]]:
         'Jedes Element ist ein Objekt mit genau zwei Feldern: "domain" (einer der obigen '
         'Domaenen-Schluessel, klein geschrieben) und "teilauftrag" (der auf diesen Schritt '
         "heruntergebrochene Anfrage-Text, auf Deutsch, so wie ihn ein Nutzer direkt sagen "
-        "wuerde). Maximal 4 Schritte. Nutze nur Domaenen aus der Liste oben. Wenn der Auftrag "
-        "erkennbar nur EINEN Schritt braucht, gib trotzdem ein Array mit genau einem Element "
-        "zurueck."
+        f"wuerde). Maximal {int(max_steps)} Schritte. Nutze nur Domaenen aus der Liste oben. "
+        "Wenn der Auftrag erkennbar nur EINEN Schritt braucht, gib trotzdem ein Array mit "
+        "genau einem Element zurueck."
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": question}]
 
@@ -97,7 +101,7 @@ def plan_multistep(
     None, wenn die Modellantwort nicht sauber als gueltiger Plan validiert werden
     konnte - der Aufrufer faellt dann auf den bestehenden Weg zurueck (Stufe 1/2),
     raet also nie selbst weiter."""
-    messages = _build_prompt(question)
+    messages = _build_prompt(question, max_steps=max_steps)
     try:
         raw = llm.ask(messages, max_output_tokens=max_output_tokens, user_text=question)
     except Exception:

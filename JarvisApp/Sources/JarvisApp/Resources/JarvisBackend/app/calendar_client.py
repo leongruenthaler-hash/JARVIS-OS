@@ -215,12 +215,29 @@ class CalendarHelper:
         except Exception as exc:
             print(f"Kalender-Helfer: lsregister fehlgeschlagen: {type(exc).__name__}", file=sys.stderr)
 
+    def _kill_stray_helper_processes(self) -> None:
+        # "open -W bundle --args ..." startet die Helfer-App per LaunchServices als
+        # eigenstaendigen Prozess - ein Python-seitiges subprocess.TimeoutExpired
+        # toetet nur den "open"-Wrapper, nicht die tatsaechlich gestartete App, die
+        # dann verwaist im Hintergrund weiterlaeuft. Gleiches Muster wie
+        # PhotoIndex._kill_stray_authorize_processes() in photos_client.py, hier
+        # noch nicht vorhanden - live beobachtet 2026-08-20 im Mehrfach-Audit.
+        try:
+            subprocess.run(["pkill", "-f", "JarvisCalendarHelper"], capture_output=True, timeout=5)
+        except Exception:
+            pass
+
     def run(self, args: list[str], timeout: int = 30) -> str:
         self._ensure_helper()
+        self._kill_stray_helper_processes()
         output_file = Path(tempfile.gettempdir()) / f"jarvis_calendar_helper_{os.getpid()}_{_time_safe_stamp()}.txt"
 
         def _invoke(command: list[str]) -> tuple[subprocess.CompletedProcess[str], str]:
-            result = _run_process(command, timeout=timeout)
+            try:
+                result = _run_process(command, timeout=timeout)
+            except CalendarAccessError:
+                self._kill_stray_helper_processes()
+                raise
             return result, _read_and_remove(output_file)
 
         app_command = ["open", "-W", str(self.helper_bundle), "--args", *args, "--output", str(output_file)]
@@ -511,15 +528,24 @@ def _events_from_helper_json(raw_json: str) -> list[dict[str, object]]:
 
 
 def _reminders_from_helper_json(raw_json: str) -> list[dict[str, str]]:
+    # "due" kommt vom Swift-Helfer als rohes UTC-ISO8601 ("...Z"), genau wie
+    # "start"/"end" bei Events - _events_from_helper_json() (oben) formatiert
+    # diese ueber _parse_iso()/_german_datetime_string() in lokale, lesbare
+    # deutsche Datumsstrings um, "due" wurde bisher unformatiert durchgereicht.
+    # Landete so roh und 2 Stunden falsch (UTC statt lokal) direkt im Dashboard
+    # (CalendarRemindersView.swift). Live beobachtet 2026-08-20 im Mehrfach-Audit.
     records = json.loads(raw_json or "[]")
-    return [
-        {
-            "list": record.get("list") or "",
-            "title": record.get("title") or "",
-            "due": record.get("due") or "",
-        }
-        for record in records
-    ]
+    result: list[dict[str, str]] = []
+    for record in records:
+        due_dt = _parse_iso(str(record.get("due") or ""))
+        result.append(
+            {
+                "list": record.get("list") or "",
+                "title": record.get("title") or "",
+                "due": _german_datetime_string(due_dt) if due_dt else "",
+            }
+        )
+    return result
 
 
 def list_upcoming_calendar_items(limit: int = 5, until: datetime | None = None) -> dict[str, list[dict[str, object]]]:

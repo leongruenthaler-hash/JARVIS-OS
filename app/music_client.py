@@ -39,6 +39,25 @@ def pause_music() -> str:
     return "Apple Music ist pausiert."
 
 
+def adjust_volume(louder: bool, step: int = 15) -> str:
+    # Es gab bisher gar keinen Lautstaerke-Pfad - "Mach die Musik lauter/leiser"
+    # fiel komplett durch has_domain()/handle_music_command() durch. Live
+    # beobachtet 2026-08-20 im Mehrfach-Audit. Apple Music's "sound volume" ist
+    # 0-100; auf Systemebene geregelt (wie am Lautstaerkeregler), nicht pro Track.
+    direction = "+" if louder else "-"
+    _run_applescript(
+        f"""
+        tell application "Music"
+            set newVolume to (sound volume) {direction} {int(step)}
+            if newVolume > 100 then set newVolume to 100
+            if newVolume < 0 then set newVolume to 0
+            set sound volume to newVolume
+        end tell
+        """
+    )
+    return f"Musik ist jetzt {'lauter' if louder else 'leiser'}."
+
+
 def next_track() -> str:
     _run_applescript(
         """

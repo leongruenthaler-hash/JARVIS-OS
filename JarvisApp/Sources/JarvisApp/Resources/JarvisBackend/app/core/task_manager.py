@@ -197,12 +197,17 @@ class TaskManager:
         return self.set_status(task_id, "abgelehnt")
 
     def delete_task(self, task_id: str) -> bool:
-        tasks = self._all()
-        remaining = [task for task in tasks if task.get("id") != task_id]
-        if len(remaining) == len(tasks):
-            return False
-        self._save(remaining)
-        return True
+        # War die einzige mutierende Methode ohne self._lock - las/schrieb den
+        # gesamten "tasks"-Bucket ungeschuetzt, mit derselben Race-Gefahr, die
+        # der Lock fuer create/update/propose bereits verhindert (siehe
+        # Klassen-Docstring). Live beobachtet 2026-08-20 im Mehrfach-Audit.
+        with self._lock:
+            tasks = self._all()
+            remaining = [task for task in tasks if task.get("id") != task_id]
+            if len(remaining) == len(tasks):
+                return False
+            self._save(remaining)
+            return True
 
     def blocked_tasks(self) -> list[dict[str, Any]]:
         """Aufgaben, deren depends_on-Liste eine noch nicht erledigte Aufgabe enthält."""

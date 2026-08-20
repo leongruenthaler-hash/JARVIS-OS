@@ -159,8 +159,18 @@ class FastIntentRouter:
             ("wie heisse ich", "wer bin ich", "was ist mein name", "wie ist mein name", "kennst du meinen namen"),
         )
 
+    # Woerter, die anzeigen, dass mehr gewollt ist als nur "App oeffnen" - z.B.
+    # "Oeffne Musik und spiel Bohemian Rhapsody von Queen" soll den echten
+    # Musik-Handler erreichen (der den Song wirklich abspielt), nicht am
+    # Fast-Intent-Kurzschluss haengenbleiben, der nur die App startet und dabei
+    # den Rest des Satzes ignoriert. Live beobachtet 2026-08-20 im
+    # Mehrfach-Audit.
+    _OPEN_APP_SPECIFIC_INTENT_WORDS = ("spiel", "spiele", "playlist", "song", "lied", "titel")
+
     def _extract_open_app(self, text: str) -> str | None:
         if not has_domain_fuzzy(text, self._OPEN_VERBS):
+            return None
+        if has_domain_fuzzy(text, self._OPEN_APP_SPECIFIC_INTENT_WORDS):
             return None
         for key, app_name in self.OPEN_APP_MAP.items():
             if has_domain_fuzzy(text, (normalize_umlauts(key),)):

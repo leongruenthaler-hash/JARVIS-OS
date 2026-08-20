@@ -484,6 +484,18 @@ def clean_file_name(text: str) -> str:
         cleaned,
         flags=re.IGNORECASE,
     )
+    # Verb-finale deutsche Saetze ("... nach Projekte verschieben.") lassen das
+    # Verb ganz am Ende stehen, hinter dem Zielordnernamen - ohne diesen Strip
+    # landet es als Teil des extrahierten Namens. Live beobachtet 2026-08-20 im
+    # Mehrfach-Audit: "Soll ich ... in den Ordner Projekte verschieben verschieben?"
+    # (Verb doppelt, einmal aus dem extrahierten Namen, einmal aus der eigenen
+    # Bestaetigungsvorlage).
+    cleaned = re.sub(
+        r"\s+(?:verschieben|verschiebe|kopieren|kopiere|einsortieren|einsortiere|packen|packe)$",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
     cleaned = re.sub(r"\s+", " ", cleaned)
     return cleaned.strip(" .,!?:;\"'")
 

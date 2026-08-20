@@ -94,6 +94,7 @@ from memory import Memory
 from model_manager import ModelManager
 from music_client import (
     MusicAccessError,
+    adjust_volume,
     list_playlists,
     next_track,
     now_playing,
@@ -770,14 +771,22 @@ DOMAIN_TERMS = {
         # beobachtet 2026-08-19: "Was hatte ich heute in meinem Terminkalender
         # stehen" wurde nicht erkannt und landete in der Domaenen-Rueckfrage.
         "terminkalender",
+        "erinnerungsliste",
+        "terminliste",
         "erinnerung",
         "erinnerungen",
         "erinnere mich",
         "termine heute",
         "agenda",
-        "wochenende",
-        "eingetragen",
-        "ansteht",
+        # "wochenende"/"eingetragen"/"ansteht" waren bewusst zu generische
+        # Einzelwoerter, die auf ganz normalen, kalenderfremden Saetzen matchten
+        # (z.B. "Ich fahre am Wochenende zu meinen Eltern" -> faelschlich
+        # "Fuer Kalender oder Erinnerung brauche ich noch Datum oder Uhrzeit.").
+        # Kein Recall-Verlust: "was steht" (CALENDAR_QUERY_PHRASES, siehe
+        # looks_like_calendar_query()) faengt "Was steht am Wochenende an?"
+        # weiterhin unabhaengig davon ab - has_domain() UND
+        # looks_like_calendar_query() werden an der Dispatch-Stelle per ODER
+        # geprueft. Live beobachtet 2026-08-20 im Mehrfach-Audit.
     ),
     "mail": (
         "mail",
@@ -872,6 +881,7 @@ DOMAIN_TERMS = {
         "titel überspringen",
         "welcher titel",
         "playlist",
+        "wiedergabeliste",
         "wiedergabe",
         "abspielen",
         "song spielen",
@@ -1069,7 +1079,7 @@ def extract_bulk_file_move(text: str) -> tuple[str, str] | None:
     normalized = normalize_text(cleaned)
     if not any(term in normalized for term in ("datei", "dateien", "dokument", "dokumente", "file", "files")):
         return None
-    if not any(term in normalized for term in ("verschieb", "pack", "lege", "leg", "sortier", "räume", "raeume")):
+    if not any(term in normalized for term in ("verschieb", "pack", "lege", "leg", "sortier", "räume", "raeume", "kopier")):
         return None
 
     target_match = re.search(
@@ -3109,6 +3119,23 @@ def handle_pending_note_flow(memory: Memory, text: str) -> str | None:
         memory.set("settings", settings)
         return None
 
+    # Robusterer, domaenen-basierter Bail-out statt eines reinen Verb-Wortlisten-
+    # Abgleichs: matcht die Nachricht auf irgendeine ANDERE Domaene (Mail,
+    # Kalender, Dateien, Musik, ...), ist es so gut wie sicher kein Notiz-Inhalt,
+    # egal mit welchem Verb der Satz anfaengt. COMMAND_SHAPE_PREFIXES (naechster
+    # Block) hat zwangslaeufig Luecken (z.B. "durchsuch" fehlte) - live
+    # beobachtet 2026-08-20: "Wie ist der Status meiner Mails?" (QUESTION_SHAPE-
+    # Treffer auf "wie") bekam die "lasse offen stehen"-Ausweichantwort, obwohl
+    # es erkennbar eine Mail-Frage war, und mehrere weitere unabhaengige
+    # Mail-Fragen dahinter blieben genauso haengen, bis schliesslich
+    # "Durchsuch mein Postfach nach der Bank." (kein COMMAND_SHAPE_PREFIXES-
+    # Treffer) als Notiz-Inhalt gespeichert wurde.
+    for _other_domain in DOMAIN_TERMS:
+        if _other_domain != "notes" and has_domain(text, _other_domain):
+            settings.pop("pending_note", None)
+            memory.set("settings", settings)
+            return None
+
     # Ergaenzender Schutz zum obigen Bail-out: der beginnt eine Rueckfrage NUR,
     # wenn extract_note_title() etwas findet - Saetze wie "Zeig mir die Notiz X"
     # oder "Lies mir meine letzte Mail vor" haben aber gar keinen extrahierbaren
@@ -3327,6 +3354,19 @@ def _dispatch_confirmed_domain(
         permission_answer = ensure_privacy_domain_permission(memory, domain, prompt_text)
         if permission_answer is not None:
             return permission_answer
+        # Der primaere Stufe-1-Dispatch (siehe answer_message()) prueft fuer
+        # Erinnerungs-Formulierungen zusaetzlich die eigene "reminders"-
+        # Berechtigung, getrennt von "calendar" - dieser Stufe-2-Pfad
+        # (nach einer bestaetigten Domaenen-Rueckfrage) tat das bisher nicht
+        # und fuehrte live Reminders/EventKit-Zugriffe aus, obwohl der Nutzer
+        # nur "calendar" erlaubt und "reminders" bewusst nicht erteilt hatte.
+        # Live beobachtet 2026-08-20 im Mehrfach-Audit.
+        if domain == "calendar" and "erinner" in normalize_text(question):
+            reminders_answer = ensure_privacy_domain_permission(
+                memory, "reminders", "Jarvis würde eine Erinnerung verwenden."
+            )
+            if reminders_answer is not None:
+                return reminders_answer
 
     if domain == "notes":
         return handle_notes_command(memory, question)
@@ -3928,6 +3968,15 @@ def handle_pending_action_flow(
 
     pending_file_action = settings.get("pending_file_action")
     if isinstance(pending_file_action, dict):
+        if not is_confirm and not is_cancel and has_domain(text, "files"):
+            # Gleiches Schutzmuster wie pending_calendar_create oben (siehe
+            # dortiger Kommentar) - fehlte hier bisher: eine neue, eigenstaendige
+            # Datei-Anfrage waehrend eine alte Bestaetigung offen war wurde nicht
+            # verworfen und frisch verarbeitet, sondern blieb an der alten
+            # Rueckfrage haengen. Live beobachtet 2026-08-20 im Mehrfach-Audit.
+            settings.pop("pending_file_action", None)
+            memory.set("settings", settings)
+            return None
         result = ACTION_ENGINE.resolve(
             memory,
             "pending_file_action",
@@ -4075,6 +4124,11 @@ _NOTES_DELETE_VERBS = (
     "entfernen",
     "lösch",
     "loesch",
+    # "streich" fehlte komplett - "Streich die Notiz X." fiel bis zum
+    # Erstellen-Flow durch und fragte "Wie soll die Notiz heißen?" statt zu
+    # loeschen. Live beobachtet 2026-08-20 im Regressionstest.
+    "streiche",
+    "streich",
 )
 
 
@@ -4082,11 +4136,20 @@ def _extract_note_title_for_delete(text: str) -> str | None:
     """Extrahiert den Notiz-Titel aus einer Loesch-Anfrage ("Lösche die Notiz X",
     "Entferne den Zettel X") - im Unterschied zu extract_note_title() braucht es
     hier KEIN "mit dem Titel"-Anschlusswort, da Loesch-Anfragen den Titel direkt
-    nach "Notiz"/"Zettel" nennen."""
-    normalized = normalize_text(text)
+    nach "Notiz"/"Zettel" nennen.
+
+    Matcht ueber re.IGNORECASE auf dem ORIGINALEN Text, nicht auf
+    normalize_text()s Ausgabe - normalize_text() ersetzt Bindestriche durch
+    Leerzeichen und entfernt Satzzeichen, was fuer den reinen Muster-Abgleich
+    hilfreich ist, aber bei direkter Rueckgabe der erfassten Gruppe echte
+    Titel-Zeichen zerstoert. delete_note()s AppleScript-Vergleich ignoriert
+    Gross-/Kleinschreibung, aber KEINE Bindestrich/Leerzeichen-Unterschiede -
+    ein Titel wie "JT2000-014 Einkaufen" wurde dadurch nie gefunden ("jt2000
+    014 einkaufen" != "JT2000-014 Einkaufen"). Live beobachtet 2026-08-20."""
     match = re.search(
         r"(?:notiz|zettel)\s+(?:mit\s+dem\s+titel\s+|namens\s+|mit\s+namen\s+)?(?:(?:der|die|den)\s+)?(.+?)(?:\s+(?:aus\s+(?:den\s+)?notizen)\s*)?$",
-        normalized,
+        text,
+        flags=re.IGNORECASE,
     )
     if not match:
         return None
@@ -4177,7 +4240,7 @@ def handle_notes_command(memory: Memory, text: str) -> str | None:
     return save_note_or_append(title, body, append=append)
 
 
-_TASKS_PRIORITY_LABELS = {"hoch": "hoch", "mittel": "mittel", "niedrig": "niedrig"}
+_TASKS_PRIORITY_LABELS = {"kritisch": "kritisch", "hoch": "hoch", "mittel": "mittel", "niedrig": "niedrig"}
 
 
 def handle_tasks_command(memory: Memory, text: str) -> str | None:
@@ -5917,7 +5980,11 @@ def handle_desktop_command(text: str, memory: Memory | None = None) -> str | Non
     normalized = normalize_text(text)
     if not any(term in normalized for term in ("desktop", "schreibtisch")):
         return None
-    if any(term in normalized for term in ("mail", "mails", "email", "emails", "posteingang", "mailfach")):
+    # Reiner Teilstring-Vergleich statt Wortgrenze traf faelschlich auch Dateien,
+    # deren Name zufaellig "mail" als Teilstring enthaelt (z.B. "Thumbnail.png",
+    # "Mailand-Urlaub.jpg") und blockierte eine ganz normale Datei-Anfrage dafuer.
+    # Live beobachtet 2026-08-20 im Mehrfach-Audit.
+    if re.search(r"\b(?:mail|mails|email|emails|posteingang|mailfach)\b", normalized):
         return None
 
     try:
@@ -6123,7 +6190,11 @@ def handle_file_command(text: str, memory: Memory | None = None) -> str | None:
     )
     if not file_context and not root_context:
         return None
-    if any(term in normalized for term in ("mail", "mails", "email", "emails", "posteingang", "mailfach")):
+    # Reiner Teilstring-Vergleich statt Wortgrenze traf faelschlich auch Dateien,
+    # deren Name zufaellig "mail" als Teilstring enthaelt (z.B. "Thumbnail.png",
+    # "Mailand-Urlaub.jpg") und blockierte eine ganz normale Datei-Anfrage dafuer.
+    # Live beobachtet 2026-08-20 im Mehrfach-Audit.
+    if re.search(r"\b(?:mail|mails|email|emails|posteingang|mailfach)\b", normalized):
         return None
 
     root_hint = detect_root_hint(text)
@@ -6138,12 +6209,23 @@ def handle_file_command(text: str, memory: Memory | None = None) -> str | None:
         # gezielte Einzeldatei-Loeschung per Namen angebunden. Verschiebt in
         # den Papierkorb (rueckgaengig machbar), loescht nie endgueltig.
         delete_match = re.search(
-            r"(?:lösche|loesche|entferne)\s+(?:die\s+|den\s+|das\s+)?(?:datei\s+)?(.+?)"
+            r"(?:lösche|loesche|lösch|loesch|entferne|entfern|schmeiß|schmeiss)\s+(?:bitte\s+)?(?:die\s+|den\s+|das\s+)?(?:datei\s+)?(.+?)"
             r"(?:\s+(?:auf|am|in|unter|von|vom)\s+(?:meinem\s+|meinen\s+|meiner\s+|dem\s+|der\s+)?"
-            r"(?:desktop|schreibtisch|dokumente|documents|downloads|download|home|benutzerordner|dateien|jarvis|projekt|code))?[.?!]*$",
+            r"(?:desktop|schreibtisch|dokumente|documents|downloads|download|home|benutzerordner|dateien|jarvis|projekt|code))?"
+            r"(?:\s+weg)?[.?!]*$",
             text,
             flags=re.IGNORECASE,
         )
+        if not delete_match:
+            # Verb-finale Formulierungen ("Kannst du X löschen?", "Ich brauch X
+            # nicht mehr, lösch die.") haben das Verb NICHT am Satzanfang, das
+            # obige Muster faengt sie deshalb nicht ab. Live beobachtet
+            # 2026-08-20 im Mehrfach-Audit.
+            delete_match = re.search(
+                r"(?:kannst du|könntest du|koenntest du)\s+(?:bitte\s+)?(?:die\s+|den\s+|das\s+)?(?:datei\s+)?(.+?)\s+(?:löschen|loeschen)\b",
+                text,
+                flags=re.IGNORECASE,
+            )
         if delete_match:
             file_name = clean_file_name(delete_match.group(1))
             if not file_name:
@@ -6732,11 +6814,26 @@ def handle_music_command(text: str) -> str | None:
             visible = ", ".join(playlists[:8])
             return f"Ich sehe diese Apple-Music-Playlists: {visible}."
 
-        if any(term in normalized for term in ("pause", "pausier", "pausiere", "stopp die musik", "stoppe die musik")):
+        if any(
+            term in normalized
+            for term in (
+                "pause", "pausier", "pausiere", "stopp die musik", "stoppe die musik",
+                "musik aus", "musik anhalten", "musik stoppen", "halt die musik an",
+            )
+        ):
             return pause_music()
 
-        if any(term in normalized for term in ("weiter", "fortsetzen", "spiel weiter", "wiedergabe starten")):
+        # Bloss "weiter" als Teilstring matchte faelschlich auch auf "weitere",
+        # "weiterhin", "weitermachen" usw. (z.B. in einer ganz anderen Antwort
+        # ueber "die restlichen Schritte ... weitermachen"). Live beobachtet
+        # 2026-08-20 im Mehrfach-Audit.
+        if re.search(r"\bweiter\b", normalized) or any(
+            term in normalized for term in ("fortsetzen", "spiel weiter", "wiedergabe starten")
+        ):
             return play_music()
+
+        if any(term in normalized for term in ("lauter", "leiser")):
+            return adjust_volume(louder="lauter" in normalized)
 
         if any(term in normalized for term in ("nächster", "naechster", "nächste", "naechste", "skip", "überspring", "ueberspring")):
             return next_track()
@@ -6745,7 +6842,7 @@ def handle_music_command(text: str) -> str | None:
             return previous_track()
 
         playlist_match = re.search(
-            r"(?:spiel|spiele|starte|öffne|oeffne)\s+(?:bitte\s+)?(?:meine\s+|die\s+)?playlist\s+(.+)$",
+            r"\b(?:spiel|spiele|starte|öffne|oeffne)\b\s+(?:bitte\s+)?(?:meine\s+|die\s+)?playlist\s+(.+)$",
             normalized,
             flags=re.IGNORECASE,
         )
@@ -6761,7 +6858,7 @@ def handle_music_command(text: str) -> str | None:
                 return play_playlist(playlist_name)
 
         song_match = re.search(
-            r"(?:spiel|spiele|starte|öffne|oeffne)\s+(?:das\s+)?(?:lied|song|titel)?\s*(.+)$",
+            r"\b(?:spiel|spiele|starte|öffne|oeffne)\b\s+(?:das\s+)?(?:lied|song|titel)?\s*(.+)$",
             normalized,
             flags=re.IGNORECASE,
         )
