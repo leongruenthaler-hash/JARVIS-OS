@@ -78,6 +78,7 @@ class PhotoIndex:
         self.base_path.mkdir(parents=True, exist_ok=True)
         self.cache_path = self.base_path / "photos_index.json"
         self.progress_path = self.base_path / "photos_scan_progress.json"
+        self.checkpoint_path = self.base_path / "photos_scan_checkpoint.json"
         self.local_vision_progress_path = self.base_path / "photos_local_vision_progress.json"
         self.app_dir = Path(__file__).resolve().parent
         self.helper_source = self.app_dir / "photos_helper.swift"
@@ -93,6 +94,21 @@ class PhotoIndex:
         # Keep the helper at one stable path so macOS does not treat it like a new app
         # on every launch. A moving helper bundle tends to retrigger privacy prompts.
         return self.project_helper_bundle
+
+    def _kill_stray_scan_processes(self) -> None:
+        """Analoges Sicherheitsnetz zu _kill_stray_authorize_processes() (siehe
+        dort fuer die volle Erklaerung des 'open -W'-Orphan-Problems), hier fuer
+        den Scan-Pfad. Matcht bewusst auf "JarvisPhotosHelper scan", nicht auf
+        den blossen Binary-Pfad, damit ein parallel laufender "authorize"-Aufruf
+        nicht mitgetroffen wird."""
+        try:
+            subprocess.run(
+                ["pkill", "-f", "JarvisPhotosHelper scan"],
+                capture_output=True,
+                timeout=5,
+            )
+        except Exception:
+            pass
 
     def scan(self, max_items: int | None = None) -> int:
         if max_items is None:
@@ -111,13 +127,47 @@ class PhotoIndex:
             for record_id, entry in previous_entries.items()
             if str(entry.get("modifiedAt") or "")
         }
+        # Alter Checkpoint eines FRUEHEREN, nicht verwandten Laufs darf hier nicht
+        # versehentlich als Ergebnis DIESES Laufs durchgehen, falls dieser Lauf
+        # selbst noch vor dem ersten eigenen Checkpoint (alle 20 Fotos) abbricht.
+        try:
+            self.checkpoint_path.unlink()
+        except OSError:
+            pass
         known_path = Path(tempfile.gettempdir()) / f"jarvis_photos_known_{os.getpid()}_{time_safe_stamp()}.json"
         try:
             known_path.write_text(json.dumps(known_metadata), encoding="utf-8")
-            output = self._run_helper(
-                ["scan", str(max_items), "--known", str(known_path), "--progress", str(self.progress_path)],
-                timeout=timeout,
-            )
+            try:
+                output = self._run_helper(
+                    [
+                        "scan", str(max_items),
+                        "--known", str(known_path),
+                        "--progress", str(self.progress_path),
+                        "--checkpoint", str(self.checkpoint_path),
+                    ],
+                    timeout=timeout,
+                )
+            except PhotosAccessError:
+                # Der Helfer laeuft ueber "open -W bundle --args ..." (siehe
+                # _kill_stray_authorize_processes()) - ein Python-seitiges Timeout
+                # killt nur den "open"-Wrapper, nicht den ueber LaunchServices
+                # gestarteten Scan-Prozess selbst, der als Waise weiterlaeuft.
+                # Ohne dieses Aufraeumen bleibt er dauerhaft im Hintergrund haengen
+                # UND konkurriert mit jedem weiteren Scan-Versuch um dieselbe
+                # Fotos-Bibliothek. Bevor der Fehler nach oben durchgereicht wird,
+                # zuerst pruefen, ob der (jetzt verwaiste) Prozess vor seinem Ende
+                # wenigstens einen Zwischenstand geschrieben hat - sonst geht die
+                # komplette, oft stundenlange Arbeit ersatzlos verloren (live vom
+                # Nutzer gemeldet 2026-08-20: "der Fotoindex wird nicht
+                # gespeichert"). Ein liegen gebliebener Checkpoint macht ausserdem
+                # den naechsten Versuch schneller, weil diese Fotos dann als
+                # "bekannt" gelten und nur noch die billige Metadaten-Pruefung statt
+                # der teuren iCloud-Download+Vision-Analyse durchlaufen.
+                self._kill_stray_scan_processes()
+                if self.checkpoint_path.exists():
+                    output = self.checkpoint_path.read_text(encoding="utf-8")
+                else:
+                    raise
         finally:
             try:
                 known_path.unlink()
@@ -140,7 +190,12 @@ class PhotoIndex:
                 "durationSeconds": 0,
             }
 
-        indexed_entries: dict[str, dict[str, Any]] = {}
+        # Startet von den VORHER gespeicherten Eintraegen (nicht leer) und fuegt
+        # nur hinzu/aktualisiert - ein Checkpoint aus einem abgebrochenen Lauf
+        # (oder theoretisch jede andere Teilmenge) darf nie bereits gespeicherte
+        # Fotos aus dem Index verschwinden lassen, nur weil sie in DIESEM
+        # bestimmten `records` nicht (erneut) enthalten waren.
+        indexed_entries: dict[str, dict[str, Any]] = dict(previous_entries)
         for record in records:
             record_id = str(record.get("id") or "")
             if record_id:
@@ -207,6 +262,13 @@ class PhotoIndex:
         cache = self._load_cache()
         cache.setdefault("stats", {})["database_bytes"] = saved_size
         self._save_cache(cache)
+        # Jetzt sicher im echten Index gelandet - ein liegen gebliebener
+        # Checkpoint aus diesem Lauf koennte sonst versehentlich von einem
+        # spaeteren, eigentlich unabhaengigen Scan-Versuch nochmal gelesen werden.
+        try:
+            self.checkpoint_path.unlink()
+        except OSError:
+            pass
         print(f"Fotos gefunden: {photos_found}")
         print(f"Videos gefunden: {videos_found}")
         print(f"Indexeinträge: {index_entries}")

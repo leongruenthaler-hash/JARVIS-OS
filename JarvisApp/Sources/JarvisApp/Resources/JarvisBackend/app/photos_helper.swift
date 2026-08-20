@@ -36,6 +36,7 @@ let isoFormatter = ISO8601DateFormatter()
 var outputPath: String?
 var knownMetadata: [String: String] = [:]
 var progressPath: String?
+var checkpointPath: String?
 
 func emitData(_ data: Data) {
     if let outputPath = outputPath {
@@ -84,6 +85,36 @@ func writeProgress(
     if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted]) {
         try? data.write(to: URL(fileURLWithPath: progressPath))
     }
+}
+
+// Vorher wurde das Scan-Ergebnis ausschliesslich EINMAL ganz am Ende ueber
+// emitData() geschrieben - lief der Python-seitige Aufruf (open -W .../scan
+// --known ...) in ein Timeout, ging die STUNDENLANGE bereits erledigte Arbeit
+// komplett verloren, weil der Prozess vom Python-Timeout gekillt wurde, bevor
+// er je das Endergebnis ausgeben konnte (und die zugehoerige "--known"-Datei
+// blieb dadurch fuer immer leer, was JEDEN folgenden Scan-Versuch wieder zum
+// vollen, langsamen Analyse-Pfad statt des billigen "bereits bekannt"-Pfads
+// zwang - ein sich selbst verstaerkender Fehlerkreislauf). Periodisches
+// Zwischenspeichern der bisher fertigen Records macht jeden Scan-Versuch
+// resilient gegen ein Timeout: die Python-Seite kann bei einem Timeout auf
+// diesen Checkpoint zurueckfallen statt alles zu verlieren. Live beobachtet/
+// vom Nutzer gemeldet 2026-08-20 ("der Fotoindex wird nicht gespeichert").
+func writeCheckpoint(records: [PhotoRecord], photosFound: Int, videosFound: Int, duration: Double) {
+    guard let checkpointPath = checkpointPath else { return }
+    let result = ScanResult(
+        stats: ScanStats(
+            photosFound: photosFound,
+            videosFound: videosFound,
+            indexEntries: records.count,
+            durationSeconds: duration
+        ),
+        records: records
+    )
+    guard let data = try? JSONEncoder().encode(result) else { return }
+    let tempURL = URL(fileURLWithPath: checkpointPath + ".tmp")
+    guard (try? data.write(to: tempURL)) != nil else { return }
+    _ = try? FileManager.default.removeItem(atPath: checkpointPath)
+    try? FileManager.default.moveItem(atPath: tempURL.path, toPath: checkpointPath)
 }
 
 func currentPhotoStatus() -> PHAuthorizationStatus {
@@ -386,6 +417,18 @@ func scan(limit: Int) throws {
                     labelsRecognized: labelsRecognized,
                     startedAt: startedText
                 )
+                // Alle 20 Fotos statt bei jedem einzelnen, damit das
+                // wiederholte Schreiben der bis dahin kompletten Records-Liste
+                // (waechst bis auf mehrere Tausend Eintraege) nicht selbst zum
+                // spuerbaren I/O-Overhead wird.
+                if completedCount % 20 == 0 {
+                    writeCheckpoint(
+                        records: records,
+                        photosFound: allImages.count,
+                        videosFound: allVideos.count,
+                        duration: Date().timeIntervalSince(startedAt)
+                    )
+                }
             }
             concurrencyLimiter.signal()
         }
@@ -565,6 +608,10 @@ if let knownIndex = args.firstIndex(of: "--known"), knownIndex + 1 < args.count 
 if let progressIndex = args.firstIndex(of: "--progress"), progressIndex + 1 < args.count {
     progressPath = args[progressIndex + 1]
     args.removeSubrange(progressIndex...progressIndex + 1)
+}
+if let checkpointIndex = args.firstIndex(of: "--checkpoint"), checkpointIndex + 1 < args.count {
+    checkpointPath = args[checkpointIndex + 1]
+    args.removeSubrange(checkpointIndex...checkpointIndex + 1)
 }
 
 guard args.count >= 2 else {
