@@ -109,7 +109,14 @@ def find_contacts(name_query: str, limit: int = 200) -> list[Contact]:
         name_parts = set(normalized_name.split())
         score += len(query_parts & name_parts) * 15
 
-        if score > 0:
+        # Ein isolierter distance==2-Treffer (Zeile oben, +35) alleine ist ein zu
+        # schwaches Signal, um als "passender Kontakt" praesentiert zu werden -
+        # "Papa" matchte so z.B. "Mama" (Distanz 2 bei 4 Zeichen: p->m, p->m),
+        # ein falscher Familienangehoeriger, nicht nur ein Tippfehler. Ab 40
+        # Punkten (z.B. schon ein reiner Teilstring-Treffer) bleibt echte
+        # Tippfehler-Toleranz erhalten, nur der schwaechste isolierte Fuzzy-
+        # Treffer wird ausgefiltert. Live beobachtet 2026-08-20.
+        if score >= 40:
             matches.append((score, contact))
 
     matches.sort(key=lambda item: item[0], reverse=True)
