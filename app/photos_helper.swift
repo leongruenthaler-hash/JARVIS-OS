@@ -482,7 +482,46 @@ func exportPreview(assetId: String, destinationPath: String, maxSize: Int) throw
     guard let asset = assets.firstObject else {
         fail("Foto nicht gefunden.")
     }
+    try exportAssetPreview(asset: asset, destinationPath: destinationPath, maxSize: maxSize)
+}
 
+// Fuer Fotos, deren Treffer von einer ANDEREN Maschine stammen (Mac-Mini-
+// Worker, siehe remote_worker_server.py) - PHAsset.localIdentifier ist
+// zwischen zwei getrennten PHPhotoLibrary-Instanzen (selbst bei gleichem
+// iCloud-Account) nicht zuverlaessig portabel (Sync-Verzoegerung, Live-Photo-
+// Sonderfaelle, neu aufgebaute Bibliothek). Gleicht stattdessen ueber
+// Dateiname + Erstellungsdatum ab, die der Fotoindex ohnehin mitfuehrt.
+func exportPreviewByAttrs(filename targetFilename: String, createdAtISO: String, destinationPath: String, maxSize: Int) throws {
+    guard let targetDate = isoFormatter.date(from: createdAtISO) else {
+        fail("Ungültiges Datum: \(createdAtISO).")
+    }
+
+    let toleranceSeconds: TimeInterval = 2
+    let windowStart = targetDate.addingTimeInterval(-toleranceSeconds)
+    let windowEnd = targetDate.addingTimeInterval(toleranceSeconds)
+
+    let options = PHFetchOptions()
+    options.predicate = NSPredicate(
+        format: "creationDate >= %@ AND creationDate <= %@",
+        windowStart as NSDate, windowEnd as NSDate
+    )
+    let candidates = PHAsset.fetchAssets(with: options)
+
+    var matchedAsset: PHAsset?
+    candidates.enumerateObjects { asset, _, stop in
+        if filename(for: asset) == targetFilename {
+            matchedAsset = asset
+            stop.pointee = true
+        }
+    }
+
+    guard let asset = matchedAsset ?? candidates.firstObject else {
+        fail("Foto nicht gefunden (Dateiname: \(targetFilename), Datum: \(createdAtISO)).")
+    }
+    try exportAssetPreview(asset: asset, destinationPath: destinationPath, maxSize: maxSize)
+}
+
+func exportAssetPreview(asset: PHAsset, destinationPath: String, maxSize: Int) throws {
     // isSynchronous = false ist hier bewusst: bei true liefert PHImageManager nur
     // zurueck, wenn das Bild schnell/lokal verfuegbar ist - fuer Fotos, die erst
     // aus iCloud nachgeladen werden muessen (z.B. durch "Fotos optimieren"),
@@ -654,6 +693,12 @@ do {
         }
         let maxSize = args.count >= 5 ? (Int(args[4]) ?? 900) : 900
         try exportPreview(assetId: args[2], destinationPath: args[3], maxSize: maxSize)
+    case "export-by-attrs":
+        guard args.count >= 5 else {
+            fail("Dateiname, Erstellungsdatum oder Zielpfad fehlt.")
+        }
+        let maxSize = args.count >= 6 ? (Int(args[5]) ?? 900) : 900
+        try exportPreviewByAttrs(filename: args[2], createdAtISO: args[3], destinationPath: args[4], maxSize: maxSize)
     case "status":
         print("ok")
     default:

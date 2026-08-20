@@ -7678,5 +7678,8 @@ if __name__ == "__main__":
     if "--local-server" in sys.argv:
         from local_server import run as run_local_server
         run_local_server()
+    elif "--remote-worker" in sys.argv:
+        from remote_worker_server import run as run_remote_worker
+        run_remote_worker()
     else:
         main()

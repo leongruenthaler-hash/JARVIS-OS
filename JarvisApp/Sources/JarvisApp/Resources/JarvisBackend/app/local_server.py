@@ -44,6 +44,7 @@ from model_manager import ModelManager, ollama_base_url
 from model_router import ModelRouter
 from music_client import now_playing as music_now_playing
 from photos_client import PhotoBackgroundWorker, PhotoIndex
+import remote_worker_client
 from voice_profile import VoiceProfileError, VoiceProfileStore, DEFAULT_SPEAKER_THRESHOLD
 from permission_manager import PermissionManager
 from privacy_dashboard import PrivacyDashboard
@@ -417,7 +418,7 @@ class JarvisLocalServer:
         }
 
     def scan_status_payload(self) -> dict[str, Any]:
-        return {
+        payload = {
             "mail_scan": self._load_scan_status(
                 self._mail_scan_status_path,
                 fallback=self._scan_progress("idle", "Noch kein Mail-Scan ausgeführt."),
@@ -431,6 +432,20 @@ class JarvisLocalServer:
                 fallback=self._scan_progress("idle", "Kein Modell-Download aktiv."),
             ),
         }
+        # Falls ein Mac-Mini-Worker konfiguriert ist (siehe
+        # remote_worker_client.py/remote_worker_server.py), NUR die drei Schluessel
+        # ueberschreiben, die er tatsaechlich liefert - "mail_scan"/"files"/
+        # "model_pull" bleiben immer MacBook-lokal, sonst wuerde ein leerer/
+        # veralteter Mac-Mini-Wert einen eigenstaendigen lokalen Status
+        # ueberschreiben. Bei nicht erreichbarem Mac Mini bleiben die lokalen
+        # Werte (typischerweise "idle"/veraltet, aber kein Absturz) stehen.
+        if remote_worker_client.is_configured(self.config):
+            remote_status = remote_worker_client.fetch_scan_status(self.config)
+            if remote_status:
+                for key in ("photos", "photos_vision", "mail_background"):
+                    if key in remote_status:
+                        payload[key] = remote_status[key]
+        return payload
 
     PULLABLE_MODELS = {"gemma3:4b", "qwen3:4b"}
 

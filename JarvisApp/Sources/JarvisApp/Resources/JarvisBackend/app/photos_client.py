@@ -15,6 +15,7 @@ from pathlib import Path
 
 from data_dir import data_root
 from local_vision_service import LocalVisionError, LocalVisionService
+import remote_worker_client
 from secure_storage import SecureStorageError, get_openai_api_key
 from typing import Any
 
@@ -423,8 +424,14 @@ class PhotoIndex:
         query: str,
         max_results: int | None = None,
         preview_size: int | None = None,
+        matches: list["PhotoMatch"] | None = None,
     ) -> tuple[Path, int]:
-        matches = self.search(query, max_results=max_results)
+        # `matches` optional durchreichbar: fuer Treffer vom Mac-Mini-Worker
+        # (remote_worker_client.search_photos(), siehe jarvis.py) wird HIER
+        # nicht lokal gesucht, sondern eine bereits fertige Trefferliste
+        # uebergeben (photo_id bewusst leer - siehe _export_preview_by_attrs).
+        if matches is None:
+            matches = self.search(query, max_results=max_results)
         if not matches:
             return Path(), 0
 
@@ -448,14 +455,17 @@ class PhotoIndex:
         size = int(preview_size or self.config.get("photos_desktop_export_preview_size", 1800))
         exported = 0
         for index, match in enumerate(matches, start=1):
-            if not match.photo_id:
+            if not match.photo_id and not (match.filename and match.created_at):
                 continue
             safe_name = sanitize_photo_filename(match.filename or f"Foto_{index}.jpg")
             if not Path(safe_name).suffix:
                 safe_name += ".jpg"
             destination = folder / f"{index:02d}_{safe_name}"
             try:
-                self._export_preview(match.photo_id, destination, size)
+                if match.photo_id:
+                    self._export_preview(match.photo_id, destination, size)
+                else:
+                    self._export_preview_by_attrs(match.filename, match.created_at, destination, size)
                 exported += 1
                 from core.activity_log import record_activity
                 record_activity("photo", safe_name)
@@ -779,6 +789,15 @@ class PhotoIndex:
 
     def _export_preview(self, photo_id: str, destination: Path, max_size: int):
         self._run_helper(["export", photo_id, str(destination), str(max_size)], timeout=60)
+        if not destination.exists() or destination.stat().st_size <= 0:
+            raise PhotosAccessError("Foto-Vorschau wurde nicht exportiert.")
+
+    def _export_preview_by_attrs(self, filename: str, created_at: str, destination: Path, max_size: int):
+        # Fuer Treffer, deren photo_id (PHAsset.localIdentifier) von einer
+        # ANDEREN Maschine stammt (Mac-Mini-Worker) und deshalb hier nicht
+        # zuverlaessig aufloesbar ist - gleicht stattdessen ueber Dateiname +
+        # Erstellungsdatum ab (siehe photos_helper.swift::exportPreviewByAttrs).
+        self._run_helper(["export-by-attrs", filename, created_at, str(destination), str(max_size)], timeout=60)
         if not destination.exists() or destination.stat().st_size <= 0:
             raise PhotosAccessError("Foto-Vorschau wurde nicht exportiert.")
 
@@ -1242,6 +1261,40 @@ class PhotoBackgroundWorker:
         return self.search_to_desktop_folder(query)
 
     def search_to_desktop_folder(self, query: str) -> str:
+        # Falls ein Mac-Mini-Worker konfiguriert ist, dessen Index nutzen statt
+        # den lokalen (der auf der ausgelagerten Konfiguration typischerweise
+        # leer bleibt, weil dort nie gescannt wird). Bewusst eine klare eigene
+        # Fehlermeldung bei Nichterreichbarkeit statt stillschweigend auf den
+        # (dann verwirrend anders lautenden) lokalen Leer-Index-Text
+        # durchzufallen. Siehe remote_worker_client.py.
+        if remote_worker_client.is_configured(self.config):
+            raw_matches = remote_worker_client.search_photos(self.config, query)
+            if raw_matches is None:
+                return (
+                    "Der Mac Mini ist gerade nicht erreichbar, ich kann den Fotoindex dort nicht abfragen. "
+                    "Prüf, ob er läuft und im selben Netzwerk ist."
+                )
+            remote_matches = [
+                PhotoMatch(
+                    photo_id="",
+                    score=int(match.get("score", 0)),
+                    labels=list(match.get("labels", []) or []),
+                    texts=[],
+                    created_at=str(match.get("createdAt", "")),
+                    filename=str(match.get("filename", "")),
+                    media_type=str(match.get("mediaType", "")),
+                )
+                for match in raw_matches
+            ]
+            if not remote_matches:
+                return (
+                    f"Ich habe im Fotoindex des Mac Mini keine passenden Treffer für {query} gefunden."
+                )
+            folder, count = self.index.export_search_to_desktop_folder(query, matches=remote_matches)
+            if count <= 0:
+                return f"Ich habe Treffer für {query} gefunden, konnte aber keine Vorschau exportieren."
+            return f"Erledigt. Ich habe {count} passende Foto(s) in den neuen Ordner {folder.name} auf Ihrem Schreibtisch gelegt."
+
         if self.scan_thread is not None and self.scan_thread.is_alive():
             return (
                 "Ich baue den Fotoindex gerade noch auf. "
