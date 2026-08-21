@@ -28,6 +28,9 @@ final class AppState: ObservableObject {
     @Published var tasksLoading = false
     @Published var voiceMode = "standard"
     @Published var availableVoiceModes: [String] = ["kurz", "standard", "fokus", "diskret", "privat"]
+    // TARS-Style Regler (0-100) - siehe app/core/personality_manager.py PersonalityStyle.
+    @Published var humorLevel = 60
+    @Published var honestyLevel = 90
     @Published var memoryIsLoading = false
     @Published var recentActivity: [ActivityEvent] = []
     @Published var mailResult = "Noch keine Mail-Aktion ausgeführt."
@@ -131,6 +134,7 @@ final class AppState: ObservableObject {
             await saveFastVoiceModeToCore()
         }
         await refreshVoiceMode()
+        await refreshPersonalitySettings()
         await refreshVoiceProfileStatus()
         autoListenEnabled = true
         keepListeningAfterGreeting = true
@@ -397,6 +401,30 @@ final class AppState: ObservableObject {
             voiceMode = try await serverController.setVoiceMode(mode)
         } catch {
             lastError = "Gesprächsmodus konnte nicht geändert werden."
+        }
+    }
+
+    func refreshPersonalitySettings() async {
+        await ensureServerConnected()
+        do {
+            let status = try await serverController.personalitySettings()
+            humorLevel = status.humorLevel
+            honestyLevel = status.honestyLevel
+        } catch {
+            // Best-effort - fallback auf die gecachten/Default-Werte ist unkritisch.
+        }
+    }
+
+    func savePersonalitySettingsToCore() async {
+        do {
+            let status = try await serverController.setPersonalitySettings(
+                humorLevel: humorLevel,
+                honestyLevel: honestyLevel
+            )
+            humorLevel = status.humorLevel
+            honestyLevel = status.honestyLevel
+        } catch {
+            lastError = "Persönlichkeits-Einstellungen konnten nicht gespeichert werden."
         }
     }
 

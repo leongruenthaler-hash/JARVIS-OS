@@ -162,6 +162,66 @@ struct SettingsView: View {
 
                 Divider().opacity(0.4)
 
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Humor-Level")
+                        .font(.headline)
+                    Text("Wie ausgeprägt Jarvis' trocken-sarkastischer Humor ist, à la TARS aus Interstellar - 0 schaltet ihn praktisch ab, 100 sucht aktiv nach Gelegenheiten für einen Seitenhieb.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Slider(
+                            value: Binding(
+                                get: { Double(appState.humorLevel) },
+                                set: { appState.humorLevel = Int($0) }
+                            ),
+                            in: 0...100,
+                            step: 1,
+                            onEditingChanged: { editing in
+                                if !editing {
+                                    Task { await appState.savePersonalitySettingsToCore() }
+                                }
+                            }
+                        )
+                        Text("\(appState.humorLevel)")
+                            .font(.callout.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 32, alignment: .trailing)
+                    }
+                }
+
+                Divider().opacity(0.4)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Ehrlichkeits-Level")
+                        .font(.headline)
+                    Text("Wie ungeschönt Jarvis unangenehme Wahrheiten oder Kritik formuliert - niedrig heißt vorsichtiger/diplomatischer, hoch heißt direkt und ohne Polster.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Slider(
+                            value: Binding(
+                                get: { Double(appState.honestyLevel) },
+                                set: { appState.honestyLevel = Int($0) }
+                            ),
+                            in: 0...100,
+                            step: 1,
+                            onEditingChanged: { editing in
+                                if !editing {
+                                    Task { await appState.savePersonalitySettingsToCore() }
+                                }
+                            }
+                        )
+                        Text("\(appState.honestyLevel)")
+                            .font(.callout.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 32, alignment: .trailing)
+                    }
+                }
+
+                Divider().opacity(0.4)
+
                 Toggle(isOn: $appState.alwaysListenEnabled) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Immer-Zuhör-Modus (\"Hey Jarvis\")")

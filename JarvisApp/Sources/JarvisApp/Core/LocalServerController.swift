@@ -1185,6 +1185,15 @@ final class LocalServerController: ObservableObject {
         try await apiClient.setVoiceMode(mode)
     }
 
+    func personalitySettings() async throws -> PersonalitySettings {
+        try await apiClient.personalitySettings()
+    }
+
+    @discardableResult
+    func setPersonalitySettings(humorLevel: Int, honestyLevel: Int) async throws -> PersonalitySettings {
+        try await apiClient.setPersonalitySettings(humorLevel: humorLevel, honestyLevel: honestyLevel)
+    }
+
     func recordVoicePerformance(_ metrics: [String: Int]) async throws {
         try await apiClient.recordVoicePerformance(metrics)
     }

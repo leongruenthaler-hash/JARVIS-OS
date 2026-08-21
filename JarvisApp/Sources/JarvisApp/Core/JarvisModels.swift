@@ -304,6 +304,18 @@ struct VoiceModeStatus: Codable, Equatable {
     }
 }
 
+/// TARS-Style Persönlichkeits-Regler (Humor/Ehrlichkeit, 0-100). Siehe
+/// app/core/personality_manager.py PersonalityStyle.
+struct PersonalitySettings: Codable, Equatable {
+    let humorLevel: Int
+    let honestyLevel: Int
+
+    enum CodingKeys: String, CodingKey {
+        case humorLevel = "humor_level"
+        case honestyLevel = "honesty_level"
+    }
+}
+
 /// A deterministic, rule-based nudge from the Proactivity Engine (Phase C, see
 /// app/core/proactivity_engine.py). `reason` is always populated - every nudge must be
 /// traceable back to a concrete rule and the data that triggered it, never "the AI felt
