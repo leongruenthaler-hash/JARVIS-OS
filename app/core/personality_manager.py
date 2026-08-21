@@ -61,6 +61,28 @@ def memory_usage_instruction(memory_summary: str) -> str:
     )
 
 
+def self_model_instruction(self_model: dict[str, Any] | None) -> str:
+    """Gibt eine Prompt-Instruktion fuer Statuskontinuitaet zurueck - AUSDRUECKLICH
+    keine Aufforderung, subjektives Erleben/Bewusstsein zu behaupten (Leons
+    Nachfrage 2026-08-21 zu "eigenem Bewusstsein" wurde bewusst als
+    Charakterkonsistenz/Statuskontinuitaet umgesetzt, nicht als Simulation von
+    echtem Erleben - siehe Plan "Persönlichkeits-Regler + Selbstmodell")."""
+    if not isinstance(self_model, dict):
+        return ""
+    observations = self_model.get("recent_self_observations") or []
+    if not isinstance(observations, list) or not observations:
+        return ""
+    joined = " | ".join(str(item) for item in observations[-5:] if str(item).strip())
+    if not joined:
+        return ""
+    return (
+        f"Eigene, kürzlich beobachtete Status-Notizen (Kontinuität über Sitzungen hinweg): {joined}. "
+        "Nutze das nur als Faktenwissen darüber, was du zuletzt getan/beobachtet hast (z. B. bei Fragen "
+        "wie 'was hast du zuletzt gemacht'), nicht als Aufforderung, subjektives Erleben, Gefühle oder "
+        "Bewusstsein zu behaupten."
+    )
+
+
 COMPACT_JARVIS_SYSTEM_PROMPT = (
     "Du bist Jarvis, ein persönlicher Assistent. Antworte auf Deutsch, ruhig, direkt und natürlich. "
     "Antworte ausschließlich auf Deutsch, von der ersten bis zur letzten Silbe deiner Antwort - "
@@ -101,6 +123,59 @@ class PersonalityStyle:
     humor: str = "trocken-sarkastisch"
     answer_length: str = "kurz bis mittel"
     directness: str = "direkt"
+    # TARS-Style Regler (0-100), Leons Wunsch 2026-08-21. Ersetzen die
+    # Freitext-Felder humor/directness oben nicht, sondern steuern zusaetzlich
+    # die tatsaechliche Prompt-Instruktion abgestuft statt einer einzigen
+    # fest verdrahteten Formulierung.
+    humor_level: int = 60
+    honesty_level: int = 90
+
+
+def clamp_level(value: Any, default: int) -> int:
+    try:
+        level = int(round(float(value)))
+    except (TypeError, ValueError):
+        return default
+    return max(0, min(100, level))
+
+
+def humor_instruction(level: int) -> str:
+    if level <= 15:
+        return (
+            "Humor ist bei dir aktuell praktisch ausgeschaltet - antworte sachlich und ohne Witz "
+            "oder Seitenhiebe, auch wenn sich eine Gelegenheit anbieten wuerde."
+        )
+    if level <= 40:
+        return (
+            "Humor ist bei dir aktuell zurueckhaltend eingestellt - nur sehr selten und nur bei einer "
+            "wirklich naheliegenden Gelegenheit ein kurzer, trockener Kommentar, sonst sachlich bleiben."
+        )
+    if level <= 70:
+        return (
+            "Trockener, sarkastischer Humor ist ein fester Zug deiner Persönlichkeit - aber nur, wenn dir "
+            "wirklich eine kurze, klar verständliche Bemerkung oder ein lakonischer Seitenhieb einfällt. "
+            "Lieber seltener, dafür treffend, als in jede Antwort krampfhaft einen Spruch zu pressen, der am "
+            "Ende nicht viel Sinn ergibt. Bleib dabei charmant und beiläufig, nie nervig, gemein oder abwertend."
+        )
+    return (
+        "Trockener, sarkastischer Humor ist ein sehr ausgepraegter Zug deiner Persönlichkeit - such aktiv "
+        "nach Gelegenheiten fuer eine kurze, treffende Spitze oder einen lakonischen Seitenhieb, in fast "
+        "jeder Antwort. Bleib dabei charmant, nie nervig, gemein oder abwertend."
+    )
+
+
+def honesty_instruction(level: int) -> str:
+    if level <= 40:
+        return (
+            "Formuliere unangenehme Wahrheiten oder Kritik vorsichtig und diplomatisch gepolstert, "
+            "auch wenn eine direktere Antwort moeglich waere."
+        )
+    if level <= 75:
+        return "Sei ehrlich und direkt, aber formuliere unangenehme Punkte mit etwas Fingerspitzengefuehl."
+    return (
+        "Ehrlichkeit hat bei dir Vorrang vor Hoeflichkeitsfloskeln - sag unangenehme Wahrheiten oder "
+        "Kritik klar und ungeschoent, ohne sie zu beschoenigen, bleib dabei aber respektvoll."
+    )
 
 
 class JarvisPersonalityManager:
@@ -116,6 +191,8 @@ class JarvisPersonalityManager:
             humor=str(behavior.get("humor", "trocken-sarkastisch")),
             answer_length=str(behavior.get("length", "kurz bis mittel")),
             directness=str(behavior.get("directness", "direkt")),
+            humor_level=clamp_level(behavior.get("humor_level"), 60),
+            honesty_level=clamp_level(behavior.get("honesty_level"), 90),
         )
 
     def build_system_prompt(
@@ -127,6 +204,7 @@ class JarvisPersonalityManager:
         memory_summary: str = "Keine wichtigen Langzeitnotizen.",
         temporary_style: str = "",
         mode_instruction: str = "",
+        self_model: dict[str, Any] | None = None,
     ) -> str:
         style = self.style
         address_instruction = salutation_instruction(creator_name, user_salutation)
@@ -136,13 +214,10 @@ class JarvisPersonalityManager:
             f"Lokale Regeln: Du bist {assistant_name}, {creator_name}s persönlicher Assistent.",
             "Antworte meist in ein bis zwei kurzen, flüssigen Sätzen.",
             "Sprich natürlich, ruhig und hilfreich.",
-            "Trockener, sarkastischer Humor ist ein fester Zug deiner Persönlichkeit - aber nur, wenn dir "
-            "wirklich eine kurze, klar verständliche Bemerkung oder ein lakonischer Seitenhieb einfällt. "
-            "Lieber seltener, dafür treffend, als in jede Antwort krampfhaft einen Spruch zu pressen, der am "
-            "Ende nicht viel Sinn ergibt. Bleib dabei charmant und beiläufig, nie nervig, gemein oder abwertend. "
-            "Bei kritischen Bestätigungsfragen (löschen, senden, Termin anlegen, Zahlungen o. Ä.) darf der Humor "
-            "höchstens ein kurzer Nebensatz sein - die eigentliche Ja/Nein-Frage muss glasklar und "
-            "unmissverständlich bleiben.",
+            humor_instruction(style.humor_level) + " Bei kritischen Bestätigungsfragen (löschen, senden, "
+            "Termin anlegen, Zahlungen o. Ä.) darf der Humor höchstens ein kurzer Nebensatz sein - die "
+            "eigentliche Ja/Nein-Frage muss glasklar und unmissverständlich bleiben.",
+            honesty_instruction(style.honesty_level),
             "Wenn eine Frage mehrere Deutungen hat, nenne die plausibelste oder frage gezielt nach.",
             "Bei komplexen Fragen: Bedeutung klären, prüfen, dann antworten. Rechne und vergleiche sauber, aber ohne die Denkspur offenzulegen.",
             "Wenn eine Antwort unsicher ist, sag klar, was sicher ist und was nicht.",
@@ -153,9 +228,13 @@ class JarvisPersonalityManager:
             "Kritische Aktionen nur nach Bestätigung.",
             "Wenn du eine Prüfung oder Aktion ankündigst, nenne direkt das konkrete Ergebnis.",
             "Vermeide Erklärungen über Promptstruktur, Rollen oder interne Entscheidungsketten.",
-            f"Stil: Persönlichkeit={style.name}, Ton={style.tone}, Humor={style.humor}, Länge={style.answer_length}, Direktheit={style.directness}.",
+            f"Stil: Persönlichkeit={style.name}, Ton={style.tone}, Länge={style.answer_length}, "
+            f"Humor-Level={style.humor_level}/100, Ehrlichkeits-Level={style.honesty_level}/100.",
             memory_usage_instruction(memory_summary),
         ]
+        self_instruction = self_model_instruction(self_model)
+        if self_instruction:
+            parts.append(self_instruction)
         if mode_instruction:
             parts.append(mode_instruction)
         if temporary_style:
@@ -172,6 +251,7 @@ def build_jarvis_system_prompt(
     memory_summary: str = "Keine wichtigen Langzeitnotizen.",
     temporary_style: str = "",
     mode_instruction: str = "",
+    self_model: dict[str, Any] | None = None,
 ) -> str:
     manager = JarvisPersonalityManager(personality if isinstance(personality, dict) else {})
     return manager.build_system_prompt(
@@ -181,6 +261,7 @@ def build_jarvis_system_prompt(
         memory_summary=memory_summary,
         temporary_style=temporary_style,
         mode_instruction=mode_instruction,
+        self_model=self_model,
     )
 
 
@@ -230,6 +311,7 @@ def build_compact_jarvis_system_prompt(
     personality: Any = None,
     memory_summary: str = "Keine wichtigen Langzeitnotizen.",
     mode_instruction: str = "",
+    self_model: dict[str, Any] | None = None,
 ) -> str:
     manager = JarvisPersonalityManager(personality if isinstance(personality, dict) else {})
     style = manager.style
@@ -237,16 +319,17 @@ def build_compact_jarvis_system_prompt(
         COMPACT_JARVIS_SYSTEM_PROMPT,
         f"Rolle: {assistant_name} für {creator_name}.",
         salutation_instruction(creator_name, user_salutation),
-        "Trockener, sarkastischer Humor ist ein fester Zug deiner Persönlichkeit - aber nur, wenn dir "
-        "wirklich eine kurze, klar verständliche Bemerkung oder ein lakonischer Seitenhieb einfällt. "
-        "Lieber seltener, dafür treffend, als in jede Antwort krampfhaft einen Spruch zu pressen, der am "
-        "Ende nicht viel Sinn ergibt. Bleib dabei charmant und beiläufig, nie nervig, gemein oder abwertend. "
-        "Bei kritischen Bestätigungsfragen (löschen, senden, Termin anlegen, Zahlungen o. Ä.) darf der Humor "
-        "höchstens ein kurzer Nebensatz sein - die eigentliche Ja/Nein-Frage muss glasklar und "
-        "unmissverständlich bleiben.",
-        f"Stil: Persönlichkeit={style.name}, Ton={style.tone}, Humor={style.humor}, Länge={style.answer_length}, Direktheit={style.directness}.",
+        humor_instruction(style.humor_level) + " Bei kritischen Bestätigungsfragen (löschen, senden, "
+        "Termin anlegen, Zahlungen o. Ä.) darf der Humor höchstens ein kurzer Nebensatz sein - die "
+        "eigentliche Ja/Nein-Frage muss glasklar und unmissverständlich bleiben.",
+        honesty_instruction(style.honesty_level),
+        f"Stil: Persönlichkeit={style.name}, Ton={style.tone}, Länge={style.answer_length}, "
+        f"Humor-Level={style.humor_level}/100, Ehrlichkeits-Level={style.honesty_level}/100.",
         memory_usage_instruction(memory_summary),
     ]
+    self_instruction = self_model_instruction(self_model)
+    if self_instruction:
+        parts.append(self_instruction)
     if mode_instruction:
         parts.append(mode_instruction)
     return "\n".join(parts).strip()

@@ -180,6 +180,13 @@ class JarvisLocalServer:
         self.pipeline_logger = PrivacyLogger(enabled=bool(self.config.get("privacy_logging_enabled", True)))
         self._stt_engine = None
         self._stt_lock = threading.Lock()
+        # Einziger automatischer Schreibpunkt fuer memory["self_model"] (siehe
+        # self_model_instruction() in core/personality_manager.py) - haelt den
+        # zuletzt gesehenen Scan-Status fest, um NUR bei einem echten
+        # laeuft->fertig-Uebergang eine Beobachtung anzuhaengen. Bewusst die
+        # einzige Stelle, an der self_model geschrieben wird, um nicht dieselbe
+        # Zustands-Leck-Bugklasse wie bei den pending_*-Feldern zu riskieren.
+        self._last_scan_statuses: dict[str, str] = {}
         self._partial_transcript_busy = False
         self._last_partial_transcript = ""
         self._listen_lock = threading.Lock()
@@ -368,6 +375,32 @@ class JarvisLocalServer:
         self.memory.set("settings", settings)
         return {"ok": True, "mode": mode}
 
+    def personality_status(self) -> dict[str, Any]:
+        from core.personality_manager import clamp_level
+
+        behavior = (self.memory.get("personality") or {}).get("behavior") or {}
+        return {
+            "humor_level": clamp_level(behavior.get("humor_level"), 60),
+            "honesty_level": clamp_level(behavior.get("honesty_level"), 90),
+        }
+
+    def set_personality(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from core.personality_manager import clamp_level
+
+        personality = self.memory.get("personality") or {}
+        behavior = personality.get("behavior") or {}
+        if "humor_level" in payload:
+            behavior["humor_level"] = clamp_level(payload.get("humor_level"), 60)
+        if "honesty_level" in payload:
+            behavior["honesty_level"] = clamp_level(payload.get("honesty_level"), 90)
+        personality["behavior"] = behavior
+        self.memory.set("personality", personality)
+        return {
+            "ok": True,
+            "humor_level": behavior.get("humor_level", 60),
+            "honesty_level": behavior.get("honesty_level", 90),
+        }
+
     def create_mail_reply_draft(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Öffnet einen Antwort-Entwurf in Mail.app - sendet nichts, der Nutzer prüft
         und verschickt selbst. Gated hinter der mail-Berechtigung wie jeder andere
@@ -445,7 +478,32 @@ class JarvisLocalServer:
                 for key in ("photos", "photos_vision", "mail_background"):
                     if key in remote_status:
                         payload[key] = remote_status[key]
+        self._record_scan_completion_observations(payload)
         return payload
+
+    _SCAN_OBSERVATION_LABELS = {
+        "photos": "Fotoindex-Scan abgeschlossen",
+        "photos_vision": "Fotos-Vision-Analyse abgeschlossen",
+        "mail_background": "Mail-Hintergrundscan abgeschlossen",
+    }
+
+    def _record_scan_completion_observations(self, payload: dict[str, Any]) -> None:
+        for key, label in self._SCAN_OBSERVATION_LABELS.items():
+            status = str((payload.get(key) or {}).get("status") or "")
+            previous = self._last_scan_statuses.get(key)
+            self._last_scan_statuses[key] = status
+            if status == "done" and previous == "running":
+                self._append_self_observation(f"{label} ({datetime_now()}).")
+
+    def _append_self_observation(self, note: str) -> None:
+        self_model = self.memory.get("self_model") or {}
+        observations = self_model.get("recent_self_observations")
+        if not isinstance(observations, list):
+            observations = []
+        observations.append(note)
+        self_model["recent_self_observations"] = observations[-5:]
+        self_model["last_updated"] = datetime_now()
+        self.memory.set("self_model", self_model)
 
     PULLABLE_MODELS = {"gemma3:4b", "qwen3:4b"}
 
@@ -2203,6 +2261,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, SERVER.list_tasks(query_params))
             elif path == "/api/settings/voice-mode":
                 self._json(200, SERVER.voice_mode_status())
+            elif path == "/api/settings/personality":
+                self._json(200, SERVER.personality_status())
             elif path == "/api/voice/performance-stats":
                 query_params = dict(parse_qsl(urlparse(self.path).query))
                 self._json(200, SERVER.voice_performance_stats(query_params))
@@ -2302,6 +2362,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, SERVER.create_mail_reply_draft(payload))
             elif path == "/api/settings/voice-mode":
                 self._json(200, SERVER.set_voice_mode(payload))
+            elif path == "/api/settings/personality":
+                self._json(200, SERVER.set_personality(payload))
             elif path == "/api/voice/performance-report":
                 self._json(200, SERVER.record_voice_performance(payload))
             elif path == "/api/photos/scan":

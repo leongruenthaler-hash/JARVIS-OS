@@ -549,6 +549,7 @@ def build_input(
     compact: bool = False,
 ) -> list[dict[str, str]]:
     personality = memory.get("personality") or {}
+    self_model = memory.get("self_model") or {}
     settings = memory.get("settings") or {}
     if bool(CONFIG.get("privacy_store_conversation", False)):
         try:
@@ -582,6 +583,7 @@ def build_input(
             personality=personality,
             memory_summary=memory_summary,
             mode_instruction=mode_instruction,
+            self_model=self_model,
         )
     else:
         system_text = build_jarvis_system_prompt(
@@ -592,6 +594,7 @@ def build_input(
             memory_summary=memory_summary,
             temporary_style=temporary_style,
             mode_instruction=mode_instruction,
+            self_model=self_model,
         )
 
     combined_history = list(previous_conversation)
@@ -2227,6 +2230,49 @@ def handle_style_command(memory: Memory, text: str) -> str | None:
         return f"Standardmodus, {configured_user_address()}. Ruhig und knapp."
 
     return None
+
+
+def handle_personality_command(memory: Memory, text: str) -> str | None:
+    """TARS-Style Humor-/Ehrlichkeits-Regler per Sprachbefehl - Leons Wunsch
+    2026-08-21. Gleiches Muster wie handle_style_command oben: Text parsen,
+    Wert in memory["personality"]["behavior"] schreiben, Bestaetigung zurueckgeben."""
+    from core.personality_manager import clamp_level
+
+    normalized = normalize_text(text)
+    if "humor" not in normalized and "ehrlich" not in normalized and "honest" not in normalized:
+        return None
+
+    is_humor = "humor" in normalized
+    field = "humor_level" if is_humor else "honesty_level"
+    label = "Humor" if is_humor else "Ehrlichkeit"
+
+    personality = memory.get("personality") or {}
+    behavior = personality.get("behavior") or {}
+    current = clamp_level(behavior.get(field), 60 if is_humor else 90)
+
+    increase_terms = ["mehr", "hoeher", "höher", "rauf", "erhoeh", "erhöh"]
+    decrease_terms = ["weniger", "runter", "niedriger", "senk", "aus"]
+    if is_humor:
+        increase_terms += ["lustiger", "witziger", "humorvoller"]
+        decrease_terms += ["ernster", "sachlicher"]
+    else:
+        increase_terms += ["ehrlicher", "direkter", "offener"]
+        decrease_terms += ["vorsichtiger", "diplomatischer", "zurueckhaltender", "zurückhaltender"]
+
+    match = re.search(r"(\d{1,3})\s*(%|prozent)?", normalized)
+    if match:
+        new_level = max(0, min(100, int(match.group(1))))
+    elif any(term in normalized for term in increase_terms):
+        new_level = max(0, min(100, current + 20))
+    elif any(term in normalized for term in decrease_terms):
+        new_level = max(0, min(100, current - 20))
+    else:
+        return None
+
+    behavior[field] = new_level
+    personality["behavior"] = behavior
+    memory.set("personality", personality)
+    return f"{label} auf {new_level} gesetzt, {configured_user_address()}."
 
 
 def handle_project_command(text: str) -> str | None:
@@ -7261,6 +7307,7 @@ def answer_message(
         ("handle_system_command", (question,), {}, "none"),
         ("handle_preference_command", (memory, question), {}, "none"),
         ("handle_style_command", (memory, question), {}, "none"),
+        ("handle_personality_command", (memory, question), {}, "none"),
         ("handle_project_command", (question,), {}, "none"),
         ("handle_local_command", (question,), {}, "none"),
         ("handle_privacy_command", (memory, question), {}, "none"),

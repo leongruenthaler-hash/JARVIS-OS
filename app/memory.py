@@ -145,6 +145,7 @@ class Memory:
 
         self.files = {
             "personality": self.base_path / "personality.json",
+            "self_model": self.base_path / "self_model.json",
             "long_memory": self.base_path / "long_memory.json",
             "conversation": self.base_path / "conversation.json",
             "projects": self.base_path / "projects.json",
@@ -164,7 +165,21 @@ class Memory:
                     "humor": "trocken-sarkastisch",
                     "calm": True,
                     "permission_required": True,
+                    # TARS-Style Regler (0-100), Leons Wunsch 2026-08-21 - siehe
+                    # app/core/personality_manager.py PersonalityStyle.
+                    "humor_level": 60,
+                    "honesty_level": 90,
                 },
+            },
+            # Statuskontinuitaet ueber Sitzungen hinweg, ausdruecklich KEINE
+            # Bewusstseins-Simulation - siehe self_model_instruction() in
+            # app/core/personality_manager.py. Getrennt von "personality"
+            # (Charakter-Konfiguration) und von den Nutzer-Fakten in
+            # long_memory (Fakten ÜBER den Nutzer, nicht über Jarvis selbst).
+            "self_model": {
+                "known_capabilities_note": "",
+                "recent_self_observations": [],
+                "last_updated": "",
             },
             "long_memory": {},
             "conversation": [],
