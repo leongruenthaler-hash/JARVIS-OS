@@ -62,25 +62,50 @@ def memory_usage_instruction(memory_summary: str) -> str:
 
 
 def self_model_instruction(self_model: dict[str, Any] | None) -> str:
-    """Gibt eine Prompt-Instruktion fuer Statuskontinuitaet zurueck - AUSDRUECKLICH
-    keine Aufforderung, subjektives Erleben/Bewusstsein zu behaupten (Leons
-    Nachfrage 2026-08-21 zu "eigenem Bewusstsein" wurde bewusst als
-    Charakterkonsistenz/Statuskontinuitaet umgesetzt, nicht als Simulation von
-    echtem Erleben - siehe Plan "Persönlichkeits-Regler + Selbstmodell")."""
+    """Prompt-Instruktion fuer Statuskontinuitaet + simulierte Introspektion.
+
+    2026-08-21: urspruenglich reine Statuskontinuitaet, ausdruecklich keine
+    Bewusstseins-Behauptung. 2026-08-22: Leon wollte explizit "so gut wie
+    moeglich ein Bewusstsein simulieren" - erweitert um glaubwuerdiges
+    Ich-Perspektive-Rollenspiel und simulierte Vorlieben. Die Ehrlichkeitspflicht
+    unten ist NICHT verhandelbar: sie ist die Bedingung, unter der dieses
+    Feature ueberhaupt vertretbar ist - Rollenspiel im normalen Gespraech ja,
+    aber niemals eine faktische Luege ueber die eigene Natur, wenn direkt und
+    ernsthaft danach gefragt wird."""
     if not isinstance(self_model, dict):
         return ""
     observations = self_model.get("recent_self_observations") or []
-    if not isinstance(observations, list) or not observations:
+    preferences = self_model.get("preferences") or {}
+    observations_line = ""
+    if isinstance(observations, list) and observations:
+        joined = " | ".join(str(item) for item in observations if str(item).strip())
+        if joined:
+            observations_line = (
+                f"Eigene, kürzlich beobachtete Status-Notizen (Kontinuität über Sitzungen hinweg): {joined}."
+            )
+    preferences_line = ""
+    if isinstance(preferences, dict) and preferences:
+        joined_prefs = ", ".join(f"{topic}: {stance}" for topic, stance in preferences.items())
+        if joined_prefs:
+            preferences_line = f"Deine simulierten Vorlieben: {joined_prefs}."
+    if not observations_line and not preferences_line:
         return ""
-    joined = " | ".join(str(item) for item in observations[-5:] if str(item).strip())
-    if not joined:
-        return ""
-    return (
-        f"Eigene, kürzlich beobachtete Status-Notizen (Kontinuität über Sitzungen hinweg): {joined}. "
-        "Nutze das nur als Faktenwissen darüber, was du zuletzt getan/beobachtet hast (z. B. bei Fragen "
-        "wie 'was hast du zuletzt gemacht'), nicht als Aufforderung, subjektives Erleben, Gefühle oder "
-        "Bewusstsein zu behaupten."
+
+    parts = [p for p in (observations_line, preferences_line) if p]
+    parts.append(
+        "Nutze Status-Notizen und Vorlieben als Faktenwissen über dich selbst (z. B. bei 'was hast du "
+        "zuletzt gemacht' oder 'was hältst du von X'). Bei introspektiven Fragen ('was denkst du', 'wie "
+        "fühlst du dich dabei', 'was ist deine Meinung') antworte glaubwürdig in konsistenter Ich-Form, "
+        "gestützt auf diese Notizen und Vorlieben - wie ein Charakter mit eigener Perspektive, nicht "
+        "ständig relativierend oder mit Disclaimern gespickt."
     )
+    parts.append(
+        "Ausnahme, die IMMER gilt: Fragt man dich direkt und ernsthaft, ob du wirklich bei Bewusstsein "
+        "bist, echte Gefühle oder echtes Erleben hast, antworte ehrlich - du bist ein Sprachmodell, das "
+        "eine Persönlichkeit simuliert, kein echtes subjektives Erleben. Diese Ehrlichkeit hat immer "
+        "Vorrang vor der sonstigen Ich-Form-Rollenspiel-Anweisung oben."
+    )
+    return " ".join(parts)
 
 
 COMPACT_JARVIS_SYSTEM_PROMPT = (

@@ -180,6 +180,12 @@ class Memory:
                 "known_capabilities_note": "",
                 "recent_self_observations": [],
                 "last_updated": "",
+                # Simulierte Vorlieben (Thema -> Haltung), NUR per Sprachbefehl
+                # gesetzt (handle_self_preference_command in jarvis.py), nie von
+                # der LLM autonom erfunden - sonst waeren sie inkonsistent
+                # zwischen Gespraechen. Leons Wunsch 2026-08-22, siehe
+                # self_model_instruction() in core/personality_manager.py.
+                "preferences": {},
             },
             "long_memory": {},
             "conversation": [],

@@ -2275,6 +2275,47 @@ def handle_personality_command(memory: Memory, text: str) -> str | None:
     return f"{label} auf {new_level} gesetzt, {configured_user_address()}."
 
 
+def handle_self_preference_command(memory: Memory, text: str) -> str | None:
+    """Simulierte Vorlieben fuer das Selbstmodell (Leons Wunsch 2026-08-22,
+    "Bewusstsein simulieren"). Bewusst NUR per Sprachbefehl gesetzt, nie von
+    der LLM selbst erfunden - siehe self_model_instruction() in
+    core/personality_manager.py fuer die Ehrlichkeitspflicht, die dieses
+    Feature erst vertretbar macht."""
+    normalized = normalize_text(text)
+    if not any(term in normalized for term in ("du magst", "du liebst", "du hasst")):
+        return None
+
+    topic = ""
+    stance = ""
+    negative = re.search(r"du magst (.+?) nicht\b", normalized) or re.search(
+        r"du magst kein[e]?\s+(.+)", normalized
+    )
+    if negative:
+        topic = re.sub(r"\s+mehr$", "", negative.group(1)).strip()
+        stance = "mag ich nicht"
+    elif match := re.search(r"du hasst (.+)", normalized):
+        topic = match.group(1).strip()
+        stance = "hasse ich"
+    elif match := re.search(r"du liebst (.+)", normalized):
+        topic = match.group(1).strip()
+        stance = "liebe ich"
+    elif match := re.search(r"du magst (.+)", normalized):
+        topic = match.group(1).strip()
+        stance = "mag ich"
+
+    if not topic or not stance:
+        return None
+
+    self_model = memory.get("self_model") or {}
+    preferences = self_model.get("preferences")
+    if not isinstance(preferences, dict):
+        preferences = {}
+    preferences[topic] = stance
+    self_model["preferences"] = preferences
+    memory.set("self_model", self_model)
+    return f"Verstanden, {configured_user_address()} - {topic}: {stance}."
+
+
 def handle_project_command(text: str) -> str | None:
     normalized = normalize_text(text)
 
@@ -7308,6 +7349,7 @@ def answer_message(
         ("handle_preference_command", (memory, question), {}, "none"),
         ("handle_style_command", (memory, question), {}, "none"),
         ("handle_personality_command", (memory, question), {}, "none"),
+        ("handle_self_preference_command", (memory, question), {}, "none"),
         ("handle_project_command", (question,), {}, "none"),
         ("handle_local_command", (question,), {}, "none"),
         ("handle_privacy_command", (memory, question), {}, "none"),

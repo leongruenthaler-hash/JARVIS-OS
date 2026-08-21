@@ -529,7 +529,11 @@ class JarvisLocalServer:
         if not isinstance(observations, list):
             observations = []
         observations.append(note)
-        self_model["recent_self_observations"] = observations[-5:]
+        # Cap 12 statt frueher 5 (Leons Wunsch 2026-08-22, "tagebuchartiges
+        # Selbstmodell") - haelt mehr Tage/Ereignisse fest, bevor alte
+        # Eintraege rausfallen, bleibt aber eine kurze Liste (kein separates
+        # Tagebuch-Datenformat, siehe self_model_instruction()).
+        self_model["recent_self_observations"] = observations[-12:]
         self_model["last_updated"] = datetime_now()
         self.memory.set("self_model", self_model)
 
