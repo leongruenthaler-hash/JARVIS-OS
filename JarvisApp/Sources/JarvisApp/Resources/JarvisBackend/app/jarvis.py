@@ -6974,8 +6974,23 @@ def handle_music_command(text: str) -> str | None:
             if query and query not in {"musik", "music", "apple music"}:
                 return play_search(query)
 
+        # Nur als Songsuche interpretieren, wenn der Satz auch wirklich nach
+        # Wiedergabe klingt - sonst wurde jede Frage, die zufaellig "Musik"
+        # erwaehnt (z.B. "wie stehst du zu Jazz-Musik", eine introspektive
+        # Vorlieben-Frage, siehe Selbstmodell-Feature), faelschlich als
+        # Songtitel-Suche interpretiert. Live beobachtet im 3000-Saetze-Test
+        # 2026-08-22: "Ich habe den Titel ... nicht gefunden" statt einer
+        # normalen LLM-Antwort.
+        has_play_intent = looks_like_play_request or any(
+            term in normalized
+            for term in ("spiel", "spiele", "starte", "öffne", "oeffne", "abspiel", "wiedergeben", "leg auf", "put on")
+        )
         fallback_query = _clean_music_query(remove_domain_words(text, "music"))
-        if fallback_query and fallback_query not in {"musik", "music", "apple music", "lied", "song", "titel"}:
+        if (
+            has_play_intent
+            and fallback_query
+            and fallback_query not in {"musik", "music", "apple music", "lied", "song", "titel"}
+        ):
             return play_search(fallback_query)
 
         if any(term in normalized for term in ("spiel", "spiele", "starte", "öffne apple music", "oeffne apple music", "mach musik", "musik an")):
