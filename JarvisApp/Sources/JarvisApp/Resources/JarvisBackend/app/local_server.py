@@ -335,7 +335,16 @@ class JarvisLocalServer:
             for key, value in payload.items()
             if key in {"title", "project", "priority", "deadline", "tags", "depends_on", "status"}
         }
+        previous = self.tasks.get_task(task_id)
+        # previous ist dieselbe Dict-Referenz wie der intern gespeicherte Task
+        # (Memory.get() gibt keine Kopie zurueck) - status/title VOR dem Update
+        # als reine Werte sichern, sonst zeigt previous nach update_task() bereits
+        # den NEUEN Status, weil update_task() das Dict in-place mutiert.
+        previous_status = previous.get("status") if previous else None
+        previous_title = str(previous.get("title") or "Aufgabe") if previous else "Aufgabe"
         ok = self.tasks.update_task(task_id, **fields)
+        if ok and previous_status != "erledigt" and fields.get("status") == "erledigt":
+            self._append_self_observation(f"Aufgabe '{previous_title}' erledigt.")
         return {"ok": ok, "task": self.tasks.get_task(task_id) if ok else None}
 
     def confirm_task(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -481,19 +490,38 @@ class JarvisLocalServer:
         self._record_scan_completion_observations(payload)
         return payload
 
+    # (label, terminal_status) - "files" landet nicht bei "done" wie die anderen
+    # drei, sondern kollabiert in _files_status() auf "completed" (siehe dort),
+    # deshalb pro Schluessel konfigurierbarer Terminalwert statt hart "done".
     _SCAN_OBSERVATION_LABELS = {
-        "photos": "Fotoindex-Scan abgeschlossen",
-        "photos_vision": "Fotos-Vision-Analyse abgeschlossen",
-        "mail_background": "Mail-Hintergrundscan abgeschlossen",
+        "photos": ("Fotoindex-Scan abgeschlossen", "done"),
+        "photos_vision": ("Fotos-Vision-Analyse abgeschlossen", "done"),
+        "mail_background": ("Mail-Hintergrundscan abgeschlossen", "done"),
+        "files": ("Dateiindex-Scan abgeschlossen", "completed"),
     }
 
     def _record_scan_completion_observations(self, payload: dict[str, Any]) -> None:
-        for key, label in self._SCAN_OBSERVATION_LABELS.items():
+        for key, (label, terminal_status) in self._SCAN_OBSERVATION_LABELS.items():
             status = str((payload.get(key) or {}).get("status") or "")
             previous = self._last_scan_statuses.get(key)
             self._last_scan_statuses[key] = status
-            if status == "done" and previous == "running":
+            if status == terminal_status and previous == "running":
                 self._append_self_observation(f"{label} ({datetime_now()}).")
+
+    def _record_daily_briefing_observation(self) -> None:
+        """Einmal pro Tag eine Selbstmodell-Notiz beim Erstellen des Tagesbriefings -
+        einzelner primitiver Datums-Guard statt eines pending_*-Objekts, damit
+        wiederholtes Polling von /api/daily-briefing nicht mehrfach am selben
+        Tag anhaengt."""
+        from datetime import date
+
+        today = date.today().isoformat()
+        self_model = self.memory.get("self_model") or {}
+        if self_model.get("last_briefing_observation_date") == today:
+            return
+        self_model["last_briefing_observation_date"] = today
+        self.memory.set("self_model", self_model)
+        self._append_self_observation("Habe heute das Tagesbriefing erstellt.")
 
     def _append_self_observation(self, note: str) -> None:
         self_model = self.memory.get("self_model") or {}
@@ -850,6 +878,7 @@ class JarvisLocalServer:
         )
         if proactivity_summary:
             briefing = f"{briefing} {proactivity_summary}."
+        self._record_daily_briefing_observation()
         return {
             "briefing": briefing,
             "calendar_count": len(calendar_items),
