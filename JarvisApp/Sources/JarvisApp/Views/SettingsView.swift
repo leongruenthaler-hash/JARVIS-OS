@@ -3,8 +3,8 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.jarvisTheme) private var theme
-    @AppStorage("JarvisActiveTheme") private var activeThemeRaw = JarvisTheme.classic.rawValue
-    @AppStorage("JarvisDashboardLayoutEnabled") private var dashboardLayoutEnabled = false
+    @AppStorage("JarvisActiveTheme") private var activeThemeRaw = JarvisTheme.signal.rawValue
+    @AppStorage("JarvisDashboardLayoutEnabled") private var dashboardLayoutEnabled = true
     @State private var apiKey = ""
     @State private var weatherCityDraft = ""
     @State private var usageGoalDraft = ""
@@ -170,13 +170,8 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack {
-                        Slider(
-                            value: Binding(
-                                get: { Double(appState.humorLevel) },
-                                set: { appState.humorLevel = Int($0) }
-                            ),
-                            in: 0...100,
-                            step: 1,
+                        SignalSlider(
+                            value: $appState.humorLevel,
                             onEditingChanged: { editing in
                                 if !editing {
                                     Task { await appState.savePersonalitySettingsToCore() }
@@ -200,13 +195,8 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack {
-                        Slider(
-                            value: Binding(
-                                get: { Double(appState.honestyLevel) },
-                                set: { appState.honestyLevel = Int($0) }
-                            ),
-                            in: 0...100,
-                            step: 1,
+                        SignalSlider(
+                            value: $appState.honestyLevel,
                             onEditingChanged: { editing in
                                 if !editing {
                                     Task { await appState.savePersonalitySettingsToCore() }

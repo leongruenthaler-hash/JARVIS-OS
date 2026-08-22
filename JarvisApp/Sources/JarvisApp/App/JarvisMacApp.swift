@@ -6,10 +6,10 @@ import UserNotifications
 struct JarvisMacApp: App {
     @NSApplicationDelegateAdaptor(JarvisAppDelegate.self) private var appDelegate
     @StateObject private var appState = AppState()
-    @AppStorage("JarvisActiveTheme") private var activeThemeRaw = JarvisTheme.classic.rawValue
+    @AppStorage("JarvisActiveTheme") private var activeThemeRaw = JarvisTheme.signal.rawValue
 
     private var activeTheme: JarvisTheme {
-        JarvisTheme(rawValue: activeThemeRaw) ?? .classic
+        JarvisTheme(rawValue: activeThemeRaw) ?? .signal
     }
 
     var body: some Scene {

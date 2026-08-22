@@ -48,6 +48,12 @@ struct ChatBubble: View {
             case .jarvis: return AnyShapeStyle(.ultraThinMaterial)
             case .system: return AnyShapeStyle(theme.secondaryAccent.opacity(0.16))
             }
+        case .signal:
+            switch message.role {
+            case .user: return AnyShapeStyle(theme.primaryAccent.opacity(0.16))
+            case .jarvis: return AnyShapeStyle(Color.white.opacity(0.03))
+            case .system: return AnyShapeStyle(theme.secondaryAccent.opacity(0.10))
+            }
         case .classic:
             switch message.role {
             case .user: return AnyShapeStyle(.blue.opacity(0.18))
@@ -72,6 +78,12 @@ struct ChatBubble: View {
             case .user: return theme.primaryAccent.opacity(0.44)
             case .jarvis: return theme.secondaryAccent.opacity(0.32)
             case .system: return theme.primaryAccent.opacity(0.28)
+            }
+        case .signal:
+            switch message.role {
+            case .user: return theme.primaryAccent.opacity(0.40)
+            case .jarvis: return Color.white.opacity(0.08)
+            case .system: return theme.secondaryAccent.opacity(0.24)
             }
         }
     }

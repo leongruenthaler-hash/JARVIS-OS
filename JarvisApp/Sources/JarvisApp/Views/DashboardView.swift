@@ -31,7 +31,7 @@ struct DashboardView: View {
     var body: some View {
         HStack(spacing: 0) {
             sidebar
-                .frame(width: 240)
+                .frame(width: 72)
 
             VStack(spacing: 0) {
                 header
@@ -57,10 +57,10 @@ struct DashboardView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(DashboardBackground())
         .preferredColorScheme(.dark)
-        // Cascade the warm-dark Dashboard theme to every embedded feature view (all sidebar
+        // Cascade the Signal theme to every embedded feature view (all sidebar
         // sections except the hand-built "Übersicht" grid, which uses DashboardPalette
         // directly). The shared components recolor via @Environment(\.jarvisTheme).
-        .environment(\.jarvisTheme, .dashboard)
+        .environment(\.jarvisTheme, .signal)
         .task { await pollSystemStats() }
         .task(id: appState.weatherLocation) { await pollWeather() }
         .task { await appState.refreshPermissions() }
@@ -141,36 +141,31 @@ struct DashboardView: View {
 
     private var sidebar: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 4) {
-                ZStack {
-                    ForEach(0..<3) { ring in
-                        Circle()
-                            .stroke(DashboardPalette.accent.opacity(0.55 - Double(ring) * 0.15), lineWidth: 1.5)
-                            .frame(width: 34 - CGFloat(ring) * 9, height: 34 - CGFloat(ring) * 9)
-                    }
+            // Icon-only Rail (Signal-Redesign 2026-08-22): die Identitaet ist der
+            // gluehende Punkt selbst, kein "JARVIS OS"-Schriftzug mehr - der passt bei
+            // 72pt Sidebar-Breite ohnehin nicht mehr sauber.
+            ZStack {
+                ForEach(0..<3) { ring in
                     Circle()
-                        .fill(DashboardPalette.accent)
-                        .frame(width: 6, height: 6)
+                        .stroke(DashboardPalette.accent.opacity(0.55 - Double(ring) * 0.15), lineWidth: 1.5)
+                        .frame(width: 34 - CGFloat(ring) * 9, height: 34 - CGFloat(ring) * 9)
                 }
-                .frame(height: 40)
-
-                Text("JARVIS")
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                Text("OS")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(DashboardPalette.textSecondary)
+                Circle()
+                    .fill(DashboardPalette.accent)
+                    .frame(width: 6, height: 6)
             }
-            .padding(.top, 28)
-            .padding(.bottom, 26)
+            .frame(height: 40)
+            .padding(.top, 26)
+            .padding(.bottom, 22)
+            .help("JARVIS OS")
+            .accessibilityLabel("JARVIS OS")
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(spacing: 4) {
                     ForEach(DashboardSection.allCases) { section in
                         sidebarRow(section)
                     }
                 }
-                .padding(.horizontal, 14)
             }
             .scrollIndicators(.never)
 
@@ -179,13 +174,13 @@ struct DashboardView: View {
             ZStack {
                 Circle()
                     .fill(DashboardPalette.accent.opacity(0.18))
-                    .frame(width: 78, height: 78)
+                    .frame(width: 60, height: 60)
                     .blur(radius: 8)
                 Circle()
                     .strokeBorder(DashboardPalette.accent.opacity(0.7), lineWidth: 1.5)
-                    .frame(width: 58, height: 58)
+                    .frame(width: 46, height: 46)
                 Image(systemName: "waveform")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(DashboardPalette.accent)
             }
             .padding(.bottom, 18)
@@ -203,50 +198,32 @@ struct DashboardView: View {
         return Button {
             activeSection = section
         } label: {
-            HStack(spacing: 10) {
-                Image(systemName: section.symbol)
-                    .font(.system(size: 13, weight: .medium))
-                    .frame(width: 18)
-                Text(section.title)
-                    .font(.system(size: 13, weight: .medium))
-                Spacer(minLength: 0)
-            }
-            .foregroundStyle(isActive ? DashboardPalette.accent : DashboardPalette.textSecondary)
-            .padding(.vertical, 9)
-            .padding(.horizontal, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(isActive ? DashboardPalette.accent.opacity(0.14) : .clear)
-            )
-            .overlay(alignment: .leading) {
-                if isActive {
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(DashboardPalette.accent)
-                        .frame(width: 3)
-                        .padding(.vertical, 6)
-                }
-            }
+            Image(systemName: section.symbol)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(isActive ? DashboardPalette.accent : DashboardPalette.textSecondary)
+                .frame(width: 38, height: 38)
+                .background(
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(isActive ? DashboardPalette.accent.opacity(0.14) : .clear)
+                )
         }
         .buttonStyle(.plain)
+        // Icon-only Rail: das Label verschwindet visuell, bleibt aber per Tooltip
+        // (Hover) und VoiceOver auffindbar, statt ganz zu verschwinden.
+        .help(section.title)
+        .accessibilityLabel(section.title)
     }
 
+    /// Kompakter Status-Punkt statt der frueheren Text-Karte ("Jarvis Online" /
+    /// "Alle Systeme aktiv") - passt nicht mehr in die 72pt-Icon-Rail. Inhalt bleibt
+    /// per Tooltip/VoiceOver erreichbar.
     private var statusCard: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Text("Jarvis Online")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white)
-                Circle()
-                    .fill(DashboardPalette.accent)
-                    .frame(width: 6, height: 6)
-            }
-            Text("Alle Systeme aktiv")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(DashboardPalette.accent)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .dashboardGlass(cornerRadius: 14)
+        Circle()
+            .fill(DashboardPalette.accent)
+            .frame(width: 8, height: 8)
+            .shadow(color: DashboardPalette.accent.opacity(0.7), radius: 6)
+            .help("Jarvis Online - alle Systeme aktiv")
+            .accessibilityLabel("Jarvis Online, alle Systeme aktiv")
     }
 
     // MARK: - Header
@@ -1093,9 +1070,13 @@ private enum DashboardSection: Equatable, Identifiable {
 // MARK: - Palette, background and glass style
 
 enum DashboardPalette {
-    static let accent = Color(red: 0.910, green: 0.475, blue: 0.165)
-    static let accentLight = Color(red: 0.961, green: 0.627, blue: 0.333)
-    static let background = Color(red: 0.05, green: 0.035, blue: 0.03)
+    // Signal-Theme (2026-08-22): mint statt warmem Orange. Bewusst weiterhin ein eigener,
+    // hart codierter Satz statt @Environment(\.jarvisTheme) - dieselbe Struktur wie zuvor,
+    // da DashboardView sein "Übersicht"-Grid direkt darauf aufbaut statt auf dem
+    // Environment-Theme (siehe Kommentar bei .environment(\.jarvisTheme, .signal) oben).
+    static let accent = Color(red: 0.34, green: 0.82, blue: 0.64)
+    static let accentLight = Color(red: 0.73, green: 0.92, blue: 0.83)
+    static let background = Color(red: 0.02, green: 0.02, blue: 0.024)
     static let textSecondary = Color(red: 0.612, green: 0.639, blue: 0.686)
     static let sidebarFill = Color.black.opacity(0.28)
     /// Faint tint on top of `.ultraThinMaterial` - pixel-sampled against the reference
@@ -1109,52 +1090,25 @@ enum DashboardPalette {
     static let badgeAmber = Color(red: 0.93, green: 0.78, blue: 0.30)
 }
 
-/// Photographic dashboard backdrop (warm interior/skyline bokeh, see reference design).
-/// Bundled as a loose folder resource (not an .xcassets catalog) alongside the other
-/// Resources/* folders already wired into JarvisApp.xcodeproj's Resources build phase.
-private enum DashboardAssets {
-    static let backgroundImage: NSImage? = {
-        guard let resourcePath = Bundle.main.resourcePath else { return nil }
-        let candidates = ["dashboard-background.jpg", "dashboard-background.png"]
-        for name in candidates {
-            if let image = NSImage(contentsOfFile: resourcePath + "/Images/" + name) {
-                return image
-            }
-        }
-        return nil
-    }()
-}
-
 struct DashboardBackground: View {
     var body: some View {
+        // Signal-Redesign (2026-08-22): der warme Bokeh-Foto-Hintergrund + brauner Scrim
+        // aus dem alten Orange-Theme ist raus - "Signal" ist bewusst fast schwarz, ein
+        // Foto mit eigenen warmen Bildfarben wuerde das immer unterlaufen, egal wie die
+        // Overlay-Farben angepasst werden. Flacher, fast schwarzer Verlauf + dezentes
+        // radiales Mint-Gluehen, analog zu LiquidGlassBackground's .signal-Fall.
         ZStack {
-            DashboardPalette.background
-
-            if let backgroundImage = DashboardAssets.backgroundImage {
-                GeometryReader { proxy in
-                    Image(nsImage: backgroundImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: proxy.size.width, height: proxy.size.height)
-                        .blur(radius: 14)
-                        .clipped()
-                }
-                .ignoresSafeArea()
-
-                // The photo's mid wall band is naturally dimmer than its ceiling-arc and
-                // floor-reflection zones; screen-blending a flat warm tone lifts darker
-                // mid-tones proportionally more than the already-bright zones, so warmth
-                // reads evenly across the whole frame instead of patchy bright/dark bands.
-                DashboardPalette.accent.opacity(0.14)
-                    .blendMode(.screen)
-                    .ignoresSafeArea()
-            }
-
-            // Dark scrim so cards/text stay legible over the photo - warm brown rather than
-            // neutral black (pixel-sampled from the reference image, which never dips to
-            // gray/black even in its darkest areas) so the whole frame keeps the photo's
-            // warmth instead of reading as desaturated.
-            Color(red: 0.10, green: 0.07, blue: 0.05).opacity(0.22)
+            LinearGradient(
+                colors: [DashboardPalette.background, Color(red: 0.012, green: 0.012, blue: 0.016)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            RadialGradient(
+                colors: [DashboardPalette.accent.opacity(0.08), .clear],
+                center: .topLeading,
+                startRadius: 40,
+                endRadius: 560
+            )
 
             topGlowArc
         }

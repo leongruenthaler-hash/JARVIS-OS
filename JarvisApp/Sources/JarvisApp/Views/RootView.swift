@@ -5,7 +5,7 @@ struct RootView: View {
     @Environment(\.jarvisTheme) private var theme
     /// Independent of `JarvisTheme` (color-only recolor of MainShellView) - this picks
     /// between two structurally different view trees. Set via Settings > Design > "Ansicht".
-    @AppStorage("JarvisDashboardLayoutEnabled") private var dashboardLayoutEnabled = false
+    @AppStorage("JarvisDashboardLayoutEnabled") private var dashboardLayoutEnabled = true
 
     var body: some View {
         Group {
@@ -25,7 +25,10 @@ struct RootView: View {
 
     @ViewBuilder
     private var rootBackground: some View {
-        if theme.isFuturistic {
+        // War frueher nur isFuturistic - liess jedes neue dunkle Theme (z.B. .signal)
+        // in den hellen windowBackgroundColor-Zweig fallen. isDark deckt alle
+        // dunklen Themes ab (siehe JarvisTheme.isDark).
+        if theme.isDark {
             Color.black
         } else {
             Color(nsColor: .windowBackgroundColor)

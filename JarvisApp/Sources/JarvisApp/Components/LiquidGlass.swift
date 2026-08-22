@@ -21,6 +21,24 @@ struct LiquidGlassBackground: View {
                         .blendMode(.screen)
                 }
                 .ignoresSafeArea()
+            case .signal:
+                // Nahezu schwarz mit einem dezenten radialen Mint-Gluehen hinter dem
+                // Inhalt, wie im Signal-Mockup - kein flaechiger Farbverlauf, das
+                // Schwarz soll dominieren.
+                ZStack {
+                    LinearGradient(
+                        colors: [theme.backgroundTop, theme.backgroundBottom],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    RadialGradient(
+                        colors: [theme.primaryAccent.opacity(0.10), .clear],
+                        center: .topLeading,
+                        startRadius: 40,
+                        endRadius: 520
+                    )
+                }
+                .ignoresSafeArea()
             case .classic:
                 ZStack {
                     LinearGradient(
@@ -57,6 +75,8 @@ struct LiquidGlassIcon: View {
             gradientColors = [activeTint.opacity(0.95), theme.secondaryAccent.opacity(0.75), .blue.opacity(0.55)]
         case .dashboard:
             gradientColors = [activeTint.opacity(0.95), theme.secondaryAccent.opacity(0.75), theme.primaryAccent.opacity(0.55)]
+        case .signal:
+            gradientColors = [activeTint.opacity(0.95), theme.secondaryAccent.opacity(0.65), activeTint.opacity(0.45)]
         case .classic:
             gradientColors = [tint, .blue, .indigo]
         }
@@ -107,6 +127,11 @@ private struct JarvisGlassPanelModifier: ViewModifier {
         case .dashboard:
             // Matches dashboardGlass' cardFill (Color.black.opacity(0.10)) over the material.
             underlayFill = Color.black.opacity(0.10)
+        case .signal:
+            // Sehr dezent - die flachen Hairline-Border-Karten aus dem Signal-Mockup
+            // kommen ueber die duennere borderOpacity/cardFillOpacity, nicht ueber
+            // eine zusaetzliche Unterfuellung.
+            underlayFill = Color.black.opacity(0.06)
         case .classic:
             underlayFill = Color.clear
         }

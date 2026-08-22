@@ -13,6 +13,7 @@
 		1A2B3C4D5E6F708192A3B4C9 /* PhotosView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4C8 /* PhotosView.swift */; };
 		1A2B3C4D5E6F708192A3B4CB /* FilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4CA /* FilesView.swift */; };
 		1A2B3C4D5E6F708192A3B4D1 /* LiquidGlass.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4D0 /* LiquidGlass.swift */; };
+		A83E9BFF08C843848FA81BB8 /* SignalSlider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FC0569466DB4212A2B37A07 /* SignalSlider.swift */; };
 		1A2B3C4D5E6F708192A3B4D3 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F708192A3B4D2 /* HomeView.swift */; };
 		2A1B3C4D5E6F708192A3B4C1 /* AudioCaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A1B3C4D5E6F708192A3B4C0 /* AudioCaptureService.swift */; };
 		5849F88F9A8A00C4F17E4358 /* NotificationPermissionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B86BFE542B4A6C67A06D1284 /* NotificationPermissionManager.swift */; };
@@ -68,6 +69,7 @@
 		1A2B3C4D5E6F708192A3B4C8 /* PhotosView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosView.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F708192A3B4CA /* FilesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilesView.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F708192A3B4D0 /* LiquidGlass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiquidGlass.swift; sourceTree = "<group>"; };
+		1FC0569466DB4212A2B37A07 /* SignalSlider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalSlider.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F708192A3B4D2 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		2A1B3C4D5E6F708192A3B4C0 /* AudioCaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioCaptureService.swift; sourceTree = "<group>"; };
 		B86BFE542B4A6C67A06D1284 /* NotificationPermissionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationPermissionManager.swift; sourceTree = "<group>"; };
@@ -145,6 +147,7 @@
 					1A2B3C4D5E6F708192A3B4C6 /* ScanProgressCard.swift */,
 					ECD6CEA34720D0375415009B /* ServerStatusCard.swift */,
 					A82EFFD2741E4DAD6415FC96 /* SetupProgressCard.swift */,
+					1FC0569466DB4212A2B37A07 /* SignalSlider.swift */,
 				7B130D8C5A37DA22F60FFAC7 /* StatusPill.swift */,
 				8DF07EF06A8FD772A6543B0F /* JarvisVoiceOrb.swift */,
 			);
@@ -371,6 +374,7 @@
 				07B13397348C35736E6A71D5 /* TasksView.swift in Sources */,
 				1A2B3C4D5E6F708192A3B4CB /* FilesView.swift in Sources */,
 				1A2B3C4D5E6F708192A3B4D1 /* LiquidGlass.swift in Sources */,
+				A83E9BFF08C843848FA81BB8 /* SignalSlider.swift in Sources */,
 				2A1B3C4D5E6F708192A3B4C1 /* AudioCaptureService.swift in Sources */,
 				5849F88F9A8A00C4F17E4358 /* NotificationPermissionManager.swift in Sources */,
 				2B7E1012A9C44CCB8F311001 /* JarvisTheme.swift in Sources */,
