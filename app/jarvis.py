@@ -330,8 +330,8 @@ def handle_privacy_command(memory: Memory, text: str) -> str | None:
     # loeste z.B. "deaktiviere dateien" faelschlich grant_match aus (der VOR
     # revoke_match geprueft wird) und hat die Berechtigung erlaubt statt
     # entzogen - in der Praxis so gefunden.
-    grant_match = re.search(r"\b(?:erlaube|aktiviere)\s+(mail|kalender|erinnerungen|kontakte|dateien|mikrofon|kamera|standort|internet|fotos|photos|bildschirm|ki|cloud|speicher|memory)", normalized)
-    revoke_match = re.search(r"\b(?:deaktiviere|verbiete|entziehe)\s+(mail|kalender|erinnerungen|kontakte|dateien|mikrofon|kamera|standort|internet|fotos|photos|bildschirm|ki|cloud|speicher|memory)", normalized)
+    grant_match = re.search(r"\b(?:erlaube|aktiviere)\s+(mail|kalender|erinnerungen|kontakte|dateien|mikrofon|kamera|standort|internet|fotos|photos|bildschirm|ki|cloud|speicher|memory|lieferando)", normalized)
+    revoke_match = re.search(r"\b(?:deaktiviere|verbiete|entziehe)\s+(mail|kalender|erinnerungen|kontakte|dateien|mikrofon|kamera|standort|internet|fotos|photos|bildschirm|ki|cloud|speicher|memory|lieferando)", normalized)
     mapping = {
         "mikrofon": "microphone",
         "kamera": "camera",
@@ -353,6 +353,7 @@ def handle_privacy_command(memory: Memory, text: str) -> str | None:
         "music": "music",
         "mail": "mail",
         "internet": "internet",
+        "lieferando": "food",
     }
     if grant_match:
         permission = mapping.get(grant_match.group(1))
@@ -862,6 +863,17 @@ DOMAIN_TERMS = {
         "projektordner",
         "jarvis code",
         "unterlagen",
+    ),
+    # Bewusst enge Mehrwort-Phrasen statt generischem "essen"/"hungrig" - das
+    # wuerde viel zu oft in normaler Alltagssprache faelschlich ausloesen
+    # ("was soll ich heute essen"). Siehe handle_food_command() - oeffnet nach
+    # Bestaetigung nur die richtige Lieferando-Seite, bestellt/bezahlt nichts.
+    "food": (
+        "lieferando",
+        "lieferdienst",
+        "essen bestellen",
+        "liefern lassen",
+        "was liefern lassen",
     ),
     "music": (
         "musik",
@@ -2962,6 +2974,7 @@ def has_pending_action(memory: Memory) -> bool:
         "pending_domain_clarification",
         "pending_mail_calendar_confirmation",
         "pending_cleanup_confirmation",
+        "pending_lieferando_open",
     )
     return any(isinstance(settings.get(key), dict) for key in pending_keys)
 
@@ -3017,6 +3030,7 @@ def pending_action_matches_text(settings: dict, normalized_text: str) -> bool:
         "pending_call_choice": ("nummer", "endung", "telefon", "kontakt", "anruf"),
         "pending_mail_calendar_confirmation": ("kalender", "termin", "termine", "vorschlag", "vorschläge", "vorschlaege", "eintragen", "mail", "mails"),
         "pending_cleanup_confirmation": ("papierkorb", "löschen", "loeschen", "datei", "dateien", "speicherplatz", "aufräumen", "aufraeumen"),
+        "pending_lieferando_open": ("lieferando", "lieferdienst", "essen", "bestellen"),
     }
 
     for key, terms in context_by_key.items():
@@ -3919,6 +3933,22 @@ def handle_pending_action_flow(
         )
         if is_confirm or is_cancel:
             return _continue_multistep_chain_if_pending(memory, "pending_calendar_create", result, aborted=is_cancel, photo_worker=photo_worker)
+        return result
+
+    pending_lieferando_open = settings.get("pending_lieferando_open")
+    if isinstance(pending_lieferando_open, dict):
+        result = ACTION_ENGINE.resolve(
+            memory,
+            "pending_lieferando_open",
+            pending_lieferando_open,
+            action_type="open_url",
+            is_confirm=is_confirm,
+            is_cancel=is_cancel,
+            cancel_message="Alles klar, ich öffne nichts.",
+            waiting_message="Ich warte noch auf deine Bestätigung. Sag ja zum Öffnen oder abbrechen.",
+        )
+        if is_confirm or is_cancel:
+            return _continue_multistep_chain_if_pending(memory, "pending_lieferando_open", result, aborted=is_cancel, photo_worker=photo_worker)
         return result
 
     pending_calendar_delete = settings.get("pending_calendar_delete")
@@ -6030,6 +6060,73 @@ def execute_call_contact(data: dict) -> str:
 ACTION_ENGINE.register("call_contact", execute_call_contact)
 
 
+_CITY_FACT_RE = re.compile(r"stadt\s*(?:ist|:)?\s*([a-zäöüß][a-zäöüß\-\s]{1,30})", re.IGNORECASE)
+_UMLAUT_TRANSLIT = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
+
+
+def _city_slug(city: str) -> str:
+    slug = city.strip().lower().translate(_UMLAUT_TRANSLIT)
+    slug = re.sub(r"[^a-z0-9]+", "-", slug).strip("-")
+    return slug
+
+
+def _known_city(memory: Memory) -> str | None:
+    for topic in ("Stadt", "Wohnort"):
+        for fact in memory.search_facts(topic):
+            if fact.get("status", "confirmed") == "pending_confirmation":
+                continue
+            match = _CITY_FACT_RE.search(str(fact.get("content") or ""))
+            if match:
+                return match.group(1).strip().rstrip(".")
+    return None
+
+
+def handle_food_command(text: str, memory: Memory | None = None) -> str | None:
+    """Oeffnet nach Bestaetigung die Lieferando-Stadtseite - bestellt/bezahlt
+    nichts selbst, siehe Plan "Lieferando öffnen (mit Bestätigung)". Lieferando
+    hat keine oeffentliche API/kein Warenkorb-Vorausfuellen per Link, deshalb
+    bewusst nur die stabile, oeffentliche Stadt-URL statt Reverse-Engineering
+    ihrer privaten API (bräuchte Leons Login, bricht bei jedem Website-Update)."""
+    if memory is None or not has_domain(text, "food"):
+        return None
+
+    city = _known_city(memory)
+    if not city:
+        return "In welcher Stadt bist du, damit ich die richtige Lieferando-Seite finde?"
+
+    url = f"https://www.lieferando.de/lieferdienst/{_city_slug(city)}"
+    return ACTION_ENGINE.propose(
+        memory,
+        "pending_lieferando_open",
+        ActionProposal(
+            action_type="open_url",
+            execution_data={"url": url, "label": "Lieferando"},
+            confirm_prompt=(
+                f"Soll ich Lieferando für {city} öffnen, {configured_user_address()}? "
+                "Ich kann dort nicht selbst bestellen oder bezahlen - du suchst und "
+                "bestellst danach selbst weiter. Sag ja oder abbrechen."
+            ),
+        ),
+    )
+
+
+def execute_open_url(data: dict) -> str:
+    url = str(data.get("url") or "").strip()
+    label = str(data.get("label") or "die Seite").strip()
+    if not url:
+        return "Mir fehlt die Adresse. Ich öffne nichts."
+    import subprocess
+
+    try:
+        subprocess.run(["open", url], check=True, timeout=5)
+    except subprocess.SubprocessError:
+        return f"Ich konnte {label} nicht öffnen."
+    return f"Ich habe {label} geöffnet, {configured_user_address()}."
+
+
+ACTION_ENGINE.register("open_url", execute_open_url)
+
+
 def extract_call_contact_name(text: str) -> str:
     patterns = (
         r"(?:ruf|rufe|rufen|hof|anruf|anrufen|telefonier|telefoniere)\s+(?:bitte\s+)?(?:mal\s+)?(?:den\s+|die\s+|das\s+)?(.+?)(?:\s+an)?[.?!]*$",
@@ -6837,7 +6934,15 @@ _FABRICATED_TRANSACTION_CLAIM_RE = re.compile(
     # Konkrete Lieferzeit-Behauptung ("in etwa 30 Minuten eintreffen/geliefert/da") - es
     # gibt keinerlei echte Liefer-/Sendungsverfolgung in der App, jede solche Behauptung
     # ist ebenfalls garantiert erfunden.
-    r"|\bin\s+(?:etwa\s+|ca\.?\s*)?\d+\s*(?:minuten|min|stunden|std)\b[^.!?]{0,30}\b(?:eintreffen|ankommen|geliefert|da\s+sein|unterwegs)\b",
+    r"|\bin\s+(?:etwa\s+|ca\.?\s*)?\d+\s*(?:minuten|min|stunden|std)\b[^.!?]{0,30}\b(?:eintreffen|ankommen|geliefert|da\s+sein|unterwegs)\b"
+    # Live beobachtet: reine Stadt-Angabe ("Meine Stadt ist Amberg", kein
+    # Lieferando-Trigger) liess das LLM aus dem Gespraechsverlauf faelschlich
+    # behaupten, es haette Lieferando schon geoeffnet - dieser Text kommt NIE
+    # aus dem echten execute_open_url-Pfad (der laeuft ausserhalb dieses
+    # Chat-Fallbacks, siehe handle_pending_action_flow), daher hier gefahrlos
+    # eng auf "lieferando"+"geoeffnet" begrenzt abfangbar.
+    r"|\blieferando\b[^.!?]{0,40}\bgeöffnet\b"
+    r"|\bgeöffnet\b[^.!?]{0,40}\blieferando\b",
     re.IGNORECASE,
 )
 
@@ -7570,6 +7675,14 @@ def answer_message(
     if contact_answer is not None:
         record_exchange(memory, question, contact_answer)
         return _result(contact_answer, mail_followup=False)
+
+    food_permission = ensure_privacy_domain_permission(memory, "food", "Jarvis würde Lieferando im Browser öffnen - bestellt oder bezahlt nichts selbst.") if has_domain(question, "food") else None
+    if food_permission is not None:
+        return _result(food_permission)
+    food_answer = handle_food_command(question, memory=memory)
+    if food_answer is not None:
+        record_exchange(memory, question, food_answer)
+        return _result(food_answer, mail_followup=False)
 
     music_permission = ensure_privacy_domain_permission(memory, "music", "Jarvis würde Apple Music oder die Musik-Wiedergabe steuern.") if has_domain(question, "music") else None
     if music_permission is not None:

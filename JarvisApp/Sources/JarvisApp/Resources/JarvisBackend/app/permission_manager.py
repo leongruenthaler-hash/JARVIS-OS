@@ -38,6 +38,7 @@ PERMISSION_DEFINITIONS: dict[str, str] = {
     "photos": "Jarvis nutzt Fotos nur, um Ihre Fotomediathek nach Ihrer Freigabe zu durchsuchen oder Alben zu erstellen.",
     "screen": "Jarvis macht nur nach Ihrer Freigabe einen einzelnen Screenshot Ihres aktiven Fensters (nicht der ganzen Bildschirm-Ansicht), analysiert ihn lokal und löscht ihn danach sofort wieder.",
     "music": "Jarvis steuert Musik nur, wenn Sie Musikfunktionen ausdrücklich nutzen.",
+    "food": "Jarvis öffnet Lieferando nur nach Ihrer Bestätigung, um die passende Seite für Sie zu finden - bestellt oder bezahlt nichts selbst.",
     "internet": "Jarvis nutzt Internetzugriff nur für Websuche oder externe Dienste, wenn Sie zustimmen.",
     "external_api": "Jarvis sendet Daten an externe APIs nur nach aktiver Zustimmung.",
     "cloud_llm": "Jarvis sendet Prompts an Cloud-KI nur nach aktiver Zustimmung. Sensible Inhalte werden vorher angekündigt.",
