@@ -2,6 +2,7 @@ import SwiftUI
 
 struct OnboardingView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.jarvisTheme) private var theme
     @State private var step = 0
     @State private var selectedModel = "phi4-mini"
     @State private var openAIKey = ""
@@ -80,7 +81,7 @@ struct OnboardingView: View {
         VStack(spacing: 18) {
             Image(systemName: "sparkles.rectangle.stack")
                 .font(.system(size: 58))
-                .foregroundStyle(.blue)
+                .foregroundStyle(theme.isDark ? theme.primaryAccent : .blue)
             Text("Willkommen bei Jarvis.")
                 .font(.largeTitle.bold())
             Text("Dein lokaler KI-Assistent für macOS. Datenschutz zuerst, lokal bevorzugt und Cloud nur optional.")
@@ -102,7 +103,7 @@ struct OnboardingView: View {
                     HStack(alignment: .top, spacing: 10) {
                         Image(systemName: item.icon)
                             .font(.title3)
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(theme.isDark ? theme.primaryAccent : .blue)
                             .frame(width: 24)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(item.title)

@@ -3,6 +3,7 @@ import SwiftUI
 
 struct FilesView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.jarvisTheme) private var theme
     @State private var pendingMoveTarget = ""
     @State private var showMoveConfirmation = false
 
@@ -35,7 +36,7 @@ struct FilesView: View {
             .frame(maxWidth: 1080, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(liquidBackground)
+        .background(LiquidGlassBackground())
         .navigationTitle("Dateien")
         .alert("Dateien verschieben?", isPresented: $showMoveConfirmation) {
             Button("Abbrechen", role: .cancel) {}
@@ -51,36 +52,9 @@ struct FilesView: View {
         }
     }
 
-    private var liquidBackground: some View {
-        ZStack {
-            LinearGradient(
-                colors: [
-                    Color(nsColor: .windowBackgroundColor),
-                    Color.cyan.opacity(0.10),
-                    Color.indigo.opacity(0.08),
-                    Color(nsColor: .textBackgroundColor).opacity(0.42)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .opacity(0.34)
-        }
-        .ignoresSafeArea()
-    }
-
     private var header: some View {
         HStack(alignment: .top, spacing: 16) {
-            Image(systemName: "folder.fill.badge.gearshape")
-                .font(.system(size: 29, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 62, height: 62)
-                .background(
-                    LinearGradient(colors: [.cyan, .blue, .indigo], startPoint: .topLeading, endPoint: .bottomTrailing),
-                    in: RoundedRectangle(cornerRadius: 22, style: .continuous)
-                )
-                .shadow(color: .cyan.opacity(0.22), radius: 18, x: 0, y: 10)
+            LiquidGlassIcon(symbol: "folder.fill.badge.gearshape", tint: .cyan)
 
             VStack(alignment: .leading, spacing: 7) {
                 Text("Datei-Zentrale")
@@ -318,7 +292,7 @@ struct FilesView: View {
                 HStack {
                     Image(systemName: symbol)
                         .font(.system(size: 21, weight: .semibold))
-                        .foregroundStyle(filesAllowed ? .cyan : .secondary)
+                        .foregroundStyle(filesAllowed ? (theme.isDark ? theme.primaryAccent : .cyan) : .secondary)
                         .frame(width: 42, height: 42)
                         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     Spacer()

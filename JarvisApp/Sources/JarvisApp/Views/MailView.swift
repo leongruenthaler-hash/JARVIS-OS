@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MailView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.jarvisTheme) private var theme
 
     private var mailAllowed: Bool {
         appState.permissions["mail"]?.allowed ?? false
@@ -223,7 +224,7 @@ struct MailView: View {
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
             )
-            .shadow(color: Color.blue.opacity(0.08), radius: 18, x: 0, y: 10)
+            .shadow(color: (theme.isDark ? theme.primaryAccent : .blue).opacity(0.08), radius: 18, x: 0, y: 10)
         }
         .buttonStyle(.plain)
         .disabled(!mailAllowed || appState.mailIsLoading)

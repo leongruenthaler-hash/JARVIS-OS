@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ModelsView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.jarvisTheme) private var theme
     @State private var showOpenAIConfirmation = false
 
     private let localModels: [LocalModelOption] = [
@@ -208,7 +209,7 @@ struct ModelsView: View {
                         .font(.headline)
                     pill(installed ? "Installiert" : "Fehlt", color: installed ? .green : .orange)
                     if active {
-                        pill("Aktiv", color: .blue)
+                        pill("Aktiv", color: theme.isDark ? theme.primaryAccent : .blue)
                     }
                 }
                 Text(option.subtitle)

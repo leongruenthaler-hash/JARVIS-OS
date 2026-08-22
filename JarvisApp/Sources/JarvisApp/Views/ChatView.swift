@@ -432,7 +432,7 @@ struct ChatView: View {
 
     private func messageBackground(for role: ChatMessage.Role) -> some ShapeStyle {
         switch role {
-        case .user: return AnyShapeStyle(Color.blue.opacity(0.14))
+        case .user: return AnyShapeStyle((theme.isDark ? theme.primaryAccent : .blue).opacity(0.14))
         case .jarvis: return AnyShapeStyle(Color.primary.opacity(0.07))
         case .system: return AnyShapeStyle(Color.orange.opacity(0.12))
         }

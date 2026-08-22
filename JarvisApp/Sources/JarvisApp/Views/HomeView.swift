@@ -2,6 +2,7 @@ import SwiftUI
 
 struct HomeView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.jarvisTheme) private var theme
 
     private var activePermissions: Int {
         appState.permissions.values.filter(\.allowed).count
@@ -118,7 +119,7 @@ struct HomeView: View {
     private var footerHint: some View {
         HStack(spacing: 10) {
             Image(systemName: "sparkles")
-                .foregroundStyle(.cyan)
+                .foregroundStyle(theme.isDark ? theme.primaryAccent : .cyan)
             Text("Tipp: Mit Sprache fühlt sich Jarvis am natürlichsten an. Text bleibt als gute Reserve.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -133,14 +134,20 @@ struct HomeView: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 28, style: .continuous)
                     .fill(
-                        LinearGradient(
-                            colors: [Color.cyan.opacity(0.96), Color.indigo.opacity(0.78), Color.mint.opacity(0.54)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
+                        theme.isDark
+                            ? LinearGradient(
+                                colors: [theme.primaryAccent.opacity(0.96), theme.secondaryAccent.opacity(0.78), theme.primaryAccent.opacity(0.54)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                            : LinearGradient(
+                                colors: [Color.cyan.opacity(0.96), Color.indigo.opacity(0.78), Color.mint.opacity(0.54)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
                     )
                     .frame(width: 96, height: 96)
-                    .shadow(color: .cyan.opacity(0.20), radius: 18, x: 0, y: 8)
+                    .shadow(color: (theme.isDark ? theme.primaryAccent : .cyan).opacity(0.20), radius: 18, x: 0, y: 8)
                 Image(systemName: "sparkles")
                     .font(.system(size: 30, weight: .semibold))
                     .foregroundStyle(.white)
@@ -432,11 +439,12 @@ struct HomeView: View {
     }
 
     private func quickAction(title: String, symbol: String, tint: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        let activeTint = theme.isDark ? theme.primaryAccent : tint
+        return Button(action: action) {
             HStack(spacing: 12) {
                 Image(systemName: symbol)
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(tint)
+                    .foregroundStyle(activeTint)
                     .frame(width: 34, height: 34)
                     .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 Text(title)
@@ -454,7 +462,7 @@ struct HomeView: View {
             .overlay(alignment: .topTrailing) {
                 Image(systemName: "sparkles")
                     .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(tint.opacity(0.55))
+                    .foregroundStyle(activeTint.opacity(0.55))
                     .padding(8)
             }
         }
@@ -477,12 +485,13 @@ private struct StripBadge: View {
     let subtitle: String
     let symbol: String
     let tint: Color
+    @Environment(\.jarvisTheme) private var theme
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: symbol)
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(tint)
+                .foregroundStyle(theme.isDark ? theme.primaryAccent : tint)
                 .frame(width: 28, height: 28)
                 .background(.thinMaterial, in: Circle())
             VStack(alignment: .leading, spacing: 3) {
@@ -503,6 +512,7 @@ private struct StripBadge: View {
 
 struct ActionCenterView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.jarvisTheme) private var theme
 
     var body: some View {
         ScrollView {
@@ -528,13 +538,12 @@ struct ActionCenterView: View {
             ZStack {
                 Circle()
                     .fill(
-                        AngularGradient(
-                            colors: [.cyan, .blue, .indigo, .purple, .cyan],
-                            center: .center
-                        )
+                        theme.isDark
+                            ? AngularGradient(colors: [theme.primaryAccent, theme.secondaryAccent, theme.primaryAccent], center: .center)
+                            : AngularGradient(colors: [.cyan, .blue, .indigo, .purple, .cyan], center: .center)
                     )
                     .frame(width: 62, height: 62)
-                    .shadow(color: .cyan.opacity(0.20), radius: 14, x: 0, y: 8)
+                    .shadow(color: (theme.isDark ? theme.primaryAccent : .cyan).opacity(0.20), radius: 14, x: 0, y: 8)
                 Image(systemName: "rectangle.grid.2x2.fill")
                     .font(.system(size: 24, weight: .semibold))
                     .foregroundStyle(.white)
@@ -653,11 +662,12 @@ struct ActionCenterView: View {
     }
 
     private func actionButton(_ title: String, symbol: String, tint: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        let activeTint = theme.isDark ? theme.primaryAccent : tint
+        return Button(action: action) {
             HStack(spacing: 12) {
                 Image(systemName: symbol)
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(tint)
+                    .foregroundStyle(activeTint)
                     .frame(width: 34, height: 34)
                     .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 Text(title)
@@ -675,7 +685,7 @@ struct ActionCenterView: View {
             .overlay(alignment: .topTrailing) {
                 Image(systemName: "sparkles")
                     .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(tint.opacity(0.55))
+                    .foregroundStyle(activeTint.opacity(0.55))
                     .padding(8)
             }
         }
