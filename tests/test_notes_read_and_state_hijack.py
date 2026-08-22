@@ -24,16 +24,23 @@ def test_create_verb_still_wins_over_read_trigger():
 
 
 def test_unrelated_question_does_not_get_swallowed_as_note_content():
+    # "Welche Aufgaben sind noch offen?" enthaelt "aufgaben" (tasks-Domaene) -
+    # der domaenen-basierte Bail-out (app/jarvis.py:3231-3235, 2026-08-20)
+    # greift VOR dem aelteren Frage-Form-Guard weiter unten: die offene Notiz
+    # wird verworfen (nicht als Inhalt gespeichert) und None zurueckgegeben,
+    # damit die echte tasks-Domaene die Frage beantwortet - keine "eigenen
+    # Frage"-Ausweichantwort mehr fuer Saetze mit erkennbarer Domaene.
     memory = MagicMock()
     memory.get.return_value = {
         "pending_note": {"state": "awaiting_body", "title": "Einkaufszettel", "append": True}
     }
     answer = jarvis.handle_pending_note_flow(memory, "Welche Aufgaben sind noch offen?")
 
-    assert answer is not None
-    assert "eigenen Frage" in answer
-    # Darf die offene Notiz NICHT aufloesen/speichern.
-    memory.set.assert_not_called()
+    assert answer is None
+    # Die offene Notiz MUSS verworfen werden, nicht als Inhalt gespeichert.
+    memory.set.assert_called_once()
+    saved_settings = memory.set.call_args[0][1]
+    assert "pending_note" not in saved_settings
 
 
 def test_plausible_note_content_still_saved(monkeypatch):

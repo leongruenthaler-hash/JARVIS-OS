@@ -18,7 +18,7 @@ class _FakeLLM:
     def __init__(self, response: str):
         self._response = response
 
-    def ask(self, messages, max_output_tokens=None, user_text=None, route=None):
+    def ask(self, messages, max_output_tokens=None, user_text=None, route=None, raw_system_prompt=False):
         return self._response
 
 

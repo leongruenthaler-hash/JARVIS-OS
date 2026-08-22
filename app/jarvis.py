@@ -981,6 +981,14 @@ CALENDAR_QUERY_PHRASES = (
     "hab ich diese woche",
     "hab ich noch was vor",
     "was hab ich vor",
+    # "eingetragen" alleine wurde bewusst NICHT als DOMAIN_TERMS-Einzelwort
+    # zurueckgeholt (siehe Kommentar dort, 2026-08-20 - zu generisch, false
+    # positives wie "Ich fahre am Wochenende zu meinen Eltern"). Als mehr-
+    # wortige Phrase hier aber gefahrlos genug ("bei mir eingetragen" matcht
+    # praktisch nur echte Kalender-Fragen) - schliesst die Luecke fuer
+    # Formulierungen wie "Ist am Wochenende was bei mir eingetragen?", die
+    # "was steht" NICHT enthalten und deshalb bisher durchfielen.
+    "bei mir eingetragen",
 )
 
 

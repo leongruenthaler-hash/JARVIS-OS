@@ -50,16 +50,21 @@ def test_whole_words_helper_ignores_punctuation_and_brackets():
 def test_pending_note_flow_guards_against_yes_no_question_not_just_w_questions():
     # Das ist der Vorfall aus der Runde-2-Simulation: diese Frage wurde
     # woertlich an Leons echte Einkaufszettel-Notiz angehaengt, weil der
-    # bisherige Schutz nur W-Fragen (was/wie/wo/...) kannte.
+    # bisherige Schutz nur W-Fragen (was/wie/wo/...) kannte. Seit dem
+    # domaenen-basierten Bail-out (app/jarvis.py:3231-3235, 2026-08-20) greift
+    # fuer "Posteingang" (mail-Domaene) bereits der breitere Schutz: die Notiz
+    # wird verworfen, None zurueckgegeben, die echte mail-Domaene antwortet -
+    # keine "eigenen Frage"-Ausweichantwort mehr noetig.
     memory = MagicMock()
     memory.get.return_value = {
         "pending_note": {"state": "awaiting_body", "title": "Einkaufszettel", "append": True}
     }
     answer = jarvis.handle_pending_note_flow(memory, "Hab ich heute irgendwas Wichtiges bekommen im Posteingang?")
 
-    assert answer is not None
-    assert "eigenen Frage" in answer
-    memory.set.assert_not_called()
+    assert answer is None
+    memory.set.assert_called_once()
+    saved_settings = memory.set.call_args[0][1]
+    assert "pending_note" not in saved_settings
 
 
 def test_pending_action_flow_lets_yes_no_question_through_instead_of_swallowing():

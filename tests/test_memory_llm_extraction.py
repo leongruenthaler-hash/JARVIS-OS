@@ -146,7 +146,7 @@ class _FakeLLM:
     def plan(self, messages, user_text=None, force_local=False):
         return None
 
-    def ask(self, messages, max_output_tokens=None, user_text=None, route=None, force_local=False):
+    def ask(self, messages, max_output_tokens=None, user_text=None, route=None, force_local=False, raw_system_prompt=False):
         return self._response
 
 

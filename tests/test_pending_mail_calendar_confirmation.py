@@ -43,7 +43,10 @@ def test_rule_includes_action_keys_in_data():
     events = rule_pending_calendar_actions_waiting(context)
     assert len(events) == 1
     assert events[0]["data"]["action_keys"] == ["abc123", "def456"]
-    assert events[0]["dedup_key"] == "pending_calendar_actions"
+    # dedup_key traegt seit 2026-08-20 die sortierten action_keys, damit ein
+    # neuer/anderer Vorschlag innerhalb des Cooldowns nicht als Duplikat des
+    # alten unterdrueckt wird (app/core/proactivity_rules.py:88-96).
+    assert events[0]["dedup_key"] == "pending_calendar_actions:abc123,def456"
 
 
 def test_rule_omits_action_keys_without_key_field():
