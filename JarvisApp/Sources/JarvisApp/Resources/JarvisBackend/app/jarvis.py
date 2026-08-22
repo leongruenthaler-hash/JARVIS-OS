@@ -6815,6 +6815,37 @@ def is_execution_promise(text: str) -> bool:
     return any(term in normalized for term in promise_terms)
 
 
+# Erkennt behauptete, aber garantiert erfundene abgeschlossene Real-Welt-Handlungen
+# (bestellt/reserviert/bezahlt/gebucht) - anders als is_execution_promise() oben (das
+# erkennt einen PROZESS, den Jarvis noch anstossen koennte, z.B. "ich pruefe das kurz").
+# Live beobachtet 2026-08-22: Leon sagte beilaeufig "Ja Käsekuchen find ich ganz gut" -
+# das reine Prompt-Instruktion ("erfinde niemals eine Handlung") reichte beim lokalen
+# 4B-Modell NICHT aus, es antwortete trotzdem "Ich habe einen Käsekuchen ... in Auftrag
+# gegeben". Da es in der gesamten Codebase KEINE echte Bestell-/Zahl-/Buchungsfunktion
+# gibt, ist JEDE solche Behauptung garantiert erfunden - deshalb hier hart abgefangen,
+# statt sich auf zuverlaessiges Prompt-Befolgen zu verlassen.
+_FABRICATED_TRANSACTION_CLAIM_RE = re.compile(
+    r"\bich\s+(?:habe|hab)\b[^.!?]{0,60}\b(bestellt|reserviert|gebucht|bezahlt|in\s+auftrag\s+gegeben)\b"
+    # Praesens, beide Wortstellungen ("ich reserviere" UND das nach vorangestelltem
+    # Adverb invertierte "reserviere ich", z.B. "Dann reserviere ich einen Kuchen").
+    r"|\bich\s+(?:bestelle|reserviere|buche|bezahle)\b"
+    r"|\b(?:bestelle|reserviere|buche|bezahle)\s+ich\b"
+    # Passiv-/Nomen-Formulierungen ohne "ich" - live beobachtet: "Bestellung bestätigt",
+    # "Bestellung aufgegeben", "ist/wurde bestellt/reserviert/gebucht/bezahlt".
+    r"|\bbestellung\s+(?:bestätigt|aufgegeben|ist\s+raus)\b"
+    r"|\b(?:ist|wurde)\s+(?:bestellt|reserviert|gebucht|bezahlt)\b"
+    # Konkrete Lieferzeit-Behauptung ("in etwa 30 Minuten eintreffen/geliefert/da") - es
+    # gibt keinerlei echte Liefer-/Sendungsverfolgung in der App, jede solche Behauptung
+    # ist ebenfalls garantiert erfunden.
+    r"|\bin\s+(?:etwa\s+|ca\.?\s*)?\d+\s*(?:minuten|min|stunden|std)\b[^.!?]{0,30}\b(?:eintreffen|ankommen|geliefert|da\s+sein|unterwegs)\b",
+    re.IGNORECASE,
+)
+
+
+def fabricated_transaction_claim(answer: str) -> bool:
+    return bool(_FABRICATED_TRANSACTION_CLAIM_RE.search(answer))
+
+
 def execute_promised_action_if_possible(
     llm: LLMClient,
     question: str,
@@ -7608,9 +7639,15 @@ def answer_message(
     answer = clean_ai_answer(answer)
     if not wants_first_name_permission(question):
         answer = strip_first_name_address(answer, configured_user_name())
-    promised = execute_promised_action_if_possible(llm, question, answer)
-    if promised is not None:
-        answer = promised
+    if fabricated_transaction_claim(answer):
+        answer = (
+            f"Das kann ich leider nicht, {configured_user_name()} - ich habe keinen Zugriff auf "
+            "Bestell-, Zahlungs- oder Buchungsfunktionen. Das musst du selbst erledigen."
+        )
+    else:
+        promised = execute_promised_action_if_possible(llm, question, answer)
+        if promised is not None:
+            answer = promised
     record_exchange(memory, question, answer)
     return _result(answer, mail_followup="mail" in normalize_text(question))
 
