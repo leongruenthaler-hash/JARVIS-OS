@@ -1070,12 +1070,14 @@ private enum DashboardSection: Equatable, Identifiable {
 // MARK: - Palette, background and glass style
 
 enum DashboardPalette {
-    // Signal-Theme (2026-08-22): mint statt warmem Orange. Bewusst weiterhin ein eigener,
-    // hart codierter Satz statt @Environment(\.jarvisTheme) - dieselbe Struktur wie zuvor,
-    // da DashboardView sein "Übersicht"-Grid direkt darauf aufbaut statt auf dem
-    // Environment-Theme (siehe Kommentar bei .environment(\.jarvisTheme, .signal) oben).
-    static let accent = Color(red: 0.34, green: 0.82, blue: 0.64)
-    static let accentLight = Color(red: 0.73, green: 0.92, blue: 0.83)
+    // Signal-Theme (2026-08-22): mint statt warmem Orange, Farbton per Settings waehlbar
+    // (SignalAccentHue). Bewusst weiterhin ein eigener Satz statt @Environment(\.jarvisTheme)
+    // - dieselbe Struktur wie zuvor, da DashboardView sein "Übersicht"-Grid direkt darauf
+    // aufbaut (siehe Kommentar bei .environment(\.jarvisTheme, .signal) oben). `static var`
+    // statt `static let`, damit eine Farbton-Aenderung in Settings sofort live nachgezogen
+    // wird statt nur einmal pro Prozesslaufzeit berechnet zu werden.
+    static var accent: Color { JarvisTheme.signal.primaryAccent }
+    static var accentLight: Color { JarvisTheme.signal.secondaryAccent }
     static let background = Color(red: 0.02, green: 0.02, blue: 0.024)
     static let textSecondary = Color(red: 0.612, green: 0.639, blue: 0.686)
     static let sidebarFill = Color.black.opacity(0.28)

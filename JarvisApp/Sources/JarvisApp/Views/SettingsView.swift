@@ -5,6 +5,7 @@ struct SettingsView: View {
     @Environment(\.jarvisTheme) private var theme
     @AppStorage("JarvisActiveTheme") private var activeThemeRaw = JarvisTheme.signal.rawValue
     @AppStorage("JarvisDashboardLayoutEnabled") private var dashboardLayoutEnabled = true
+    @AppStorage("JarvisSignalAccentHue") private var signalAccentHueRaw: Double = SignalAccentHue.mint.rawValue
     @State private var apiKey = ""
     @State private var weatherCityDraft = ""
     @State private var usageGoalDraft = ""
@@ -434,6 +435,46 @@ struct SettingsView: View {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .strokeBorder(theme.isDark ? theme.primaryAccent.opacity(0.36) : Color.white.opacity(0.16), lineWidth: 1)
             )
+
+            // Signal-Akzentfarbe (Leons Wunsch 2026-08-22, "komplette Farbpalette zur
+            // Auswahl"): sichtbar, sobald Signal irgendwo wirkt - entweder als Dashboard
+            // (das IMMER Signal cascadet, unabhaengig vom Farbthema-Picker oben) oder als
+            // gewaehltes Farbthema in der klassischen Ansicht.
+            if dashboardLayoutEnabled || currentTheme == .signal {
+                Divider().opacity(0.4)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Signal-Akzentfarbe")
+                        .font(.headline)
+                    Text("Gleiche Helligkeit und Sättigung bei jeder Option - nur der Farbton ändert sich.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+
+                    HStack(spacing: 12) {
+                        ForEach(SignalAccentHue.allCases) { hue in
+                            let isSelected = signalAccentHueRaw == hue.rawValue
+                            Button {
+                                signalAccentHueRaw = hue.rawValue
+                            } label: {
+                                Circle()
+                                    .fill(OklchColor.color(lightness: 0.78, chroma: 0.13, hueDegrees: hue.rawValue))
+                                    .frame(width: 30, height: 30)
+                                    .overlay(
+                                        Circle()
+                                            .strokeBorder(Color.white, lineWidth: isSelected ? 2.5 : 0)
+                                    )
+                                    .overlay(
+                                        Circle()
+                                            .strokeBorder(Color.black.opacity(0.15), lineWidth: 1)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .help(hue.title)
+                            .accessibilityLabel(hue.title)
+                        }
+                    }
+                }
+            }
         }
         .liquidGlassPanel(tint: .cyan)
     }
@@ -668,6 +709,6 @@ struct SettingsView: View {
     }
 
     private var currentTheme: JarvisTheme {
-        JarvisTheme(rawValue: activeThemeRaw) ?? .classic
+        JarvisTheme(rawValue: activeThemeRaw) ?? .signal
     }
 }
