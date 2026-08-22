@@ -243,7 +243,7 @@ struct DashboardView: View {
             HStack(spacing: 10) {
                 Circle()
                     .fill(
-                        LinearGradient(colors: [.blue, .purple, .pink], startPoint: .topLeading, endPoint: .bottomTrailing)
+                        LinearGradient(colors: [DashboardPalette.accent, DashboardPalette.accentLight], startPoint: .topLeading, endPoint: .bottomTrailing)
                     )
                     .frame(width: 20, height: 20)
                 Text("Frag Jarvis oder suche ...")
@@ -478,21 +478,24 @@ struct DashboardView: View {
         }
     }
 
+    /// Alle Kachel-Icons nutzen jetzt konsequent die gewaehlte Signal-Akzentfarbe statt der
+    /// frueheren fest verdrahteten Einzelfarben (badgeBlue/badgeAmber/grau) - Leons Wunsch
+    /// 2026-08-22, "die ganzen Akzente farbenfroh" statt nur vereinzelte Stellen.
     private var quickLaunchGrid: some View {
         let tiles: [(label: String, symbol: String, tint: Color)] = [
-            ("Dateien", "folder.fill", DashboardPalette.badgeBlue),
-            ("Notizen", "note.text", DashboardPalette.badgeAmber),
-            ("Browser", "safari.fill", DashboardPalette.badgeBlue),
+            ("Dateien", "folder.fill", DashboardPalette.accent),
+            ("Notizen", "note.text", DashboardPalette.accentLight),
+            ("Browser", "safari.fill", DashboardPalette.accent),
             ("Fotos", "photo.stack.fill", DashboardPalette.accentLight),
-            ("Terminal", "terminal.fill", DashboardPalette.textSecondary),
-            ("Hinzufügen", "plus", DashboardPalette.textSecondary),
+            ("Terminal", "terminal.fill", DashboardPalette.accent),
+            ("Hinzufügen", "plus", DashboardPalette.accentLight),
         ]
         return HStack(spacing: 8) {
             ForEach(tiles, id: \.label) { tile in
                 VStack(spacing: 8) {
                     ZStack {
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color.white.opacity(0.07))
+                            .fill(DashboardPalette.accent.opacity(0.14))
                             .frame(width: 42, height: 42)
                         Image(systemName: tile.symbol)
                             .font(.system(size: 16, weight: .medium))
@@ -547,8 +550,8 @@ struct DashboardView: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
-                .background(Capsule().fill(Color.white.opacity(0.08)))
-                .overlay(Capsule().strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
+                .background(Capsule().fill(DashboardPalette.accent.opacity(0.16)))
+                .overlay(Capsule().strokeBorder(DashboardPalette.accent.opacity(0.28), lineWidth: 1))
                 .contentShape(Capsule())
                 // Nur dieser Chip ist verdrahtet - die anderen drei ("Notizen erstellen" etc.)
                 // bleiben bewusst unverändert dekorativ, das war nicht Teil der Anfrage.
