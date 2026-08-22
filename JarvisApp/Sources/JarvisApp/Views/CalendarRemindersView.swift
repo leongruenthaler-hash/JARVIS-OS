@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CalendarWorkspaceView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.jarvisTheme) private var theme
 
     private var calendarAllowed: Bool {
         appState.permissions["calendar"]?.allowed ?? false
@@ -220,7 +221,7 @@ struct CalendarWorkspaceView: View {
             }
         }
         .padding(14)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private var guidancePanel: some View {
@@ -232,7 +233,7 @@ struct CalendarWorkspaceView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .liquidGlassPanel(tint: .indigo)
     }
@@ -247,7 +248,7 @@ struct CalendarWorkspaceView: View {
                         .font(.system(size: 21, weight: .semibold))
                         .foregroundStyle(.indigo)
                         .frame(width: 42, height: 42)
-                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     Spacer()
                     Image(systemName: "arrow.right.circle")
                         .font(.title3)
@@ -262,7 +263,7 @@ struct CalendarWorkspaceView: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, minHeight: 146, alignment: .topLeading)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.03)) : AnyShapeStyle(.ultraThinMaterial), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
@@ -279,7 +280,7 @@ struct CalendarWorkspaceView: View {
                     .font(.system(size: 21, weight: .semibold))
                     .foregroundStyle(tint)
                     .frame(width: 42, height: 42)
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 Spacer()
             }
 
@@ -307,11 +308,11 @@ struct CalendarWorkspaceView: View {
                 }
             }
             .padding(12)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .padding(16)
         .frame(maxWidth: .infinity, minHeight: 190, alignment: .topLeading)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.03)) : AnyShapeStyle(.ultraThinMaterial), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
@@ -327,7 +328,7 @@ struct CalendarWorkspaceView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private func activityRow(_ message: ChatMessage) -> some View {
@@ -348,7 +349,7 @@ struct CalendarWorkspaceView: View {
             Spacer(minLength: 0)
         }
         .padding(14)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private func sectionHeader(_ title: String, subtitle: String) -> some View {
@@ -412,7 +413,7 @@ struct CalendarWorkspaceView: View {
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(tint)
                 .frame(width: 28, height: 28)
-                .background(.thinMaterial, in: Circle())
+                .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: Circle())
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.callout.weight(.semibold))
@@ -425,12 +426,13 @@ struct CalendarWorkspaceView: View {
             Spacer(minLength: 0)
         }
         .padding(10)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.03)) : AnyShapeStyle(.ultraThinMaterial), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 
 struct RemindersWorkspaceView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.jarvisTheme) private var theme
 
     private var remindersAllowed: Bool {
         appState.permissions["reminders"]?.allowed ?? false
@@ -554,7 +556,7 @@ struct RemindersWorkspaceView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .liquidGlassPanel(tint: .green)
     }
@@ -569,7 +571,7 @@ struct RemindersWorkspaceView: View {
                         .font(.system(size: 21, weight: .semibold))
                         .foregroundStyle(.green)
                         .frame(width: 42, height: 42)
-                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     Spacer()
                     Image(systemName: "arrow.right.circle")
                         .font(.title3)
@@ -584,7 +586,7 @@ struct RemindersWorkspaceView: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, minHeight: 146, alignment: .topLeading)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.03)) : AnyShapeStyle(.ultraThinMaterial), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
@@ -601,7 +603,7 @@ struct RemindersWorkspaceView: View {
                     .font(.system(size: 21, weight: .semibold))
                     .foregroundStyle(tint)
                     .frame(width: 42, height: 42)
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 Spacer()
             }
 
@@ -629,11 +631,11 @@ struct RemindersWorkspaceView: View {
                 }
             }
             .padding(12)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .padding(16)
         .frame(maxWidth: .infinity, minHeight: 190, alignment: .topLeading)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.03)) : AnyShapeStyle(.ultraThinMaterial), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)

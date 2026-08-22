@@ -104,7 +104,7 @@ struct ChatView: View {
                     if appState.modelStatus.provider.lowercased() == "openai" {
                         modelBadge(title: "OpenAI aktiv", tint: .orange)
                     } else {
-                        modelBadge(title: "Lokal aktiv", tint: .blue)
+                        modelBadge(title: "Lokal aktiv", tint: theme.isDark ? theme.primaryAccent : .blue)
                     }
                 }
             }
@@ -131,7 +131,7 @@ struct ChatView: View {
             .foregroundStyle(activeVoiceTint)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(.thinMaterial, in: Capsule())
+            .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: Capsule())
             .overlay(Capsule().strokeBorder(theme.isDark ? activeVoiceTint.opacity(0.42) : Color.white.opacity(0.16), lineWidth: 1))
             .shadow(color: activeVoiceTint.opacity(theme.isDark ? 0.18 : 0.10), radius: 10, x: 0, y: 4)
     }
@@ -142,7 +142,7 @@ struct ChatView: View {
             .foregroundStyle(tint)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(.thinMaterial, in: Capsule())
+            .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: Capsule())
             .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 1))
             .shadow(color: tint.opacity(0.08), radius: 8, x: 0, y: 4)
     }
@@ -151,13 +151,13 @@ struct ChatView: View {
         ScrollView {
             VStack(spacing: 18) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 36, style: .continuous)
-                        .fill(.ultraThinMaterial)
+                    RoundedRectangle(cornerRadius: theme.isSignal ? 16 : 36, style: .continuous)
+                        .fill(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.ultraThinMaterial))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 36, style: .continuous)
+                            RoundedRectangle(cornerRadius: theme.isSignal ? 16 : 36, style: .continuous)
                                 .strokeBorder(theme.isDark ? theme.primaryAccent.opacity(0.36) : Color.white.opacity(0.14), lineWidth: 1)
                         )
-                        .shadow(color: activeVoiceTint.opacity(theme.isDark ? 0.16 : 0.08), radius: 24, x: 0, y: 10)
+                        .shadow(color: activeVoiceTint.opacity(theme.isDark ? 0.16 : 0.08), radius: theme.isSignal ? 12 : 24, x: 0, y: theme.isSignal ? 4 : 10)
 
                     VStack(spacing: 14) {
                         Group {
@@ -272,7 +272,7 @@ struct ChatView: View {
                 .lineLimit(1)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
-                .background(.thinMaterial, in: Capsule())
+                .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: Capsule())
                 .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
         }
         .buttonStyle(.plain)
@@ -313,7 +313,7 @@ struct ChatView: View {
             .lineLimit(1)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
-            .background(.thinMaterial, in: Capsule())
+            .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: Capsule())
             .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
     }
 
@@ -369,14 +369,14 @@ struct ChatView: View {
                 HStack(spacing: 8) {
                     Text(appState.lastAnswerSource)
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(appState.modelStatus.provider.lowercased() == "openai" ? .orange : .blue)
+                        .foregroundStyle(appState.modelStatus.provider.lowercased() == "openai" ? .orange : (theme.isDark ? theme.primaryAccent : .blue))
                     if appState.voiceState == .jarvisSpeaking {
                         Text("Live")
                             .font(.caption2.weight(.bold))
                             .foregroundStyle(.green)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 3)
-                            .background(.thinMaterial, in: Capsule())
+                            .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: Capsule())
                     }
                 }
                 Text(latestJarvisText.isEmpty ? "..." : latestJarvisText)
@@ -399,7 +399,7 @@ struct ChatView: View {
                 .padding(18)
             }
         }
-        .background(.ultraThinMaterial)
+        .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.03)) : AnyShapeStyle(.ultraThinMaterial))
     }
 
     private func compactMessageRow(_ message: ChatMessage) -> some View {
@@ -478,7 +478,7 @@ struct ChatView: View {
         .padding(.horizontal, 22)
         .padding(.top, 14)
         .padding(.bottom, 20)
-        .background(.ultraThinMaterial)
+        .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.03)) : AnyShapeStyle(.ultraThinMaterial))
         .overlay(
             Rectangle()
                 .fill(

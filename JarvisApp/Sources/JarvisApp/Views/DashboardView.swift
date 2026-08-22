@@ -512,7 +512,7 @@ struct DashboardView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .dashboardGlass(cornerRadius: 18)
+        .liquidGlassCard(cornerRadius: 18)
     }
 
     /// Schickt den Bildschirm-Befehl (Phase F, siehe docs/vision-system.md) wie eine normale
@@ -574,7 +574,7 @@ struct DashboardView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .dashboardGlass(cornerRadius: 16)
+        .liquidGlassCard(cornerRadius: 16)
     }
 
     /// Every non-overview sidebar item maps to the SAME real view MainShellView's
@@ -657,7 +657,7 @@ private struct DashboardCard<Content: View>: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .dashboardGlass(cornerRadius: 18)
+        .liquidGlassCard(cornerRadius: 18)
     }
 
     @ViewBuilder
@@ -1151,21 +1151,3 @@ struct DashboardBackground: View {
     }
 }
 
-private extension View {
-    func dashboardGlass(cornerRadius: CGFloat) -> some View {
-        self
-            .background(
-                ZStack {
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .fill(.ultraThinMaterial)
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .fill(DashboardPalette.cardFill)
-                }
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(0.35), radius: 14, x: 0, y: 8)
-    }
-}

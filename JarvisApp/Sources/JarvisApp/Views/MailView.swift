@@ -194,9 +194,9 @@ struct MailView: View {
                 HStack {
                     Image(systemName: symbol)
                         .font(.system(size: 21, weight: .semibold))
-                        .foregroundStyle(mailAllowed ? .blue : .secondary)
+                        .foregroundStyle(mailAllowed ? (theme.isDark ? theme.primaryAccent : .blue) : .secondary)
                         .frame(width: 42, height: 42)
-                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     Spacer()
                     if appState.mailIsLoading {
                         ProgressView()

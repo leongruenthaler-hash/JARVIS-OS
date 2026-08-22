@@ -12,6 +12,10 @@ struct MemoryCoreView: View {
     let activityEvents: [ActivityEvent]
     let onSelect: (MemoryFact) -> Void
 
+    @Environment(\.jarvisTheme) private var theme
+    /// Graph-Zeichenfarbe war hart Color.cyan verdrahtet, unabhaengig vom Theme - jetzt
+    /// wie der Rest der App auf die aktive Akzentfarbe umgestellt.
+    private var accentColor: Color { theme.isDark ? theme.primaryAccent : .cyan }
     @State private var layout: MemoryCoreLayout = .empty
     private let pulseController = MemorySynapsePulseController()
     @State private var fieldPoints: [FieldPoint] = []
@@ -118,7 +122,7 @@ struct MemoryCoreView: View {
             let radius = ring.radius * scale
             var path = Path()
             path.addEllipse(in: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
-            canvas.stroke(path, with: .color(Color.cyan.opacity(0.1)), lineWidth: 0.6)
+            canvas.stroke(path, with: .color(accentColor.opacity(0.1)), lineWidth: 0.6)
         }
     }
 
@@ -128,7 +132,7 @@ struct MemoryCoreView: View {
             var path = Path()
             path.move(to: center)
             path.addLine(to: point)
-            canvas.stroke(path, with: .color(Color.cyan.opacity(0.14)), lineWidth: 0.6)
+            canvas.stroke(path, with: .color(accentColor.opacity(0.14)), lineWidth: 0.6)
         }
     }
 
@@ -184,14 +188,14 @@ struct MemoryCoreView: View {
         let outerRadius = scale * (0.05 + breathe * 0.008)
         canvas.fill(
             Path(ellipseIn: CGRect(x: center.x - outerRadius, y: center.y - outerRadius, width: outerRadius * 2, height: outerRadius * 2)),
-            with: .color(Color.cyan.opacity(0.06))
+            with: .color(accentColor.opacity(0.06))
         )
 
         let midRadius = scale * (0.028 + breathe * 0.004)
         canvas.fill(
             Path(ellipseIn: CGRect(x: center.x - midRadius, y: center.y - midRadius, width: midRadius * 2, height: midRadius * 2)),
             with: .radialGradient(
-                Gradient(colors: [.white, Color.cyan, Color.cyan.opacity(0)]),
+                Gradient(colors: [.white, accentColor, accentColor.opacity(0)]),
                 center: center,
                 startRadius: 0,
                 endRadius: midRadius
@@ -273,13 +277,13 @@ struct MemoryCoreView: View {
             ForEach(layout.rings) { ring in
                 Text(ring.category.uppercased())
                     .font(.system(size: 9, weight: .medium, design: .monospaced))
-                    .foregroundStyle(Color.cyan.opacity(0.5))
+                    .foregroundStyle(accentColor.opacity(0.5))
                     .position(x: canvasSide / 2, y: canvasSide / 2 - ring.radius * canvasSide + 10)
             }
             ForEach(activeFieldLabels(canvasSide: canvasSide), id: \.key) { entry in
                 Text(entry.label)
                     .font(.system(size: 9, weight: .medium, design: .monospaced))
-                    .foregroundStyle(Color.cyan)
+                    .foregroundStyle(accentColor)
                     .padding(.horizontal, 4)
                     .background(.black.opacity(0.4), in: RoundedRectangle(cornerRadius: 3))
                     .position(x: entry.position.x, y: entry.position.y - 12)

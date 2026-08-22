@@ -159,11 +159,12 @@ private struct HistoryDayDetailView: View {
 
 private struct HistoryTurnRow: View {
     let turn: ConversationTurnPayload
+    @Environment(\.jarvisTheme) private var theme
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: turn.role == "user" ? "person.fill" : "sparkles")
-                .foregroundStyle(turn.role == "user" ? .blue : .cyan)
+                .foregroundStyle(theme.isDark ? theme.primaryAccent : (turn.role == "user" ? .blue : .cyan))
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: 3) {
                 Text(turn.role == "user" ? "Du" : "Jarvis")
@@ -175,10 +176,6 @@ private struct HistoryTurnRow: View {
             Spacer(minLength: 0)
         }
         .padding(14)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
-        )
+        .liquidGlassCard(cornerRadius: 14)
     }
 }

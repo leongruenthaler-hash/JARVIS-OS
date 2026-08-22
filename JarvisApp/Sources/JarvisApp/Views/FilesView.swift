@@ -137,7 +137,7 @@ struct FilesView: View {
                 .disabled(!filesAllowed || appState.fileSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || appState.fileIsLoading)
             }
             .padding(13)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
@@ -153,7 +153,7 @@ struct FilesView: View {
                                 .font(.callout.weight(.semibold))
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 8)
-                                .background(.thinMaterial, in: Capsule())
+                                .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: Capsule())
                                 .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
                         }
                         .buttonStyle(.plain)
@@ -199,7 +199,7 @@ struct FilesView: View {
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(result.isFolder ? .blue : .teal)
                 .frame(width: 38, height: 38)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(result.name)
@@ -224,7 +224,7 @@ struct FilesView: View {
             .disabled(result.path.isEmpty)
         }
         .padding(12)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.16), lineWidth: 1)
@@ -294,7 +294,7 @@ struct FilesView: View {
                         .font(.system(size: 21, weight: .semibold))
                         .foregroundStyle(filesAllowed ? (theme.isDark ? theme.primaryAccent : .cyan) : .secondary)
                         .frame(width: 42, height: 42)
-                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     Spacer()
                     if appState.fileIsLoading {
                         ProgressView().controlSize(.small)
@@ -313,7 +313,7 @@ struct FilesView: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, minHeight: 150, alignment: .topLeading)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.03)) : AnyShapeStyle(.ultraThinMaterial), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
@@ -333,7 +333,7 @@ struct FilesView: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .liquidGlassPanel(tint: .indigo)
     }

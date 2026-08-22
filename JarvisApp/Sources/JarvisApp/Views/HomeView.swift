@@ -91,9 +91,9 @@ struct HomeView: View {
                 HStack {
                     Image(systemName: symbol)
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(tint)
+                        .foregroundStyle(theme.isDark ? theme.primaryAccent : tint)
                         .frame(width: 34, height: 34)
-                        .background(.thinMaterial, in: Circle())
+                        .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: Circle())
                     Spacer()
                     Image(systemName: "arrow.right.circle")
                         .foregroundStyle(.secondary)
@@ -107,7 +107,7 @@ struct HomeView: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
@@ -182,11 +182,11 @@ struct HomeView: View {
     private func heroChip(title: String, icon: String, tint: Color) -> some View {
         Label(title, systemImage: icon)
             .font(.caption.weight(.semibold))
-            .foregroundStyle(tint)
+            .foregroundStyle(theme.isDark ? theme.primaryAccent : tint)
             .lineLimit(1)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(.thinMaterial, in: Capsule())
+            .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: Capsule())
             .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 1))
     }
 
@@ -241,7 +241,7 @@ struct HomeView: View {
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(tint)
                 .frame(width: 34, height: 34)
-                .background(.thinMaterial, in: Circle())
+                .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: Circle())
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
@@ -371,7 +371,7 @@ struct HomeView: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(tint)
                     .frame(width: 34, height: 34)
-                    .background(.thinMaterial, in: Circle())
+                    .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: Circle())
                 Spacer()
                 Text(title)
                     .font(.callout.weight(.semibold))
@@ -446,7 +446,7 @@ struct HomeView: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(activeTint)
                     .frame(width: 34, height: 34)
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 Text(title)
                     .font(.headline)
                 Spacer()
@@ -454,7 +454,7 @@ struct HomeView: View {
                     .foregroundStyle(.secondary)
             }
             .padding(14)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
@@ -493,7 +493,7 @@ private struct StripBadge: View {
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(theme.isDark ? theme.primaryAccent : tint)
                 .frame(width: 28, height: 28)
-                .background(.thinMaterial, in: Circle())
+                .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: Circle())
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.subheadline.weight(.semibold))
@@ -577,7 +577,7 @@ struct ActionCenterView: View {
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(tint)
                 .frame(width: 34, height: 34)
-                .background(.thinMaterial, in: Circle())
+                .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: Circle())
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.caption.weight(.semibold))
@@ -669,7 +669,7 @@ struct ActionCenterView: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(activeTint)
                     .frame(width: 34, height: 34)
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 Text(title)
                     .font(.headline)
                 Spacer()
@@ -677,7 +677,7 @@ struct ActionCenterView: View {
                     .foregroundStyle(.secondary)
             }
             .padding(14)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
@@ -711,14 +711,15 @@ struct ActionCenterView: View {
         let subtitle: String
         let symbol: String
         let tint: Color
+        @Environment(\.jarvisTheme) private var theme
 
         var body: some View {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: symbol)
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(tint)
+                    .foregroundStyle(theme.isDark ? theme.primaryAccent : tint)
                     .frame(width: 28, height: 28)
-                    .background(.thinMaterial, in: Circle())
+                    .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: Circle())
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
                         .font(.subheadline.weight(.semibold))

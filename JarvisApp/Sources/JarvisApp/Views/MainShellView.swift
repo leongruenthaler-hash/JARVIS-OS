@@ -35,6 +35,13 @@ struct MainShellView: View {
             }
         }
         .listStyle(.sidebar)
+        // War frueher opak (native List-Material) und liess theme.isDark-Hintergruende
+        // (Signal, Futuristic Blue) nur bei .isFuturistic durchscheinen - jetzt fuer
+        // jedes dunkle Theme, damit die zweite Navigationsschale (MainShellView) beim
+        // "komplettes Redesign"-Umbau denselben Look bekommt wie die Standard-
+        // Dashboard-Ansicht, siehe Plan "Signal-Look wirklich komplett umsetzen".
+        .scrollContentBackground(.hidden)
+        .tint(theme.isDark ? theme.primaryAccent : .accentColor)
         .navigationTitle("Jarvis")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -58,8 +65,8 @@ struct MainShellView: View {
             .padding(.bottom, 12)
         }
         .background {
-            if theme.isFuturistic {
-                JarvisFuturisticBackground()
+            if theme.isDark {
+                LiquidGlassBackground()
             }
         }
     }

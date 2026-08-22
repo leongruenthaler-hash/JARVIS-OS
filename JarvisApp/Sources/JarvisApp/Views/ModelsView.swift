@@ -98,7 +98,7 @@ struct ModelsView: View {
                 title: "Betriebsart",
                 value: appState.modelStatus.openAIEnabled ? "Cloud aktiv" : "Lokal aktiv",
                 symbol: appState.modelStatus.openAIEnabled ? "cloud.fill" : "house.fill",
-                tint: appState.modelStatus.openAIEnabled ? .orange : .blue
+                tint: appState.modelStatus.openAIEnabled ? .orange : (theme.isDark ? theme.primaryAccent : .blue)
             )
             statusCard(
                 title: "Modus",
@@ -138,7 +138,7 @@ struct ModelsView: View {
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(tint)
                 .frame(width: 34, height: 34)
-                .background(.thinMaterial, in: Circle())
+                .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: Circle())
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
@@ -201,7 +201,7 @@ struct ModelsView: View {
                 .font(.system(size: 21, weight: .semibold))
                 .foregroundStyle(active ? .green : .primary)
                 .frame(width: 42, height: 42)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
 
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 8) {
@@ -293,7 +293,7 @@ struct ModelsView: View {
                         .font(.system(size: 22, weight: .semibold))
                         .foregroundStyle(appState.modelStatus.openAIEnabled ? .orange : .secondary)
                         .frame(width: 44, height: 44)
-                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
 
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 8) {
@@ -332,7 +332,7 @@ struct ModelsView: View {
                 }
             }
             .padding(16)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .background(theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.03)) : AnyShapeStyle(.ultraThinMaterial), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
@@ -361,7 +361,8 @@ struct ModelsView: View {
     }
 
     private func cardBackground(active: Bool) -> some ShapeStyle {
-        active ? AnyShapeStyle(Color.green.opacity(0.12)) : AnyShapeStyle(.ultraThinMaterial)
+        if active { return AnyShapeStyle(Color.green.opacity(0.12)) }
+        return theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.03)) : AnyShapeStyle(.ultraThinMaterial)
     }
 
     private func isActiveLocalModel(_ model: String) -> Bool {

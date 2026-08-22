@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct LicensesView: View {
+    @Environment(\.jarvisTheme) private var theme
+
     private let entries: [LicenseModelEntry] = [
         LicenseModelEntry(
             id: "phi4-mini",
@@ -66,9 +68,12 @@ struct LicensesView: View {
         HStack(spacing: 14) {
             Image(systemName: entry.symbol)
                 .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(.indigo)
+                .foregroundStyle(theme.isDark ? theme.primaryAccent : .indigo)
                 .frame(width: 38, height: 38)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(
+                    theme.isSignal ? AnyShapeStyle(Color.white.opacity(0.045)) : AnyShapeStyle(.thinMaterial),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                )
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {

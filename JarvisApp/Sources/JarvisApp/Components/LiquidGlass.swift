@@ -81,6 +81,12 @@ struct LiquidGlassIcon: View {
             gradientColors = [tint, .blue, .indigo]
         }
 
+        // Signal ist bewusst kantiger/flacher als die anderen Themes (Mockup-Vorgabe:
+        // scharfe Kanten statt weicher Iron-Man-Glow-Blobs) - kleinerer Radius, duennerer
+        // Verlauf, schaerferer statt weicher Schatten.
+        let radius: CGFloat = theme.isSignal ? 12 : 22
+        let shadowRadius: CGFloat = theme.isSignal ? 10 : (theme.isDark ? 24 : 18)
+
         return Image(systemName: symbol)
             .font(.system(size: 28, weight: .semibold))
             .foregroundStyle(.white)
@@ -91,13 +97,13 @@ struct LiquidGlassIcon: View {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 ),
-                in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+                in: RoundedRectangle(cornerRadius: radius, style: .continuous)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .strokeBorder(activeTint.opacity(theme.isDark ? 0.42 : 0.0), lineWidth: 1)
             )
-            .shadow(color: activeTint.opacity(theme.isDark ? 0.34 : 0.22), radius: theme.isDark ? 24 : 18, x: 0, y: 10)
+            .shadow(color: activeTint.opacity(theme.isDark ? 0.34 : 0.22), radius: shadowRadius, x: 0, y: theme.isSignal ? 6 : 10)
     }
 }
 
@@ -108,6 +114,36 @@ extension View {
 
     func liquidGlassCard(tint: Color = .cyan, cornerRadius: CGFloat = 22) -> some View {
         modifier(JarvisGlassPanelModifier(tint: tint, cornerRadius: cornerRadius, padding: 0))
+    }
+
+    /// Kapsel-Variante fuer Chips/Toolbar-Pillen (Eingabeleisten, Filter-Buttons), die
+    /// bisher an vielen Stellen rohes `.thinMaterial`/`.ultraThinMaterial` in einer
+    /// `Capsule()` nutzten und dadurch die Signal-Kartenform (siehe JarvisGlassPanelModifier)
+    /// nicht mitbekamen. Gleiches Prinzip, nur Capsule statt RoundedRectangle.
+    func liquidGlassCapsule(tint: Color = .cyan) -> some View {
+        modifier(JarvisGlassCapsuleModifier(tint: tint))
+    }
+}
+
+private struct JarvisGlassCapsuleModifier: ViewModifier {
+    @Environment(\.jarvisTheme) private var theme
+    let tint: Color
+
+    func body(content: Content) -> some View {
+        let activeTint = theme.isDark ? theme.primaryAccent : tint
+
+        if theme.isSignal {
+            return AnyView(
+                content
+                    .background(Capsule().fill(Color.white.opacity(0.045)))
+                    .overlay(Capsule().strokeBorder(activeTint.opacity(0.30), lineWidth: 1))
+            )
+        }
+        return AnyView(
+            content
+                .background(.thinMaterial, in: Capsule())
+                .overlay(Capsule().strokeBorder(activeTint.opacity(theme.isDark ? 0.30 : 0.14), lineWidth: 1))
+        )
     }
 }
 
@@ -120,6 +156,30 @@ private struct JarvisGlassPanelModifier: ViewModifier {
     func body(content: Content) -> some View {
         let activeTint = theme.isDark ? theme.primaryAccent : tint
 
+        // Signal ist die einzige Ausnahme, die NIE die schwere Weichzeichner-Blur-Karte
+        // der anderen Themes bekommt - das war der eigentliche Grund, warum das bisherige
+        // "Signal"-Redesign trotz korrekter Akzentfarbe wie das alte Liquid-Glass-Design
+        // aussah (siehe Plan "Signal-Look wirklich komplett umsetzen", 2026-08-22): nur
+        // Fuellfarbe/Rand waren angepasst, die Form (dicker Blur, grosse runde Ecken) war
+        // ueberall identisch. Flache Fuellung + duenner Rand + kleinerer, von der
+        // Aufrufstelle unabhaengiger Radius statt Material-Blur.
+        if theme.isSignal {
+            let radius = min(cornerRadius, 14)
+            return AnyView(
+                content
+                    .padding(padding)
+                    .background(
+                        RoundedRectangle(cornerRadius: radius, style: .continuous)
+                            .fill(Color.white.opacity(cardFillOpacityForSignal))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: radius, style: .continuous)
+                            .strokeBorder(activeTint.opacity(0.32), lineWidth: 1)
+                    )
+                    .shadow(color: activeTint.opacity(0.10), radius: 12, x: 0, y: 4)
+            )
+        }
+
         let underlayFill: Color
         switch theme {
         case .futuristicBlue:
@@ -128,28 +188,32 @@ private struct JarvisGlassPanelModifier: ViewModifier {
             // Matches dashboardGlass' cardFill (Color.black.opacity(0.10)) over the material.
             underlayFill = Color.black.opacity(0.10)
         case .signal:
-            // Sehr dezent - die flachen Hairline-Border-Karten aus dem Signal-Mockup
-            // kommen ueber die duennere borderOpacity/cardFillOpacity, nicht ueber
-            // eine zusaetzliche Unterfuellung.
-            underlayFill = Color.black.opacity(0.06)
+            underlayFill = .clear // unreachable, handled above
         case .classic:
             underlayFill = Color.clear
         }
 
-        return content
-            .padding(padding)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .background(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(underlayFill)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(borderGradient(activeTint), lineWidth: 1)
-            )
-            .shadow(color: activeTint.opacity(theme.isDark ? 0.18 : 0.10), radius: theme.isDark ? 28 : 24, x: 0, y: 12)
-            .shadow(color: Color.black.opacity(theme.isDark ? 0.18 : 0.07), radius: 10, x: 0, y: 4)
+        return AnyView(
+            content
+                .padding(padding)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .background(
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .fill(underlayFill)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(borderGradient(activeTint), lineWidth: 1)
+                )
+                .shadow(color: activeTint.opacity(theme.isDark ? 0.18 : 0.10), radius: theme.isDark ? 28 : 24, x: 0, y: 12)
+                .shadow(color: Color.black.opacity(theme.isDark ? 0.18 : 0.07), radius: 10, x: 0, y: 4)
+        )
     }
+
+    /// theme.cardFillOpacity ist fuer signal auf 0.04 gestimmt (dunkler Grundton) - hier
+    /// als heller weisser Overlay auf dem fast-schwarzen Hintergrund gebraucht, deshalb
+    /// eigene, etwas hoehere Konstante statt der theme-Property direkt.
+    private var cardFillOpacityForSignal: Double { 0.045 }
 
     private func borderGradient(_ activeTint: Color) -> LinearGradient {
         LinearGradient(
