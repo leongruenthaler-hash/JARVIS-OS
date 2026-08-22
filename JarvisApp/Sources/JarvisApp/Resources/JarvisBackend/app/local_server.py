@@ -226,6 +226,48 @@ class JarvisLocalServer:
             ],
         }
 
+    # Synthetische Fakten-IDs fuer memory["self_model"]["preferences"] - kein echter
+    # long_memory-Eintrag, siehe _self_model_preference_facts() unten. Praefix macht
+    # delete_memory_fact() erkennbar, dass hier self_model statt long_memory gemeint ist.
+    _SELF_PREF_ID_PREFIX = "self_pref::"
+
+    def _self_model_preference_facts(self) -> list[dict[str, Any]]:
+        """Blendet memory["self_model"]["preferences"] (simulierte Jarvis-Vorlieben,
+        siehe handle_self_preference_command in jarvis.py) als sichtbare, loeschbare
+        Eintraege in der bestehenden Gedaechtnis-Ansicht ein, statt eine zweite,
+        unsichtbare Ablage zu betreiben. Leons Wunsch 2026-08-22, nachdem ein
+        Testlauf 37 falsche Vorlieben unbemerkt dort ablegen konnte - siehe
+        Konversation "Ich mein, wir haben ja extra diesen Erinnerung Speicher...".
+        Eigene Kategorie ("Jarvis über sich selbst"), damit sie klar von echten
+        Nutzer-Fakten unterscheidbar bleiben und nicht mit ihnen verwechselt werden."""
+        self_model = self.memory.get("self_model") or {}
+        preferences = self_model.get("preferences")
+        if not isinstance(preferences, dict):
+            return []
+        updated_at = str(self_model.get("last_updated") or "")
+        facts = []
+        for topic, stance in preferences.items():
+            facts.append({
+                "id": f"{self._SELF_PREF_ID_PREFIX}{topic}",
+                "content": f"{topic}: {stance}",
+                "category": "Jarvis über sich selbst",
+                "scope": "private",
+                "source_type": "manual",
+                "source_reference": None,
+                "created_at": updated_at,
+                "updated_at": updated_at,
+                "last_used_at": None,
+                "confidence": 1.0,
+                "sensitivity": "normal",
+                "retention_policy": "until_deleted",
+                "expires_at": None,
+                "user_confirmed": True,
+                "status": "confirmed",
+                "tags": [],
+                "related_entities": [],
+            })
+        return facts
+
     def list_memory_facts(self, query: dict[str, Any]) -> dict[str, Any]:
         """Memory management view (Phase B). Deliberately not gated behind the
         "memory" permission the way auto-storage is - that permission controls
@@ -243,6 +285,12 @@ class JarvisLocalServer:
             facts = self.memory.search_facts(search, include_expired=include_expired, include_rejected=include_rejected)
         else:
             facts = self.memory.all_facts(include_expired=include_expired, include_rejected=include_rejected)
+
+        self_facts = self._self_model_preference_facts()
+        if search:
+            search_lower = search.lower()
+            self_facts = [f for f in self_facts if search_lower in f["content"].lower()]
+        facts = facts + self_facts
 
         if category:
             facts = [f for f in facts if str(f.get("category") or "") == category]
@@ -292,6 +340,16 @@ class JarvisLocalServer:
         fact_id = str(payload.get("id") or "")
         if not fact_id:
             return {"ok": False, "error": "missing_id"}
+        if fact_id.startswith(self._SELF_PREF_ID_PREFIX):
+            topic = fact_id[len(self._SELF_PREF_ID_PREFIX):]
+            self_model = self.memory.get("self_model") or {}
+            preferences = self_model.get("preferences")
+            if not isinstance(preferences, dict) or topic not in preferences:
+                return {"ok": False, "error": "not_found"}
+            del preferences[topic]
+            self_model["preferences"] = preferences
+            self.memory.set("self_model", self_model)
+            return {"ok": True}
         return {"ok": self.memory.delete_fact_by_id(fact_id)}
 
     def list_tasks(self, query: dict[str, Any]) -> dict[str, Any]:
