@@ -7,6 +7,14 @@ struct JarvisMacApp: App {
     @NSApplicationDelegateAdaptor(JarvisAppDelegate.self) private var appDelegate
     @StateObject private var appState = AppState()
     @AppStorage("JarvisActiveTheme") private var activeThemeRaw = JarvisTheme.signal.rawValue
+    // Nicht direkt gelesen, aber noetig: JarvisTheme.primaryAccent liest den Farbton per
+    // UserDefaults.standard direkt (kein @AppStorage), da es eine reine enum-Property ist.
+    // Ohne dieses @AppStorage HIER hat kein View im Hauptfenster einen Grund, bei einer
+    // Farbton-Aenderung im Einstellungen-Fenster neu zu rendern - die Aenderung landete zwar
+    // in UserDefaults, aber das offene Hauptfenster zeigte weiter die alte Farbe. Die blosse
+    // Deklaration dieser Property macht `body` reaktiv auf den Schluessel, unabhaengig davon,
+    // ob sie unten explizit gelesen wird.
+    @AppStorage("JarvisSignalAccentHue") private var signalAccentHueRaw: Double = SignalAccentHue.mint.rawValue
 
     private var activeTheme: JarvisTheme {
         JarvisTheme(rawValue: activeThemeRaw) ?? .signal
