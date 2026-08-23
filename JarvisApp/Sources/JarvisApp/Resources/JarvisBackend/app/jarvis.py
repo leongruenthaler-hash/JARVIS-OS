@@ -7772,24 +7772,29 @@ def answer_message(
         recent_limit=min(int(config.get("recent_context_messages", 6)) + 1, 7),
     )
 
-    # on_chunk faengt hier NICHT direkt den Aufrufer-Callback ab, sondern puffert -
-    # sonst haette ein Nutzer den halluzinierten "ich habe bestellt"-Text schon live
-    # im Chat/als Sprachausgabe gehoert, bevor fabricated_transaction_claim() unten
-    # ueberhaupt laeuft (Codex-Adversarial-Review 2026-08-23 hat diese Streaming-
-    # Luecke im Kaesekuchen-Fix aufgedeckt: der Filter korrigierte bis dahin nur den
-    # intern zurueckgegebenen answer-Wert, nicht die bereits ausgelieferten Chunks).
+    # on_llm_chunk wird hier bewusst NICHT an ask_stream() durchgereicht (kein
+    # Live-Mitschreiben mehr waehrend der Generierung) - sonst haette ein Nutzer
+    # den halluzinierten "ich habe bestellt"-Text schon live im Chat/als
+    # Sprachausgabe gehoert, bevor fabricated_transaction_claim() unten ueberhaupt
+    # laeuft (Codex-Adversarial-Review 2026-08-23 hat diese Streaming-Luecke im
+    # Kaesekuchen-Fix aufgedeckt: der Filter korrigierte bis dahin nur den intern
+    # zurueckgegebenen answer-Wert, nicht die bereits ausgelieferten Chunks).
+    # ask_stream() liefert answer unabhaengig von on_chunk zurueck (siehe
+    # llm_client.py), das Weglassen von on_chunk kostet also nichts - der
+    # gesamte Chunk-Versand passiert erst unten, NACH clean_ai_answer()/
+    # strip_first_name_address()/fabricated_transaction_claim(), auf Basis des
+    # bereits bereinigten answer (ein erster Versuch, hier die rohen Chunks zu
+    # puffern und unveraendert wiederzugeben, hat genau diese Bereinigung
+    # umgangen - Codex Stop-Time-Review 2026-08-23).
     if callable(on_llm_chunk):
-        buffered_chunks: list[str] = []
         answer = llm.ask_stream(
             messages,
             max_output_tokens=route.max_output_tokens,
             user_text=question,
             route=route,
-            on_chunk=buffered_chunks.append,
             force_local=force_local,
         )
     else:
-        buffered_chunks = None
         answer = llm.ask(messages, max_output_tokens=route.max_output_tokens, user_text=question, route=route, force_local=force_local)
     answer = clean_ai_answer(answer)
     if not wants_first_name_permission(question):
@@ -7817,8 +7822,18 @@ def answer_message(
             if callable(on_llm_chunk):
                 on_llm_chunk(answer)
         elif callable(on_llm_chunk):
-            for chunk in buffered_chunks:
-                on_llm_chunk(chunk)
+            # NICHT die rohen buffered_chunks abspielen - die sind der unbereinigte
+            # Modell-Rohtext von VOR clean_ai_answer()/strip_first_name_address()
+            # oben. Ein Wiederabspielen dieser Rohdaten wuerde genau die
+            # Bereinigung umgehen, die fuer den zurueckgegebenen answer-Wert
+            # bereits lief - der haeufigste (sichere) Pfad haette damit
+            # ungefilterten Text live ausgeliefert (Codex Stop-Time-Review
+            # 2026-08-23). Stattdessen den bereits bereinigten answer wortweise
+            # ausliefern, gleiches Chunking-Muster wie der Fallback in
+            # local_server.py.
+            words = answer.split(" ")
+            for index, word in enumerate(words):
+                on_llm_chunk(word if index == 0 else " " + word)
     record_exchange(memory, question, answer)
     return _result(answer, mail_followup="mail" in normalize_text(question))
 

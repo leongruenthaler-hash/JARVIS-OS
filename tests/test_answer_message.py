@@ -287,4 +287,9 @@ def test_streaming_uses_ask_stream_and_forwards_chunks(memory, workers):
         )
 
     assert result.text == "Gestreamte Antwort"
-    assert chunks == ["Gestreamte Antwort"]
+    # Chunks kommen absichtlich NICHT mehr live waehrend ask_stream() an (siehe
+    # answer_message()-Kommentar zu Codex-Adversarial-Review 2026-08-23), sondern
+    # erst danach, wortweise, auf Basis des bereits sicherheitsgeprueften Texts -
+    # geprueft wird hier deshalb nur, dass der vollstaendige Text ankommt, nicht
+    # die exakte Fragmentierung.
+    assert "".join(chunks) == "Gestreamte Antwort"
