@@ -269,6 +269,14 @@ PENDING_MAIL_CALENDAR_CONFIRMATION_TTL_SECONDS = 24 * 3600
 # Siehe plans/2026-08-13-jarvis-speicherplatz-aufraeumen-per-chat.md.
 PENDING_CLEANUP_CONFIRMATION_TTL_SECONDS = 30 * 60
 
+# Wie lange ein vorgeschlagenes "Lieferando fuer <Stadt> oeffnen?" noch per "ja"
+# bestaetigt werden kann. Wie PENDING_PERMISSION_TTL_SECONDS eine unmittelbare
+# Ja/Nein-Bestaetigung ohne eigenen Zeitstempel-Support in ActionEngine - ohne
+# TTL koennte ein spaeteres, thematisch unabhaengiges "ja" versehentlich noch
+# den laengst ueberholten Vorschlag ausloesen und den Browser oeffnen (Codex-
+# Adversarial-Review 2026-08-23).
+PENDING_LIEFERANDO_OPEN_TTL_SECONDS = 300
+
 
 def ensure_permission(memory: Memory, permission: str, action_summary: str) -> str | None:
     if not permissions_required():
@@ -3937,6 +3945,20 @@ def handle_pending_action_flow(
 
     pending_lieferando_open = settings.get("pending_lieferando_open")
     if isinstance(pending_lieferando_open, dict):
+        set_at = pending_lieferando_open.get("set_at")
+        age_seconds = (time.time() - set_at) if isinstance(set_at, (int, float)) else None
+        if age_seconds is None or age_seconds > PENDING_LIEFERANDO_OPEN_TTL_SECONDS:
+            settings.pop("pending_lieferando_open", None)
+            memory.set("settings", settings)
+            if is_confirm or is_cancel:
+                return _continue_multistep_chain_if_pending(
+                    memory,
+                    "pending_lieferando_open",
+                    "Der Lieferando-Vorschlag ist inzwischen abgelaufen. Sag es mir noch einmal, falls du ihn öffnen möchtest.",
+                    aborted=True,
+                    photo_worker=photo_worker,
+                )
+            return None
         result = ACTION_ENGINE.resolve(
             memory,
             "pending_lieferando_open",
@@ -6060,7 +6082,19 @@ def execute_call_contact(data: dict) -> str:
 ACTION_ENGINE.register("call_contact", execute_call_contact)
 
 
-_CITY_FACT_RE = re.compile(r"stadt\s*(?:ist|:)?\s*([a-zäöüß][a-zäöüß\-\s]{1,30})", re.IGNORECASE)
+# Nur "stadt" ODER "wohnort" (matcht beide Topics aus _known_city()s Suchschleife -
+# vorher fehlte "wohnort" hier komplett, siehe Codex-Adversarial-Review 2026-08-23).
+# Mehrwort-Staedte (z.B. "Bad Homburg", "Frankfurt am Main") bleiben erhalten - der
+# Regex haengt bis zu 3 weitere Woerter an, bricht aber vor einem eigenstaendigen
+# "in" ab, weil kein deutscher Stadtname "in" als eigenes Wort enthaelt. Das
+# verhindert, dass Anhaengsel wie "Amberg in Deutschland" mit in die gebaute
+# Lieferando-URL rutschen (erste Fassung dieses Fixes kappte auf ein einzelnes
+# Wort und regressierte damit echte Mehrwort-Staedte - von einem zweiten Codex-
+# Review-Durchlauf 2026-08-23 aufgedeckt).
+_CITY_FACT_RE = re.compile(
+    r"(?:stadt|wohnort)\s*(?:ist|:)?\s*([a-zäöüß][a-zäöüß\-]*(?:\s(?!in\b)[a-zäöüß][a-zäöüß\-]*){0,3})",
+    re.IGNORECASE,
+)
 _UMLAUT_TRANSLIT = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
 
 
@@ -6100,7 +6134,7 @@ def handle_food_command(text: str, memory: Memory | None = None) -> str | None:
         "pending_lieferando_open",
         ActionProposal(
             action_type="open_url",
-            execution_data={"url": url, "label": "Lieferando"},
+            execution_data={"url": url, "label": "Lieferando", "set_at": time.time()},
             confirm_prompt=(
                 f"Soll ich Lieferando für {city} öffnen, {configured_user_address()}? "
                 "Ich kann dort nicht selbst bestellen oder bezahlen - du suchst und "
@@ -7738,16 +7772,24 @@ def answer_message(
         recent_limit=min(int(config.get("recent_context_messages", 6)) + 1, 7),
     )
 
+    # on_chunk faengt hier NICHT direkt den Aufrufer-Callback ab, sondern puffert -
+    # sonst haette ein Nutzer den halluzinierten "ich habe bestellt"-Text schon live
+    # im Chat/als Sprachausgabe gehoert, bevor fabricated_transaction_claim() unten
+    # ueberhaupt laeuft (Codex-Adversarial-Review 2026-08-23 hat diese Streaming-
+    # Luecke im Kaesekuchen-Fix aufgedeckt: der Filter korrigierte bis dahin nur den
+    # intern zurueckgegebenen answer-Wert, nicht die bereits ausgelieferten Chunks).
     if callable(on_llm_chunk):
+        buffered_chunks: list[str] = []
         answer = llm.ask_stream(
             messages,
             max_output_tokens=route.max_output_tokens,
             user_text=question,
             route=route,
-            on_chunk=on_llm_chunk,
+            on_chunk=buffered_chunks.append,
             force_local=force_local,
         )
     else:
+        buffered_chunks = None
         answer = llm.ask(messages, max_output_tokens=route.max_output_tokens, user_text=question, route=route, force_local=force_local)
     answer = clean_ai_answer(answer)
     if not wants_first_name_permission(question):
@@ -7757,10 +7799,26 @@ def answer_message(
             f"Das kann ich leider nicht, {configured_user_name()} - ich habe keinen Zugriff auf "
             "Bestell-, Zahlungs- oder Buchungsfunktionen. Das musst du selbst erledigen."
         )
+        # _result() unten wendet strip_first_name_address() zwar idempotent auf den
+        # Rueckgabewert an, aber der Live-Stream-Chunk hier wird DIREKT an
+        # on_llm_chunk ausgeliefert, an _result() vorbei - ohne diese Zeile wuerde
+        # der Vorname also live im Chat/als Sprachausgabe landen, selbst wenn keine
+        # Vornamen-Erlaubnis erteilt wurde (zweiter Codex-Review-Durchlauf 2026-08-23).
+        if not wants_first_name_permission(question):
+            answer = strip_first_name_address(answer, configured_user_name())
+        if callable(on_llm_chunk):
+            on_llm_chunk(answer)
     else:
         promised = execute_promised_action_if_possible(llm, question, answer)
         if promised is not None:
             answer = promised
+            if not wants_first_name_permission(question):
+                answer = strip_first_name_address(answer, configured_user_name())
+            if callable(on_llm_chunk):
+                on_llm_chunk(answer)
+        elif callable(on_llm_chunk):
+            for chunk in buffered_chunks:
+                on_llm_chunk(chunk)
     record_exchange(memory, question, answer)
     return _result(answer, mail_followup="mail" in normalize_text(question))
 
