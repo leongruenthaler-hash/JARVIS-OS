@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from data_dir import data_root
+from push_notify import send_push
 
 # See docs/proactivity.md and Master-Plan Abschnitt 8.
 PRIORITIES = ("information", "relevant", "wichtig", "kritisch")
@@ -72,16 +73,23 @@ class ProactivityEngine:
         self._rules.append((name, rule))
 
     def _load_state(self) -> dict[str, Any]:
+        # pushed_kritisch ist ein dedup_key->rule_name-Dict (nicht nur eine Liste
+        # von Schluesseln) - evaluate() muss wissen, welche REGEL einen gepushten
+        # Schluessel erzeugt hat, um bei einem bloss transient fehlgeschlagenen
+        # Regel-Aufruf (siehe dortiger try/except) nicht faelschlich "Bedingung
+        # geloest" anzunehmen und doppelt zu pushen (Codex-Review 2026-08-23).
         if not self.cache_path.exists():
-            return {"history": [], "last_shown": {}, "dismissed_forever": [], "snoozed_until": {}}
+            return {"history": [], "last_shown": {}, "dismissed_forever": [], "snoozed_until": {}, "pushed_kritisch": {}}
         try:
             data = json.loads(self.cache_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
-            return {"history": [], "last_shown": {}, "dismissed_forever": [], "snoozed_until": {}}
+            return {"history": [], "last_shown": {}, "dismissed_forever": [], "snoozed_until": {}, "pushed_kritisch": {}}
         data.setdefault("history", [])
         data.setdefault("last_shown", {})
         data.setdefault("dismissed_forever", [])
         data.setdefault("snoozed_until", {})
+        if not isinstance(data.get("pushed_kritisch"), dict):
+            data["pushed_kritisch"] = {}
         return data
 
     def _save_state(self, state: dict[str, Any]) -> None:
@@ -107,6 +115,7 @@ class ProactivityEngine:
             state = self._load_state()
 
             candidates: list[ProactiveEvent] = []
+            successful_rule_names: set[str] = set()
             for rule_name, rule in self._rules:
                 try:
                     raw_events = rule(context) or []
@@ -115,6 +124,7 @@ class ProactivityEngine:
                     # unavailable) must never take down the whole evaluation pass.
                     print(f"Proactivity-Regel '{rule_name}' fehlgeschlagen: {type(exc).__name__}")
                     continue
+                successful_rule_names.add(rule_name)
                 for raw in raw_events:
                     priority = raw.get("priority") if raw.get("priority") in PRIORITIES else "information"
                     dedup_key = str(raw.get("dedup_key") or f"{rule_name}:{raw.get('message', '')}")
@@ -130,6 +140,11 @@ class ProactivityEngine:
                             created_at=now.isoformat(timespec="seconds"),
                         )
                     )
+
+            # Rohe (ungefilterte) kritische Dedup-Keys dieses Zyklus - wird unten
+            # gebraucht, um pushed_kritisch zurueckzusetzen, sobald eine Regel eine
+            # zuvor gepushte Bedingung nicht mehr meldet (siehe dort).
+            raw_kritisch_keys = {event.dedup_key for event in candidates if event.priority == "kritisch"}
 
             # "kritisch" darf ueberall durchbrechen (siehe _apply_quiet_hours/
             # _apply_throttle unten, die das schon tun) - dismissed_forever/
@@ -165,11 +180,63 @@ class ProactivityEngine:
             candidates.sort(key=lambda event: PRIORITY_RANK.get(event.priority, 0), reverse=True)
             candidates = self._apply_throttle(candidates, state, config, now)
 
+            # "kritisch" umgeht Cooldown/Dismiss oben absichtlich (siehe Kommentar dort) -
+            # ohne eigenen Dedup wuerde ein weiterhin bestehendes kritisches Ereignis bei
+            # jedem 5-Minuten-Poll erneut gepusht. pushed_kritisch ist deshalb ein eigener,
+            # dauerhafter Merker (nicht an last_shown/cooldown gekoppelt): einmal gepusht,
+            # bleibt es das bis snooze() den Schluessel wieder entfernt (siehe dort) - ein
+            # dismiss_forever()-Ereignis soll dagegen nie wieder pushen.
+            pushed_kritisch: dict[str, str] = dict(state.get("pushed_kritisch") or {})
+            pushed_kritisch_before = dict(pushed_kritisch)
+            # Ein zuvor gepushtes kritisches Ereignis gilt nur dann als geloest,
+            # wenn dessen REGEL diesen Zyklus erfolgreich lief und es nicht mehr
+            # meldet - sonst wuerde ein bloss transient fehlgeschlagener Regel-
+            # Aufruf (siehe try/except oben) faelschlich "geloest" bedeuten und
+            # beim naechsten erfolgreichen Zyklus einen unveraendert bestehenden
+            # kritischen Zustand erneut pushen (Codex-Review 2026-08-23). Ein
+            # spaeteres echtes Wiederauftreten (Regel lief erfolgreich, meldet
+            # den Schluessel nicht mehr, dann spaeter wieder) darf dagegen wieder
+            # pushen - deshalb ueberhaupt dieses Pruning.
+            pushed_kritisch = {
+                key: rule_name
+                for key, rule_name in pushed_kritisch.items()
+                if key in raw_kritisch_keys or rule_name not in successful_rule_names
+            }
             for event in candidates:
+                # "kritisch" bricht oben bewusst durch dismissed_forever durch (siehe
+                # Kommentar dort, 2026-08-20-Audit) - fuer die Mac-Oberflaeche richtig,
+                # weil ein dismiss_forever() auf einer frueheren "wichtig"-Stufe eine
+                # echte spaetere Eskalation zu "kritisch" nicht stumm schalten soll.
+                # Fuer den PUSH-Kanal gilt eine striktere Abwaegung: eine Nachricht,
+                # die der Nutzer ausdruecklich "nie wieder zeigen" liess, soll nicht
+                # trotzdem aufs Telefon durchbrechen - dismiss_forever() hier also
+                # zusaetzlich respektieren (Codex-Review 2026-08-23).
+                if (
+                    event.priority == "kritisch"
+                    and event.dedup_key not in pushed_kritisch
+                    and event.dedup_key not in dismissed_forever
+                ):
+                    # Marker nur bei ERFOLGREICHEM Versand setzen - sonst wuerde ein
+                    # kurzzeitig nicht erreichbares ntfy (Mac Mini aus, Tailscale weg)
+                    # den Push fuer diesen Vorfall dauerhaft verschlucken, statt es beim
+                    # naechsten Zyklus erneut zu versuchen (Codex-Adversarial-Review
+                    # 2026-08-23).
+                    # ntfy akzeptiert nur max/high/default/low/min (bzw. 1-5) als Priority -
+                    # "urgent" (eine andere Push-Anbieter-Konvention) liess den Server mit
+                    # 400 antworten, send_push() gab False zurueck und der ganze kritische
+                    # Push-Kanal loeste effektiv nie aus (Codex-Review 2026-08-23).
+                    if send_push(config, title=event.trigger, message=event.message, priority="max"):
+                        pushed_kritisch[event.dedup_key] = event.trigger
                 last_shown[event.dedup_key] = now.isoformat(timespec="seconds")
                 state["history"].append(event.to_dict())
+            pushed_kritisch_changed = pushed_kritisch != pushed_kritisch_before
             state["last_shown"] = last_shown
-            if candidates:
+            state["pushed_kritisch"] = pushed_kritisch
+            # War bisher an "if candidates" gekoppelt - dadurch ginge eine reine
+            # pushed_kritisch-Aenderung (z.B. ein geloestes kritisches Ereignis, das
+            # den Marker zuruecksetzt) verloren, sobald in demselben Zyklus sonst
+            # nichts anzuzeigen ist.
+            if candidates or pushed_kritisch_changed:
                 self._save_state(state)
 
         return candidates
@@ -249,6 +316,12 @@ class ProactivityEngine:
             state.setdefault("snoozed_until", {})[dedup_key] = (
                 datetime.now() + timedelta(minutes=minutes)
             ).isoformat(timespec="seconds")
+            # Snoozen heisst "spaeter nochmal zeigen" - ein zuvor gepushtes kritisches
+            # Ereignis soll nach Ablauf der Schlummerzeit auch wieder pushen duerfen,
+            # sonst bliebe pushed_kritisch (siehe evaluate()) dauerhaft "verbraucht".
+            pushed_kritisch = dict(state.get("pushed_kritisch") or {})
+            pushed_kritisch.pop(dedup_key, None)
+            state["pushed_kritisch"] = pushed_kritisch
             self._save_state(state)
 
     def dismiss_forever(self, dedup_key: str) -> None:

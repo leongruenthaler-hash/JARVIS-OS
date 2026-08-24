@@ -74,6 +74,7 @@ from mail_client import (
     unread_inbox_count,
 )
 from mail_calendar_actions import _extract_datetime
+from push_notify import send_push
 from core.action_engine import ACTION_ENGINE, ActionProposal
 from core.context_engine import CONTEXT_ENGINE, active_context_pack
 from core.conversation_manager import ConversationManager
@@ -277,6 +278,13 @@ PENDING_CLEANUP_CONFIRMATION_TTL_SECONDS = 30 * 60
 # Adversarial-Review 2026-08-23).
 PENDING_LIEFERANDO_OPEN_TTL_SECONDS = 300
 
+# Wie lange ein vorgeschlagenes "Tisch bei <Restaurant> reservieren?" noch per
+# "ja" im Chat bestaetigt werden kann - exakt dasselbe Muster/derselbe Grund
+# wie PENDING_LIEFERANDO_OPEN_TTL_SECONDS. Betrifft NUR den Chat-"ja"-Pfad -
+# der Push-Kanal (send_push() mit "Click"-URL) oeffnet die vorausgefuellte
+# TheFork-Seite direkt beim Antippen, unabhaengig von dieser TTL.
+PENDING_RESERVATION_OPEN_TTL_SECONDS = 300
+
 
 def ensure_permission(memory: Memory, permission: str, action_summary: str) -> str | None:
     if not permissions_required():
@@ -338,8 +346,8 @@ def handle_privacy_command(memory: Memory, text: str) -> str | None:
     # loeste z.B. "deaktiviere dateien" faelschlich grant_match aus (der VOR
     # revoke_match geprueft wird) und hat die Berechtigung erlaubt statt
     # entzogen - in der Praxis so gefunden.
-    grant_match = re.search(r"\b(?:erlaube|aktiviere)\s+(mail|kalender|erinnerungen|kontakte|dateien|mikrofon|kamera|standort|internet|fotos|photos|bildschirm|ki|cloud|speicher|memory|lieferando)", normalized)
-    revoke_match = re.search(r"\b(?:deaktiviere|verbiete|entziehe)\s+(mail|kalender|erinnerungen|kontakte|dateien|mikrofon|kamera|standort|internet|fotos|photos|bildschirm|ki|cloud|speicher|memory|lieferando)", normalized)
+    grant_match = re.search(r"\b(?:erlaube|aktiviere)\s+(mail|kalender|erinnerungen|kontakte|dateien|mikrofon|kamera|standort|internet|fotos|photos|bildschirm|ki|cloud|speicher|memory|lieferando|reservierung)", normalized)
+    revoke_match = re.search(r"\b(?:deaktiviere|verbiete|entziehe)\s+(mail|kalender|erinnerungen|kontakte|dateien|mikrofon|kamera|standort|internet|fotos|photos|bildschirm|ki|cloud|speicher|memory|lieferando|reservierung)", normalized)
     mapping = {
         "mikrofon": "microphone",
         "kamera": "camera",
@@ -362,6 +370,7 @@ def handle_privacy_command(memory: Memory, text: str) -> str | None:
         "mail": "mail",
         "internet": "internet",
         "lieferando": "food",
+        "reservierung": "reservation",
     }
     if grant_match:
         permission = mapping.get(grant_match.group(1))
@@ -882,6 +891,17 @@ DOMAIN_TERMS = {
         "essen bestellen",
         "liefern lassen",
         "was liefern lassen",
+    ),
+    # Gleiche Vorsicht wie bei "food": enge Phrasen statt generischem "tisch"/
+    # "reservieren" allein - siehe handle_reservation_command(), oeffnet nach
+    # Bestaetigung nur die vorausgefuellte TheFork-Seite, reserviert selbst
+    # nichts endgueltig.
+    "reservation": (
+        "tisch reservieren",
+        "reservierung",
+        "tisch buchen",
+        "reserviere einen tisch",
+        "reserviere mir einen tisch",
     ),
     "music": (
         "musik",
@@ -2983,6 +3003,7 @@ def has_pending_action(memory: Memory) -> bool:
         "pending_mail_calendar_confirmation",
         "pending_cleanup_confirmation",
         "pending_lieferando_open",
+        "pending_reservation_open",
     )
     return any(isinstance(settings.get(key), dict) for key in pending_keys)
 
@@ -3039,6 +3060,7 @@ def pending_action_matches_text(settings: dict, normalized_text: str) -> bool:
         "pending_mail_calendar_confirmation": ("kalender", "termin", "termine", "vorschlag", "vorschläge", "vorschlaege", "eintragen", "mail", "mails"),
         "pending_cleanup_confirmation": ("papierkorb", "löschen", "loeschen", "datei", "dateien", "speicherplatz", "aufräumen", "aufraeumen"),
         "pending_lieferando_open": ("lieferando", "lieferdienst", "essen", "bestellen"),
+        "pending_reservation_open": ("tisch", "reservier", "thefork", "restaurant"),
     }
 
     for key, terms in context_by_key.items():
@@ -3959,6 +3981,23 @@ def handle_pending_action_flow(
                     photo_worker=photo_worker,
                 )
             return None
+        # Berechtigung wird VOR dem urspruenglichen Vorschlag (handle_food_command())
+        # geprueft, aber nicht mehr hier beim Ausfuehren - ein zwischenzeitlicher
+        # Entzug (Datenschutz-Dashboard/Sprachbefehl "deaktiviere lieferando"),
+        # waehrend die Bestaetigung noch offen stand, wuerde sonst trotzdem
+        # ausgefuehrt, weil handle_pending_action_flow() VOR dem regulaeren
+        # Berechtigungs-Check in der Domaenen-Dispatch-Kette laeuft (Codex-Review
+        # 2026-08-23, analog zum gleichen Fund fuer die Reservierung).
+        if is_confirm and permissions_required() and not PermissionManager().is_allowed("food"):
+            settings.pop("pending_lieferando_open", None)
+            memory.set("settings", settings)
+            return _continue_multistep_chain_if_pending(
+                memory,
+                "pending_lieferando_open",
+                "Die Berechtigung für Lieferando wurde inzwischen entzogen. Ich öffne nichts.",
+                aborted=True,
+                photo_worker=photo_worker,
+            )
         result = ACTION_ENGINE.resolve(
             memory,
             "pending_lieferando_open",
@@ -3971,6 +4010,50 @@ def handle_pending_action_flow(
         )
         if is_confirm or is_cancel:
             return _continue_multistep_chain_if_pending(memory, "pending_lieferando_open", result, aborted=is_cancel, photo_worker=photo_worker)
+        return result
+
+    pending_reservation_open = settings.get("pending_reservation_open")
+    if isinstance(pending_reservation_open, dict):
+        set_at = pending_reservation_open.get("set_at")
+        age_seconds = (time.time() - set_at) if isinstance(set_at, (int, float)) else None
+        if age_seconds is None or age_seconds > PENDING_RESERVATION_OPEN_TTL_SECONDS:
+            settings.pop("pending_reservation_open", None)
+            memory.set("settings", settings)
+            if is_confirm or is_cancel:
+                return _continue_multistep_chain_if_pending(
+                    memory,
+                    "pending_reservation_open",
+                    "Der Reservierungs-Vorschlag ist inzwischen abgelaufen. Sag es mir noch einmal, falls du ihn öffnen möchtest.",
+                    aborted=True,
+                    photo_worker=photo_worker,
+                )
+            return None
+        # Siehe gleicher Kommentar oben bei pending_lieferando_open - Berechtigung
+        # muss auch beim Ausfuehren einer offenen Bestaetigung erneut geprueft
+        # werden, nicht nur beim urspruenglichen Vorschlag (Codex-Review
+        # 2026-08-23).
+        if is_confirm and permissions_required() and not PermissionManager().is_allowed("reservation"):
+            settings.pop("pending_reservation_open", None)
+            memory.set("settings", settings)
+            return _continue_multistep_chain_if_pending(
+                memory,
+                "pending_reservation_open",
+                "Die Berechtigung für Reservierungen wurde inzwischen entzogen. Ich öffne nichts.",
+                aborted=True,
+                photo_worker=photo_worker,
+            )
+        result = ACTION_ENGINE.resolve(
+            memory,
+            "pending_reservation_open",
+            pending_reservation_open,
+            action_type="open_url",
+            is_confirm=is_confirm,
+            is_cancel=is_cancel,
+            cancel_message="Alles klar, ich bereite nichts vor.",
+            waiting_message="Ich warte noch auf deine Bestätigung. Sag ja zum Öffnen oder abbrechen.",
+        )
+        if is_confirm or is_cancel:
+            return _continue_multistep_chain_if_pending(memory, "pending_reservation_open", result, aborted=is_cancel, photo_worker=photo_worker)
         return result
 
     pending_calendar_delete = settings.get("pending_calendar_delete")
@@ -6161,6 +6244,258 @@ def execute_open_url(data: dict) -> str:
 ACTION_ENGINE.register("open_url", execute_open_url)
 
 
+_RESTAURANT_URL_RE = re.compile(r"(https?://(?:www\.)?thefork\.[a-z]+/restaurant/[a-zA-Z0-9\-]+)")
+# "für"/"mit" optional (nicht nur als Praefix erlaubt) - eine Folgeantwort auf
+# "Fuer wie viele Personen...?" lautet natuerlicherweise oft schlicht "2
+# Personen" statt "fuer 2 Personen"; ohne den optionalen Praefix waere das
+# durchgefallen und haette die Frage endlos wiederholt (Codex-Review
+# 2026-08-23).
+_PARTY_SIZE_RE = re.compile(r"(?:für|mit)?\s*(\d{1,2})\s*(?:personen|leute|gäste|erwachsene)", re.IGNORECASE)
+
+
+def _known_restaurant(memory: Memory, hint: str = "") -> tuple[str, str] | None:
+    """Liefert (Anzeigename, TheFork-Basis-URL ohne Query-Parameter) aus einem
+    gespeicherten "Restaurant"-Fakt, oder None wenn noch keiner hinterlegt ist.
+    `hint` (z.B. ein im Nutzertext erwaehnter Name) bevorzugt einen passenden
+    Fakt, falls mehrere Restaurants hinterlegt sind - sonst wird der erste
+    genommen (in der Praxis meist ohnehin nur eines, siehe Plan)."""
+    candidates: list[tuple[str, str]] = []
+    for fact in memory.search_facts("Restaurant"):
+        if fact.get("status", "confirmed") == "pending_confirmation":
+            continue
+        content = str(fact.get("content") or "")
+        match = _RESTAURANT_URL_RE.search(content)
+        if not match:
+            continue
+        url = match.group(1).split("?")[0]
+        name = content.replace(match.group(1), "").strip(" :,-–")
+        # Fuehrendes "Restaurant"-Label entfernen (aus dem dokumentierten Fakt-Format
+        # "Restaurant <Name>: <URL>") - sonst enthaelt name z.B. "Restaurant Hans im
+        # Glück", was gegen einen natuerlich gesprochenen Hinweis wie "bei Hans im
+        # Glück" nie matcht (Codex-Review 2026-08-23, wurde durch den Ein-Restaurant-
+        # Testfall zunaechst maskiert).
+        name = re.sub(r"^restaurant\s+", "", name, flags=re.IGNORECASE).strip(" :,-–") or "das hinterlegte Restaurant"
+        candidates.append((name, url))
+    if not candidates:
+        return None
+    # Bugfix (Codex-Adversarial-Review 2026-08-23): war urspruenglich verkehrt herum
+    # (hint_normalized in normalize_text(name)) - das prueft, ob der GESAMTE
+    # Nutzersatz Teil des kurzen Restaurantnamens ist, was praktisch nie zutrifft
+    # und deshalb immer stillschweigend candidates[0] zurueckgab, selbst wenn der
+    # Nutzer ausdruecklich ein ANDERES Restaurant genannt hat. Richtig ist die
+    # umgekehrte Richtung: der (kurze) Restaurantname muss im (langen) Nutzersatz
+    # vorkommen.
+    hint_normalized = normalize_text(hint) if hint else ""
+    if hint_normalized:
+        for name, url in candidates:
+            if normalize_text(name) in hint_normalized:
+                return name, url
+        # Kein Kandidat passt zum Hinweis - das galt bisher nur bei MEHREREN
+        # hinterlegten Restaurants als Grund zum Nachfragen; bei nur einem
+        # hinterlegten Restaurant fiel der Code trotzdem auf candidates[0]
+        # zurueck. Das ist gefaehrlich, sobald der Nutzer AUSDRUECKLICH ein
+        # anderes, nicht hinterlegtes Restaurant nennt ("reserviere bei Pizza
+        # Blitz") - dann wuerde stillschweigend fuer das falsche (einzige
+        # bekannte) Restaurant reserviert. Ohne echte NLU laesst sich "kein
+        # Name genannt" nicht perfekt von "ein unbekannter Name genannt"
+        # unterscheiden - als pragmatische Heuristik: enthaelt der Hinweis
+        # "bei ...", scheint ein Name gemeint zu sein, der nicht passt -
+        # dann nachfragen statt raten (Codex-Review 2026-08-23).
+        if len(candidates) > 1 or " bei " in f" {hint_normalized} ":
+            return None
+    return candidates[0]
+
+
+# Erkennt eine Slot-Fuellungs-Antwort auf eine offene Reservierungs-Rueckfrage
+# ("Um wie viel Uhr...?" -> "19 Uhr", "Fuer wie viele Personen?" -> "2") - ohne
+# das wuerde eine solche kurze Folgenachricht has_domain(text, "reservation")
+# nicht matchen und die Anfrage haenge tot, der Nutzer muesste alles nochmal
+# von vorn sagen (Codex-Review 2026-08-23).
+_RESERVATION_CONTINUATION_RE = re.compile(
+    r"\d|uhr|personen|leute|gäste|erwachsene|heute|morgen|übermorgen|"
+    r"montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag",
+    re.IGNORECASE,
+)
+
+PENDING_RESERVATION_DETAILS_TTL_SECONDS = 300
+
+
+def handle_reservation_command(text: str, memory: Memory | None = None) -> str | None:
+    """Bereitet eine Tischreservierung bei TheFork vor (Datum/Uhrzeit/
+    Personenzahl vorausgefuellt per URL-Parameter) und schickt die
+    Bestaetigung zusaetzlich als Push mit Klick-Link aufs iPhone - siehe Plan
+    "Push-Kanal (Tailscale + ntfy) und TheFork-Tischreservierung". Reserviert
+    selbst nichts endgueltig: TheFork blockt automatisierte finale Buchungen
+    (403 + React-Hydration-Fehler live beobachtet), genau wie Lieferando -
+    der letzte "Reservieren"-Klick bleibt bewusst bei Leon.
+
+    Fehlt eine Angabe (Restaurant/Datum/Uhrzeit/Personenzahl), fragt die
+    Funktion EINE Sache nach und merkt sich den bisherigen Text als
+    "pending_reservation_details" - die naechste Nachricht wird an den
+    bisherigen Text angehaengt und die komplette Extraktion (Restaurant,
+    _extract_datetime, Personenzahl) laeuft erneut auf dem Gesamttext, statt
+    eine eigene Merge-Logik pro Feld zu brauchen."""
+    if memory is None:
+        return None
+
+    settings = memory.get("settings") or {}
+    pending_details = settings.get("pending_reservation_details")
+    has_pending = isinstance(pending_details, dict)
+
+    if has_pending:
+        set_at = pending_details.get("set_at")
+        age_seconds = (time.time() - set_at) if isinstance(set_at, (int, float)) else None
+        if age_seconds is None or age_seconds > PENDING_RESERVATION_DETAILS_TTL_SECONDS:
+            settings.pop("pending_reservation_details", None)
+            memory.set("settings", settings)
+            has_pending = False
+            pending_details = None
+
+    if not has_pending and not has_domain(text, "reservation"):
+        return None
+
+    if has_pending and not has_domain(text, "reservation") and not _RESERVATION_CONTINUATION_RE.search(text):
+        # _RESERVATION_CONTINUATION_RE matcht Zeit-/Personenzahl-Antworten, aber
+        # keinen blossen Restaurantnamen ("Hans im Glück" auf "Welches Restaurant
+        # meinst du?") - zusaetzlich pruefen, ob die neue Nachricht ein Restaurant
+        # aufloesbar macht, das vorher noch nicht bekannt war, sonst waere genau
+        # diese Rueckfrage nie beantwortbar gewesen (Codex-Review 2026-08-23).
+        newly_resolves_restaurant = (
+            _known_restaurant(memory, hint=text) is not None
+            and _known_restaurant(memory, hint=pending_details["accumulated_text"]) is None
+        )
+        if not newly_resolves_restaurant:
+            # Sieht nicht nach einer Antwort auf die offene Rueckfrage aus (z.B.
+            # der Nutzer wechselt einfach das Thema) - Anfrage verwerfen statt
+            # eine unzusammenhaengende Nachricht hineinzuziehen, gleiches Muster
+            # wie pending_calendar_create bei einer neuen, unabhaengigen Anfrage.
+            settings.pop("pending_reservation_details", None)
+            memory.set("settings", settings)
+            return None
+
+    accumulated_text = f"{pending_details['accumulated_text']} {text}" if has_pending else text
+    conversation_started_at = pending_details["set_at"] if has_pending else time.time()
+
+    def _ask(question: str) -> str:
+        settings["pending_reservation_details"] = {
+            "accumulated_text": accumulated_text,
+            "set_at": conversation_started_at,
+        }
+        memory.set("settings", settings)
+        return question
+
+    restaurant = _known_restaurant(memory, hint=accumulated_text)
+    if restaurant is None:
+        # Hat der Nutzer gerade einen TheFork-Link geschickt (z.B. als Antwort auf
+        # genau diese Rueckfrage) - direkt als Restaurant-Fakt merken, statt nur zu
+        # versprechen "ich merke ihn mir" und die Frage trotzdem endlos zu
+        # wiederholen, weil nichts den Link je gespeichert hat (Codex-Review
+        # 2026-08-23).
+        link_match = _RESTAURANT_URL_RE.search(accumulated_text)
+        if link_match:
+            memory.remember_fact(f"Restaurant: {link_match.group(1)}", category="facts")
+            restaurant = _known_restaurant(memory, hint=accumulated_text)
+        if restaurant is None:
+            return _ask("Welches Restaurant meinst du? Sag mir den Namen genauer, oder schick mir einmal den TheFork-Link, dann merke ich ihn mir.")
+    name, base_url = restaurant
+
+    parsed = _extract_datetime(accumulated_text, CONFIG)
+    if parsed is None:
+        return _ask(f"Für welchen Tag und welche Uhrzeit soll ich bei {name} reservieren?")
+    when, has_time = parsed
+    if not has_time:
+        return _ask(f"Um wie viel Uhr soll ich bei {name} reservieren?")
+    if when < datetime.now():
+        # _extract_datetime() gibt fuer "heute" immer den heutigen Tag zurueck,
+        # unabhaengig davon, ob die genannte Uhrzeit schon vorbei ist (geteilte
+        # Funktion, auch fuer Kalender-/Erinnerungs-Erstellung genutzt - hier
+        # bewusst lokal statt in der gemeinsamen Funktion abgefangen). Ohne
+        # diese Pruefung wuerde Jarvis eine Bestaetigung/einen Push fuer einen
+        # bereits verstrichenen Zeitpunkt vorbereiten (Codex-Review 2026-08-23).
+        #
+        # BEKANNTE EINSCHRAENKUNG: anders als bei der Personenzahl (siehe unten)
+        # wird die abgelehnte Zeitangabe hier NICHT aus accumulated_text entfernt -
+        # _extract_datetime()/._extract_time() liefern keine Match-Position, nur
+        # den fertigen Wert, ein sauberes Herausschneiden wuerde deren interne
+        # Regexe hier duplizieren muessen. Eine Korrektur-Antwort mit neuer
+        # Uhrzeit koennte deshalb weiterhin an der alten (per re.search() zuerst
+        # gefundenen) Zeitangabe scheitern - der Nutzer muesste die Anfrage dann
+        # neu stellen statt zu korrigieren. Bewusst nicht geloest (Aufwand/Nutzen),
+        # siehe Session-Notizen 2026-08-23.
+        return _ask(f"Diese Uhrzeit ist heute schon vorbei - für wann soll ich bei {name} stattdessen reservieren?")
+
+    party_match = _PARTY_SIZE_RE.search(accumulated_text)
+    if party_match:
+        party_size = int(party_match.group(1))
+    else:
+        # Restaurant und Datum/Uhrzeit stehen an dieser Stelle schon fest - fehlt
+        # nur noch die Personenzahl, ist eine blanke Zahl als Antwort ("2" auf
+        # "Für wie viele Personen...?") eindeutig und die natuerlichste Antwort
+        # ueberhaupt. Ohne diesen Fallback wuerde genau diese Antwort die Frage
+        # endlos wiederholen, weil _PARTY_SIZE_RE eine Formulierung mit "für"/
+        # "Personen" verlangt (Codex-Review 2026-08-23). Bewusst nur auf DIESER
+        # (der neuesten, nicht der aufaddierten) Nachricht geprueft, damit keine
+        # zufaellige Zahl aus einer frueheren Nachricht im Kontext (z.B. aus dem
+        # Datum) faelschlich als Personenzahl gelesen wird.
+        bare_number = re.fullmatch(r"\s*(\d{1,2})\s*", text)
+        party_size = int(bare_number.group(1)) if bare_number else 0
+    # 0 wuerde sonst unbemerkt in die TheFork-URL rutschen (z.B. bei einem
+    # Spracherkennungs-Ausrutscher "fuer 0 Personen") - keine echte Reservierung,
+    # also nachfragen statt eine sinnlose Bestaetigung zu zeigen (Codex-
+    # Adversarial-Review 2026-08-23).
+    if not (1 <= party_size <= 30):
+        if party_match:
+            # Eine bereits genannte, aber ungueltige Personenzahl (z.B. "fuer 0
+            # Personen") darf nicht im aufaddierten Text stehen bleiben - sonst
+            # findet die naechste Extraktion per re.search() (immer das ERSTE
+            # Vorkommen) weiterhin den alten falschen Wert, und eine Korrektur-
+            # Antwort ("2") kaeme nie an - die Frage wiederholte sich endlos bis
+            # zum Ablauf der TTL (Codex-Review 2026-08-23).
+            accumulated_text = accumulated_text[: party_match.start()] + accumulated_text[party_match.end() :]
+        return _ask(f"Für wie viele Personen soll ich bei {name} reservieren?")
+
+    settings.pop("pending_reservation_details", None)
+    memory.set("settings", settings)
+
+    hour_minutes = when.hour * 60 + when.minute
+    url = f"{base_url}?date={when.strftime('%Y-%m-%d')}&hour={hour_minutes}&partySize={party_size}"
+    date_label = when.strftime("%d.%m.%Y")
+    time_label = when.strftime("%H:%M")
+
+    confirm_prompt = (
+        f"Soll ich eine Tischreservierung bei {name} vorbereiten - {date_label} um {time_label} Uhr, "
+        f"{party_size} Personen? Ich kann dort nicht selbst final reservieren - du bestätigst den "
+        "letzten Schritt auf der TheFork-Seite selbst. Sag ja oder abbrechen."
+    )
+    result = ACTION_ENGINE.propose(
+        memory,
+        "pending_reservation_open",
+        ActionProposal(
+            action_type="open_url",
+            execution_data={"url": url, "label": f"TheFork für {name}", "set_at": time.time()},
+            confirm_prompt=confirm_prompt,
+        ),
+    )
+    # Push ist best-effort und darf den Chat-Bestaetigungsfluss nie beeintraechtigen -
+    # send_push() faengt Nichterreichbarkeit/fehlende Konfiguration zwar bereits intern
+    # ab, wartet bei einem konfigurierten, aber gerade nicht erreichbaren ntfy-Server
+    # (Mac Mini aus, Tailscale weg) jedoch bis zu dessen Timeout - das wuerde sonst
+    # genau diese Live-Chat-Antwort spuerbar verzoegern. Der Rueckgabewert wird hier
+    # ohnehin nicht ausgewertet, deshalb im Hintergrund-Thread feuern statt zu warten
+    # (Codex-Review 2026-08-23).
+    threading.Thread(
+        target=send_push,
+        kwargs={
+            "config": CONFIG,
+            "title": f"Tisch bei {name}?",
+            "message": f"{date_label} um {time_label} Uhr, {party_size} Personen - antippen zum Reservieren.",
+            "url": url,
+        },
+        daemon=True,
+    ).start()
+    return result
+
+
 def extract_call_contact_name(text: str) -> str:
     patterns = (
         r"(?:ruf|rufe|rufen|hof|anruf|anrufen|telefonier|telefoniere)\s+(?:bitte\s+)?(?:mal\s+)?(?:den\s+|die\s+|das\s+)?(.+?)(?:\s+an)?[.?!]*$",
@@ -7717,6 +8052,25 @@ def answer_message(
     if food_answer is not None:
         record_exchange(memory, question, food_answer)
         return _result(food_answer, mail_followup=False)
+
+    # Auch bei einer laufenden Mehrschritt-Rueckfrage (pending_reservation_details,
+    # siehe handle_reservation_command) muss die Berechtigung erneut geprueft
+    # werden - has_domain(question, "reservation") matcht eine kurze Folgeantwort
+    # wie "19 Uhr" nicht, ohne diesen Zusatz-Check koennte ein zwischenzeitlicher
+    # Berechtigungsentzug (Datenschutz-Dashboard/Sprachbefehl) waehrend eines
+    # laufenden Dialogs uebergangen werden (Codex-Review 2026-08-23).
+    reservation_in_progress = bool((memory.get("settings") or {}).get("pending_reservation_details"))
+    reservation_permission = (
+        ensure_privacy_domain_permission(memory, "reservation", "Jarvis würde eine Tischreservierung bei TheFork vorbereiten - reserviert selbst nichts endgültig.")
+        if has_domain(question, "reservation") or reservation_in_progress
+        else None
+    )
+    if reservation_permission is not None:
+        return _result(reservation_permission)
+    reservation_answer = handle_reservation_command(question, memory=memory)
+    if reservation_answer is not None:
+        record_exchange(memory, question, reservation_answer)
+        return _result(reservation_answer, mail_followup=False)
 
     music_permission = ensure_privacy_domain_permission(memory, "music", "Jarvis würde Apple Music oder die Musik-Wiedergabe steuern.") if has_domain(question, "music") else None
     if music_permission is not None:
