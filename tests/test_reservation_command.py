@@ -120,9 +120,10 @@ def test_pasted_thefork_link_gets_remembered_instead_of_looping(memory):
     second = jarvis.handle_reservation_command(
         "https://www.thefork.de/restaurant/hans-im-gluck-burgergrill-bar-amberg-spitalkirche-r615551", memory=memory
     )
-    # Restaurant jetzt bekannt, aber Datum/Uhrzeit/Personenzahl fehlen noch -
-    # keine Endlosschleife bei derselben Frage mehr.
-    assert "restaurant" not in second.lower() or "tag" in second.lower() or "uhrzeit" in second.lower()
+    # Restaurant jetzt bekannt, aber Personenzahl/Datum/Uhrzeit fehlen noch -
+    # keine Endlosschleife bei derselben Frage mehr (Personenzahl kommt zuerst
+    # dran, siehe fetch_available_time_slots()-Integration).
+    assert "personen" in second.lower()
     facts = memory.search_facts("Restaurant")
     assert any("hans-im-gluck-burgergrill-bar-amberg-spitalkirche" in f.get("content", "") for f in facts)
 
@@ -216,29 +217,216 @@ def test_happy_path_proposes_and_sends_push_with_prefilled_url(memory):
 
 
 def test_followup_answers_complete_the_reservation_across_turns(memory):
-    # Regression: eine kurze Folgeantwort wie "19 Uhr" oder "2 Personen" matcht
+    # Regression: eine kurze Folgeantwort wie "2 Personen" oder "19 Uhr" matcht
     # has_domain(text, "reservation") nicht - ohne den pending_reservation_details-
     # Mechanismus wuerde die Anfrage tot enden und der Nutzer muesste alles
-    # nochmal von vorn sagen (Codex-Review 2026-08-23).
+    # nochmal von vorn sagen (Codex-Review 2026-08-23). fetch_available_time_slots()
+    # wird gemockt (gibt None zurueck, wie ein nicht erreichbares Safari) - das
+    # AppleScript/Safari-Verhalten selbst wird in test_thefork_client.py getestet,
+    # nicht hier.
     _remember_restaurant(memory)
 
-    first = jarvis.handle_reservation_command("reserviere einen tisch bei Hans im Glück heute", memory=memory)
-    assert "uhr" in first.lower()
-    assert memory.get("settings").get("pending_reservation_details") is not None
+    with patch.object(jarvis.thefork_client, "fetch_available_time_slots", return_value=None):
+        first = jarvis.handle_reservation_command("reserviere einen tisch bei Hans im Glück morgen", memory=memory)
+        assert "personen" in first.lower()
+        assert memory.get("settings").get("pending_reservation_details") is not None
 
-    second = jarvis.handle_reservation_command("19 Uhr", memory=memory)
-    assert "personen" in second.lower()
-    assert memory.get("settings").get("pending_reservation_details") is not None
+        second = jarvis.handle_reservation_command("2 Personen", memory=memory)
+        assert "uhr" in second.lower()
+        assert memory.get("settings").get("pending_reservation_details") is not None
 
-    with patch.object(jarvis, "send_push", return_value=True):
-        third = jarvis.handle_reservation_command("für 2 Personen", memory=memory)
+        with patch.object(jarvis, "send_push", return_value=True):
+            third = jarvis.handle_reservation_command("19 Uhr", memory=memory)
 
     assert "hans im glück" in third.lower()
     assert memory.get("settings").get("pending_reservation_details") is None
+
+
+def test_available_times_are_offered_and_validated(memory):
+    # Kernanforderung: Jarvis soll echte verfuegbare Uhrzeiten nennen, der
+    # Nutzer waehlt eine, und nur eine tatsaechlich genannte Zeit wird
+    # akzeptiert (Plan "Echte TheFork-Verfuegbarkeit per Safari-
+    # Fernsteuerung", 2026-08-27).
+    _remember_restaurant(memory)
+
+    with patch.object(jarvis.thefork_client, "fetch_available_time_slots", return_value=["18:00", "19:00", "20:00"]) as fetch:
+        first = jarvis.handle_reservation_command("reserviere einen tisch bei Hans im Glück morgen für 2 Personen", memory=memory)
+        assert "18:00" in first and "19:00" in first and "20:00" in first
+        fetch.assert_called_once()
+        assert fetch.call_args.args[2] == 2  # party_size wurde vor der Abfrage schon aufgeloest
+
+        # Eine nicht genannte Uhrzeit wird abgelehnt, nicht stillschweigend uebernommen.
+        second = jarvis.handle_reservation_command("21 Uhr", memory=memory)
+        assert "nicht mehr frei" in second.lower()
+        assert "18:00" in second
+
+        with patch.object(jarvis, "send_push", return_value=True):
+            third = jarvis.handle_reservation_command("19 Uhr", memory=memory)
+
+    assert "hans im glück" in third.lower()
     pending = memory.get("settings").get("pending_reservation_open")
     assert pending is not None
     assert "hour=1140" in pending["url"]
     assert "partySize=2" in pending["url"]
+
+
+def test_empty_availability_is_not_treated_as_a_failed_lookup(memory):
+    # Regression: "if slots:" behandelte eine erfolgreiche, aber leere
+    # Verfuegbarkeits-Liste (Tag komplett ausgebucht) genauso wie eine
+    # fehlgeschlagene Abfrage - Jarvis haette danach blind jede genannte
+    # Uhrzeit akzeptiert, obwohl echt abgefragt bekannt war, dass keine frei
+    # ist (Codex-Review 2026-08-27, P2).
+    _remember_restaurant(memory)
+
+    with patch.object(jarvis.thefork_client, "fetch_available_time_slots", return_value=[]):
+        first = jarvis.handle_reservation_command("reserviere einen tisch bei Hans im Glück morgen für 2 Personen", memory=memory)
+        assert "nichts mehr frei" in first.lower()
+
+        # Egal welche Uhrzeit jetzt genannt wird - keine ist gueltig, eine
+        # Reservierung darf nicht vorbereitet werden.
+        second = jarvis.handle_reservation_command("19 Uhr", memory=memory)
+
+    assert "nichts mehr frei" in second.lower()
+
+
+def test_rejected_date_does_not_repeat_query_but_a_new_date_does(memory):
+    # Regression: das abgelehnte Datum blieb im aufaddierten Text stehen -
+    # eine Korrektur-Antwort mit einem neuen Tag haette _extract_datetime()
+    # trotzdem wieder auf das alte, bereits als ausgebucht bekannte Datum
+    # treffen lassen (Codex-Review 2026-08-27, dritte Runde). rejected_dates
+    # muss den bekannten Tag kurzschliessen (keine erneute Safari-Abfrage),
+    # ein WIRKLICH neuer Tag muss aber normal weiterlaufen.
+    _remember_restaurant(memory)
+
+    with patch.object(jarvis.thefork_client, "fetch_available_time_slots", return_value=[]) as fetch:
+        first = jarvis.handle_reservation_command("reserviere einen tisch bei Hans im Glück morgen für 2 Personen", memory=memory)
+        assert "nichts mehr frei" in first.lower()
+        fetch.assert_called_once()
+
+        # Derselbe (bereits abgelehnte) Tag nochmal genannt - keine neue Abfrage.
+        second = jarvis.handle_reservation_command("morgen", memory=memory)
+        assert "nichts mehr frei" in second.lower()
+        fetch.assert_called_once()  # weiterhin nur der erste Aufruf
+
+        # Ein WIRKLICH anderer Tag - muss eine neue, echte Abfrage ausloesen.
+        fetch.return_value = ["18:00"]
+        third = jarvis.handle_reservation_command("übermorgen", memory=memory)
+        assert "18:00" in third
+        assert fetch.call_count == 2
+    assert memory.get("settings").get("pending_reservation_open") is None
+
+
+def test_rejected_absolute_date_does_not_block_a_new_absolute_date(memory):
+    # Regression: _strip_resolved_relative_date_phrase() entfernte urspruenglich
+    # nur relative Formulierungen (heute/morgen/uebermorgen/Wochentage) - ein
+    # abgelehntes ABSOLUTES Datum (ISO-Format) blieb im aufaddierten Text stehen
+    # und _extract_datetime() fand es weiterhin zuerst, selbst wenn der Nutzer
+    # danach ein echt anderes absolutes Datum nannte (Codex-Review 2026-08-27,
+    # Folgerunde nach dem relativen Datums-Fix).
+    _remember_restaurant(memory)
+
+    with patch.object(jarvis.thefork_client, "fetch_available_time_slots", return_value=[]) as fetch:
+        first = jarvis.handle_reservation_command(
+            "reserviere einen tisch bei Hans im Glück am 2026-09-01 für 2 Personen", memory=memory
+        )
+        assert "nichts mehr frei" in first.lower()
+        fetch.assert_called_once()
+
+        fetch.return_value = ["18:00"]
+        second = jarvis.handle_reservation_command("am 2026-09-15", memory=memory)
+        assert "18:00" in second
+        assert fetch.call_count == 2
+
+
+def test_user_can_change_the_date_before_it_was_ever_rejected(memory):
+    # Regression: der Bug trat nicht nur NACH einer Ablehnung wegen
+    # Ausbuchung auf, sondern schon VORHER - sobald zwei unterschiedliche
+    # Datums-Woerter im aufaddierten Text stehen, gewann das eine mit
+    # hoeherer Prioritaet in _extract_relative_date() (z.B. "morgen") immer
+    # gegen ein spaeter genanntes anderes ("uebermorgen"), obwohl der Nutzer
+    # den Tag noch vor jeder Antwort auf verfuegbare Zeiten aendert (Codex-
+    # Review 2026-08-27, dritte Folgerunde).
+    _remember_restaurant(memory)
+
+    with patch.object(jarvis.thefork_client, "fetch_available_time_slots") as fetch:
+        fetch.return_value = ["18:00", "19:00"]
+        first = jarvis.handle_reservation_command("reserviere einen tisch bei Hans im Glück morgen für 2 Personen", memory=memory)
+        assert "18:00" in first
+        fetch.assert_called_once()
+
+        fetch.return_value = ["20:00"]
+        second = jarvis.handle_reservation_command("doch lieber übermorgen", memory=memory)
+        assert "20:00" in second
+        assert fetch.call_count == 2
+
+
+def test_time_paired_with_a_superseded_date_is_not_reused_for_the_new_date(memory):
+    # Regression: _resolve_latest_date() entfernte beim Ueberholen eines
+    # aelteren Datums nur das Datums-Wort selbst, nicht die daneben stehende
+    # Uhrzeit - "heute um 8 Uhr" (schon vorbei) gefolgt von einer Korrektur
+    # "morgen um 19 Uhr" loeste dann zwar korrekt auf MORGEN auf, aber
+    # _extract_time() fand ueber re.search() weiterhin zuerst die alte,
+    # eigentlich verworfene "8 Uhr" - die Reservierung waere fuer die
+    # falsche Uhrzeit vorbereitet worden (Codex-Review 2026-08-27, fuenfte
+    # Folgerunde).
+    _remember_restaurant(memory)
+
+    first = jarvis.handle_reservation_command(
+        "reserviere einen tisch bei Hans im Glück heute um 8 Uhr für 2 Personen", memory=memory
+    )
+    assert "schon vorbei" in first.lower()
+
+    second = jarvis.handle_reservation_command("morgen um 19 Uhr", memory=memory)
+    assert "19:00" in second
+    assert "08:00" not in second
+
+
+def test_time_removal_window_does_not_swallow_an_intervening_valid_date(memory):
+    # Regression: das Suchfenster um ein zu entfernendes altes Datum durfte
+    # eine naheliegende Uhrzeit mitreissen - stand dazwischen aber ein
+    # DRITTES, gueltiges Datum sehr nah beieinander (z.B. "morgen uebermorgen
+    # um 19 Uhr"), wurde das Fenster von "morgen" bis zur "19 Uhr" faelschlich
+    # ausgedehnt und riss das dazwischenliegende "uebermorgen" mit heraus -
+    # die eigentlich gueltige Korrektur ging dadurch komplett verloren
+    # (Codex-Review 2026-08-27, sechste Folgerunde).
+    _remember_restaurant(memory)
+
+    first = jarvis.handle_reservation_command(
+        "reserviere einen tisch bei Hans im Glück heute um 8 Uhr für 2 Personen", memory=memory
+    )
+    assert "schon vorbei" in first.lower()
+
+    second = jarvis.handle_reservation_command("morgen übermorgen um 19 Uhr", memory=memory)
+    assert "19:00" in second
+    assert "08:00" not in second
+
+
+def test_stale_availability_cache_is_not_used_for_a_different_corrected_date(memory):
+    # Regression: available_times wurde nicht danach gescoped, FUER WELCHES
+    # Datum es echt abgefragt wurde - nennt der Nutzer Datum UND Uhrzeit in
+    # einer Korrektur zusammen (z.B. "doch übermorgen um 19 Uhr" nach zuvor
+    # fuer "morgen" abgefragten Zeiten), ueberspringt has_time die neue
+    # Abfrage und die alte (fuer ein anderes Datum gueltige) Liste haette die
+    # neue Uhrzeit faelschlich validiert (Codex-Review 2026-08-27, vierte
+    # Folgerunde).
+    _remember_restaurant(memory)
+
+    with patch.object(jarvis.thefork_client, "fetch_available_time_slots", return_value=["19:00"]) as fetch:
+        first = jarvis.handle_reservation_command("reserviere einen tisch bei Hans im Glück morgen für 2 Personen", memory=memory)
+        assert "19:00" in first
+        fetch.assert_called_once()
+
+        # "19 Uhr" ist bei den fuer MORGEN abgefragten Zeiten gueltig, aber der
+        # Nutzer wechselt hier gleichzeitig auf UEBERMORGEN - fuer diesen Tag
+        # wurde nie echt geprueft, ob 19 Uhr wirklich frei ist. Die alte Liste
+        # darf das nicht mehr validieren (weder blind bestaetigen noch
+        # faelschlich als "nicht mehr frei" ablehnen) - das Verhalten faellt
+        # stattdessen auf den bestehenden, unvalidierten Bestaetigungs-Fluss
+        # zurueck (identisch zu einer allerersten Nachricht mit Datum+Uhrzeit
+        # zusammen, die ebenfalls nie live geprueft wird).
+        second = jarvis.handle_reservation_command("doch übermorgen um 19 Uhr", memory=memory)
+        assert "nicht mehr frei" not in second.lower()
+        assert "vorbereiten" in second.lower()
 
 
 def test_invalid_party_size_can_be_corrected(memory):

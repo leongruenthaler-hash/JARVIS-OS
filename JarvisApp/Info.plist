@@ -23,7 +23,7 @@
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>Jarvis nutzt Apple Events nur nach deiner Freigabe, um macOS-Apps wie Mail, Kalender, Musik, Kontakte, Erinnerungen, Notizen oder Fotos auf deinen Befehl hin zu steuern.</string>
+    <string>Jarvis nutzt Apple Events nur nach deiner Freigabe, um macOS-Apps wie Mail, Kalender, Musik, Kontakte, Erinnerungen, Notizen, Fotos oder Safari (für echte TheFork-Verfügbarkeit bei Tischreservierungen) auf deinen Befehl hin zu steuern.</string>
     <key>NSCalendarsFullAccessUsageDescription</key>
     <string>Jarvis benötigt Kalenderzugriff nur nach deiner Zustimmung, um Termine zu lesen oder mit deiner Bestätigung zu erstellen.</string>
     <key>NSCalendarsUsageDescription</key>

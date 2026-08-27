@@ -75,6 +75,7 @@ from mail_client import (
 )
 from mail_calendar_actions import _extract_datetime
 from push_notify import send_push
+import thefork_client
 from core.action_engine import ACTION_ENGINE, ActionProposal
 from core.context_engine import CONTEXT_ENGINE, active_context_pack
 from core.conversation_manager import ConversationManager
@@ -6319,6 +6320,122 @@ _RESERVATION_CONTINUATION_RE = re.compile(
 
 PENDING_RESERVATION_DETAILS_TTL_SECONDS = 300
 
+# Erkennt jede Datums-Formulierung, die _extract_datetime()/
+# _extract_relative_date() (siehe mail_calendar_actions.py) verstehen wuerde
+# (relative Woerter, ISO-Datum, numerisches Datum, Monatsnamen-Datum) - wird
+# NICHT genutzt, um nach Prioritaet zu entscheiden, sondern um ALLE
+# Vorkommen im aufaddierten Text zu finden und das ZULETZT genannte
+# (hoechste Text-Position) zu bevorzugen, siehe _resolve_latest_date()
+# unten. _extract_relative_date() selbst entscheidet nach einer FESTEN
+# Prioritaets-Reihenfolge (heute > morgen > uebermorgen > Wochentage, ISO >
+# numerisch > Monatsname) gegen den GESAMTEN Text, nicht nach Position -
+# eine Korrektur ("morgen" -> spaeter "doch uebermorgen") haette damit NIE
+# gewinnen koennen, weder vor noch nach einer Ablehnung wegen Ausbuchung
+# (eigener Regressionstest fuer den Fall NACH Ablehnung, 2026-08-27; von
+# Codex in einer Folgerunde ergaenzt: derselbe Bug tritt genauso VOR jeder
+# Ablehnung auf, sobald zwei unterschiedliche Datums-Woerter im Text stehen,
+# 2026-08-27). Die absoluten Muster laufen bewusst gegen den UNVERAENDERTEN
+# Originaltext (nicht gegen _normalize_umlauts(text) wie
+# _extract_datetime()s Monatsnamen-Zweig) - Positionen aus einer
+# umlaut-normalisierten Kopie (ä -> ae aendert die Laenge) liessen sich nicht
+# sicher auf den Originaltext zurueckrechnen, deshalb wird hier stattdessen
+# sowohl die Umlaut- als auch die ASCII-Ersatzschreibweise jedes Monatsnamens
+# direkt im Muster gefuehrt.
+_KNOWN_DATE_PHRASE_PATTERNS = (
+    re.compile(r"\b(?:heute)\b", re.IGNORECASE),
+    re.compile(r"\b(?:morgen)\b", re.IGNORECASE),
+    re.compile(r"\b(?:uebermorgen|übermorgen)\b", re.IGNORECASE),
+    re.compile(
+        r"\b(?:naechsten\s+|nächsten\s+)?"
+        r"(?:montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\b(20\d{2})-(\d{1,2})-(\d{1,2})\b"),
+    re.compile(r"\b([0-3]?\d)[.\/-]([01]?\d)(?:[.\/-]((?:20)?\d{2}))?\b"),
+    re.compile(
+        r"\b([0-3]?\d)\.?\s+"
+        r"(januar|jan|februar|feb|märz|maerz|mrz|april|apr|mai|juni|jun|juli|jul|"
+        r"august|aug|september|sep|oktober|okt|november|nov|dezember|dez)"
+        r"(?:\s+(20\d{2}))?\b",
+        re.IGNORECASE,
+    ),
+)
+
+# Erkennt die beiden von _extract_time() (mail_calendar_actions.py)
+# verstandenen Uhrzeit-Formate ("H:MM" und "H Uhr", optional mit "um") - wird
+# beim Entfernen eines ueberholten Datums in _resolve_latest_date() genutzt,
+# um eine UNMITTELBAR danebenstehende Uhrzeit gleich mit zu entfernen. Ohne
+# das wuerde eine Korrektur wie "morgen um 19 Uhr" nach zuvor abgelehntem
+# "heute um 8 Uhr" zwar das richtige NEUE Datum aufloesen, aber
+# _extract_time() faende ueber re.search() weiterhin zuerst die ALTE,
+# eigentlich schon verworfene "8 Uhr" - eine Reservierung fuer die falsche
+# Uhrzeit waere die Folge (Codex-Review 2026-08-27, fuenfte Folgerunde).
+_TIME_PHRASE_PATTERNS = (
+    re.compile(r"\b([01]?\d|2[0-3]):([0-5]\d)\b"),
+    re.compile(r"\b(?:um\s+)?([01]?\d|2[0-3])\s*uhr\b", re.IGNORECASE),
+)
+
+
+def _resolve_latest_date(accumulated_text: str, config: dict) -> tuple[datetime, bool] | None:
+    """Wie _extract_datetime(), aber bevorzugt bei MEHREREN erkannten
+    Datums-Formulierungen im Text konsequent die zuletzt genannte (hoechste
+    Position), nicht die mit der hoechsten Prioritaet in
+    _extract_relative_date()s fester Reihenfolge - siehe Kommentar bei
+    _KNOWN_DATE_PHRASE_PATTERNS oben. Bei hoechstens einer erkannten
+    Formulierung (der Normalfall) unveraendertes Verhalten wie
+    _extract_datetime()."""
+    matches: list[re.Match[str]] = []
+    for pattern in _KNOWN_DATE_PHRASE_PATTERNS:
+        for m in pattern.finditer(accumulated_text):
+            # Das numerische Muster ("D.M(.Y)?") matcht als TEILSTRING auch
+            # innerhalb eines ISO-Datums (z.B. "09-01" in "2026-09-01") - ohne
+            # diesen Ueberlapp-Check wuerde ein und dieselbe Datumsnennung als
+            # ZWEI verschiedene Vorkommen gezaehlt, das Entfernen des
+            # (fruehesten) ISO-Treffers loescht dann versehentlich auch den
+            # vermeintlich "spaeteren", tatsaechlich nur ueberlappenden
+            # numerischen Treffer mit - live per eigenem Regressionstest
+            # entdeckt (2026-08-27). Die Muster-Reihenfolge oben entspricht
+            # _extract_datetime()s eigener Prioritaet (relativ > ISO >
+            # numerisch > Monatsname) - bei einem Ueberlapp gewinnt deshalb
+            # hier wie dort das zuerst gelistete (hoeher priorisierte) Muster.
+            if any(m.start() < existing.end() and existing.start() < m.end() for existing in matches):
+                continue
+            matches.append(m)
+    if len(matches) <= 1:
+        return _extract_datetime(accumulated_text, config)
+    matches.sort(key=lambda m: m.start())
+    cleaned = accumulated_text
+    for match in sorted(matches[:-1], key=lambda m: m.start(), reverse=True):
+        start, end = match.start(), match.end()
+        # Eine unmittelbar benachbarte Uhrzeit-Formulierung ("morgen UM 19
+        # UHR", "UM 19 UHR morgen") gehoert semantisch zu diesem jetzt
+        # ueberholten Datum und muss mitentfernt werden - sonst faende
+        # _extract_time() ueber re.search() (immer das erste Vorkommen im
+        # GESAMTEN Text) weiterhin diese alte Zeit, selbst wenn das Datum
+        # bereits korrekt auf die neueste Nennung aufgeloest wird (siehe
+        # _TIME_PHRASE_PATTERNS oben). Fester, kleiner Suchradius statt des
+        # gesamten Texts, damit keine voellig unabhaengige Uhrzeit aus einer
+        # anderen Nachricht versehentlich mitgerissen wird.
+        # Das Suchfenster darf niemals ueber ein ANDERES erkanntes Datums-
+        # Muster hinausreichen - sonst koennte bei einer kurzen Nachricht wie
+        # "morgen uebermorgen um 19 Uhr" das Entfernen von "morgen" bis zur
+        # naheliegenden "19 Uhr" versehentlich auch das dazwischenliegende,
+        # eigentlich gueltige "uebermorgen" mitreissen und die Korrektur
+        # damit selbst zerstoeren (Codex-Review 2026-08-27, sechste
+        # Folgerunde).
+        left_bound = max((m.end() for m in matches if m is not match and m.end() <= start), default=0)
+        right_bound = min((m.start() for m in matches if m is not match and m.start() >= end), default=len(cleaned))
+        window_start = max(left_bound, start - 20)
+        window_end = min(right_bound, end + 20)
+        for time_pattern in _TIME_PHRASE_PATTERNS:
+            for tm in time_pattern.finditer(cleaned[window_start:window_end]):
+                abs_start, abs_end = window_start + tm.start(), window_start + tm.end()
+                if abs_start < end and abs_end > start:
+                    continue  # ueberlappt das Datums-Muster selbst
+                start, end = min(start, abs_start), max(end, abs_end)
+        cleaned = cleaned[:start] + cleaned[end:]
+    return _extract_datetime(cleaned, config)
+
 
 def handle_reservation_command(text: str, memory: Memory | None = None) -> str | None:
     """Bereitet eine Tischreservierung bei TheFork vor (Datum/Uhrzeit/
@@ -6334,7 +6451,15 @@ def handle_reservation_command(text: str, memory: Memory | None = None) -> str |
     "pending_reservation_details" - die naechste Nachricht wird an den
     bisherigen Text angehaengt und die komplette Extraktion (Restaurant,
     _extract_datetime, Personenzahl) laeuft erneut auf dem Gesamttext, statt
-    eine eigene Merge-Logik pro Feld zu brauchen."""
+    eine eigene Merge-Logik pro Feld zu brauchen.
+
+    Fehlt nur noch die Uhrzeit, fragt die Funktion nicht blind, sondern
+    versucht zuerst per thefork_client.fetch_available_time_slots() echte
+    Verfuegbarkeit abzufragen (Safari-Fernsteuerung, siehe Plan "Echte
+    TheFork-Verfuegbarkeit per Safari-Fernsteuerung") - klappt das nicht
+    (fehlende Berechtigung, TheFork blockt, Timeout), faellt es still auf die
+    bisherige, datenlose Rueckfrage zurueck. Klappt es, wird eine gewaehlte
+    Uhrzeit gegen die genannte Liste geprueft, nicht blind uebernommen."""
     if memory is None:
         return None
 
@@ -6375,11 +6500,36 @@ def handle_reservation_command(text: str, memory: Memory | None = None) -> str |
 
     accumulated_text = f"{pending_details['accumulated_text']} {text}" if has_pending else text
     conversation_started_at = pending_details["set_at"] if has_pending else time.time()
+    # Ueber Zugs hinweg gemerkte, tatsaechlich verfuegbare Uhrzeiten (siehe
+    # fetch_available_time_slots() unten) - None solange noch keine Abfrage
+    # gelaufen ist oder sie fehlgeschlagen ist (dann laeuft alles wie bisher
+    # ohne Live-Daten weiter).
+    available_times: list[str] | None = pending_details.get("available_times") if has_pending else None
+    # Das Datum, FUER DAS available_times echt abgefragt wurde - ohne das
+    # bliebe eine gemerkte Liste ueber einen Datums-Wechsel hinweg bestehen
+    # und wuerde eine neue Uhrzeit fuer ein ANDERES, nie abgefragtes Datum
+    # faelschlich gegen die alten (falschen) Zeiten validieren, z.B. bei
+    # "doch uebermorgen um 19 Uhr" nach zuvor fuer "morgen" abgefragten
+    # Zeiten (Codex-Review 2026-08-27, vierte Folgerunde). Wird unten sofort
+    # nach dem Aufloesen von `when` geprueft und die Liste bei einem
+    # abweichenden Datum verworfen, statt sie faelschlich weiterzuverwenden.
+    available_times_date: str | None = pending_details.get("available_times_date") if has_pending else None
+    # Tage, fuer die bereits echt (leer) abgefragt wurde - verhindert das exakte
+    # "erstes Vorkommen gewinnt"-Problem, das ein Text-Herausschneiden hier
+    # gehabt haette: _extract_relative_date() kennt viele Formate (heute/
+    # morgen/uebermorgen/Wochentage/ISO-Datum), die alle zu duplizieren waere
+    # unverhaeltnismaessig - stattdessen wird der bereits als leer bekannte Tag
+    # strukturiert gemerkt und beim naechsten Aufloesen direkt dagegen
+    # geprueft, ohne den Rohtext anfassen zu muessen (Codex-Review 2026-08-27).
+    rejected_dates: list[str] = (pending_details.get("rejected_dates") or []) if has_pending else []
 
     def _ask(question: str) -> str:
         settings["pending_reservation_details"] = {
             "accumulated_text": accumulated_text,
             "set_at": conversation_started_at,
+            "available_times": available_times,
+            "available_times_date": available_times_date,
+            "rejected_dates": rejected_dates,
         }
         memory.set("settings", settings)
         return question
@@ -6399,44 +6549,21 @@ def handle_reservation_command(text: str, memory: Memory | None = None) -> str |
             return _ask("Welches Restaurant meinst du? Sag mir den Namen genauer, oder schick mir einmal den TheFork-Link, dann merke ich ihn mir.")
     name, base_url = restaurant
 
-    parsed = _extract_datetime(accumulated_text, CONFIG)
-    if parsed is None:
-        return _ask(f"Für welchen Tag und welche Uhrzeit soll ich bei {name} reservieren?")
-    when, has_time = parsed
-    if not has_time:
-        return _ask(f"Um wie viel Uhr soll ich bei {name} reservieren?")
-    if when < datetime.now():
-        # _extract_datetime() gibt fuer "heute" immer den heutigen Tag zurueck,
-        # unabhaengig davon, ob die genannte Uhrzeit schon vorbei ist (geteilte
-        # Funktion, auch fuer Kalender-/Erinnerungs-Erstellung genutzt - hier
-        # bewusst lokal statt in der gemeinsamen Funktion abgefangen). Ohne
-        # diese Pruefung wuerde Jarvis eine Bestaetigung/einen Push fuer einen
-        # bereits verstrichenen Zeitpunkt vorbereiten (Codex-Review 2026-08-23).
-        #
-        # BEKANNTE EINSCHRAENKUNG: anders als bei der Personenzahl (siehe unten)
-        # wird die abgelehnte Zeitangabe hier NICHT aus accumulated_text entfernt -
-        # _extract_datetime()/._extract_time() liefern keine Match-Position, nur
-        # den fertigen Wert, ein sauberes Herausschneiden wuerde deren interne
-        # Regexe hier duplizieren muessen. Eine Korrektur-Antwort mit neuer
-        # Uhrzeit koennte deshalb weiterhin an der alten (per re.search() zuerst
-        # gefundenen) Zeitangabe scheitern - der Nutzer muesste die Anfrage dann
-        # neu stellen statt zu korrigieren. Bewusst nicht geloest (Aufwand/Nutzen),
-        # siehe Session-Notizen 2026-08-23.
-        return _ask(f"Diese Uhrzeit ist heute schon vorbei - für wann soll ich bei {name} stattdessen reservieren?")
-
+    # Personenzahl kommt bewusst VOR Datum/Uhrzeit dran (anders als in der
+    # natuerlichen Satzreihenfolge) - fetch_available_time_slots() unten
+    # braucht sie schon als Parameter fuer die Verfuegbarkeits-Abfrage.
     party_match = _PARTY_SIZE_RE.search(accumulated_text)
     if party_match:
         party_size = int(party_match.group(1))
     else:
-        # Restaurant und Datum/Uhrzeit stehen an dieser Stelle schon fest - fehlt
-        # nur noch die Personenzahl, ist eine blanke Zahl als Antwort ("2" auf
-        # "Für wie viele Personen...?") eindeutig und die natuerlichste Antwort
-        # ueberhaupt. Ohne diesen Fallback wuerde genau diese Antwort die Frage
-        # endlos wiederholen, weil _PARTY_SIZE_RE eine Formulierung mit "für"/
-        # "Personen" verlangt (Codex-Review 2026-08-23). Bewusst nur auf DIESER
-        # (der neuesten, nicht der aufaddierten) Nachricht geprueft, damit keine
-        # zufaellige Zahl aus einer frueheren Nachricht im Kontext (z.B. aus dem
-        # Datum) faelschlich als Personenzahl gelesen wird.
+        # Eine blanke Zahl als Antwort ("2" auf "Für wie viele Personen...?")
+        # ist eindeutig und die natuerlichste Antwort ueberhaupt. Ohne diesen
+        # Fallback wuerde genau diese Antwort die Frage endlos wiederholen,
+        # weil _PARTY_SIZE_RE eine Formulierung mit "für"/"Personen" verlangt
+        # (Codex-Review 2026-08-23). Bewusst nur auf DIESER (der neuesten,
+        # nicht der aufaddierten) Nachricht geprueft, damit keine zufaellige
+        # Zahl aus einer frueheren Nachricht im Kontext faelschlich als
+        # Personenzahl gelesen wird.
         bare_number = re.fullmatch(r"\s*(\d{1,2})\s*", text)
         party_size = int(bare_number.group(1)) if bare_number else 0
     # 0 wuerde sonst unbemerkt in die TheFork-URL rutschen (z.B. bei einem
@@ -6453,6 +6580,117 @@ def handle_reservation_command(text: str, memory: Memory | None = None) -> str |
             # zum Ablauf der TTL (Codex-Review 2026-08-23).
             accumulated_text = accumulated_text[: party_match.start()] + accumulated_text[party_match.end() :]
         return _ask(f"Für wie viele Personen soll ich bei {name} reservieren?")
+
+    parsed = _resolve_latest_date(accumulated_text, CONFIG)
+    if parsed is None:
+        return _ask(f"Für welchen Tag und welche Uhrzeit soll ich bei {name} reservieren?")
+    when, has_time = parsed
+    if available_times is not None and available_times_date != when.strftime("%Y-%m-%d"):
+        # Die gemerkte Verfuegbarkeit gilt nur fuer das Datum, fuer das sie
+        # tatsaechlich abgefragt wurde - loest sich das jetzt aufgeloeste
+        # Datum (z.B. durch eine Korrektur wie "doch uebermorgen um 19 Uhr")
+        # auf ein ANDERES Datum auf, ist die Liste wertlos und darf weder
+        # unten zur Zeit-Validierung noch als Grund fuer eine ausgelassene
+        # Live-Abfrage benutzt werden - sonst koennte eine fuer das alte
+        # Datum echte, fuer das neue Datum aber nie gepruefte Uhrzeit
+        # faelschlich akzeptiert werden (Codex-Review 2026-08-27, vierte
+        # Folgerunde).
+        available_times = None
+        available_times_date = None
+    if when.strftime("%Y-%m-%d") in rejected_dates:
+        # Dieser Tag wurde bereits echt abgefragt und war leer (siehe unten).
+        # _resolve_latest_date() bevorzugt bereits die ZULETZT genannte
+        # Datums-Formulierung im Text (nicht die mit der hoechsten Prioritaet
+        # in _extract_relative_date()s fester Reihenfolge) - ein wirklich
+        # neuer Tag waere hier also schon oben aufgeloest worden, gaebe es
+        # eine solche Formulierung im Text. Landet die Ausfuehrung trotzdem
+        # hier, hat der Nutzer keinen (erkennbaren) neuen Tag genannt - dann
+        # bleibt nur die Rueckfrage nach einem anderen Tag (Codex-Review
+        # 2026-08-27, mehrere Runden).
+        return _ask(f"Bei {name} ist an diesem Tag für {party_size} Personen leider nichts mehr frei. Für welchen anderen Tag soll ich schauen?")
+    if not has_time:
+        # Best-effort: echte Verfuegbarkeit bei TheFork abfragen (siehe
+        # thefork_client.py) statt blind nach einer Uhrzeit zu fragen. Jeder
+        # Fehlschlag (fehlende Safari-Berechtigung, TheFork blockt doch,
+        # Timeout) liefert None - dann faellt das Verhalten still auf die
+        # bisherige, datenlose Rueckfrage zurueck (Plan "Echte TheFork-
+        # Verfuegbarkeit per Safari-Fernsteuerung", 2026-08-27).
+        slots = thefork_client.fetch_available_time_slots(base_url, when.strftime("%Y-%m-%d"), party_size)
+        # "is not None" statt Wahrheitswert-Pruefung: eine erfolgreiche Abfrage
+        # OHNE freie Zeiten (leere Liste) ist ein ANDERER Fall als eine
+        # fehlgeschlagene Abfrage (None) - ein blosses "if slots:" haette
+        # beides gleich behandelt und bei echt ausgebuchten Tagen trotzdem
+        # blind nach einer Uhrzeit gefragt, die dann nie geprueft worden waere
+        # (Codex-Review 2026-08-27).
+        if slots is not None:
+            available_times = slots
+            available_times_date = when.strftime("%Y-%m-%d")
+            if slots:
+                return _ask(f"Diese Zeiten sind bei {name} noch frei: {', '.join(slots)}. Welche passt dir?")
+            rejected_dates = rejected_dates + [when.strftime("%Y-%m-%d")]
+            return _ask(f"Bei {name} ist an diesem Tag für {party_size} Personen leider nichts mehr frei. Für welchen anderen Tag soll ich schauen?")
+        return _ask(f"Um wie viel Uhr soll ich bei {name} reservieren?")
+    if when < datetime.now():
+        # _extract_datetime() gibt fuer "heute" immer den heutigen Tag zurueck,
+        # unabhaengig davon, ob die genannte Uhrzeit schon vorbei ist (geteilte
+        # Funktion, auch fuer Kalender-/Erinnerungs-Erstellung genutzt - hier
+        # bewusst lokal statt in der gemeinsamen Funktion abgefangen). Ohne
+        # diese Pruefung wuerde Jarvis eine Bestaetigung/einen Push fuer einen
+        # bereits verstrichenen Zeitpunkt vorbereiten (Codex-Review 2026-08-23).
+        #
+        # BEKANNTE EINSCHRAENKUNG: anders als bei der Personenzahl wird die
+        # abgelehnte Zeitangabe hier NICHT aus accumulated_text entfernt -
+        # _extract_datetime()/._extract_time() liefern keine Match-Position, nur
+        # den fertigen Wert, ein sauberes Herausschneiden wuerde deren interne
+        # Regexe hier duplizieren muessen. Eine Korrektur-Antwort mit neuer
+        # Uhrzeit koennte deshalb weiterhin an der alten (per re.search() zuerst
+        # gefundenen) Zeitangabe scheitern - der Nutzer muesste die Anfrage dann
+        # neu stellen statt zu korrigieren. Bewusst nicht geloest (Aufwand/Nutzen),
+        # siehe Session-Notizen 2026-08-23.
+        return _ask(f"Diese Uhrzeit ist heute schon vorbei - für wann soll ich bei {name} stattdessen reservieren?")
+    if available_times is not None and when.strftime("%H:%M") not in available_times:
+        # Verfuegbarkeit wurde oben schon einmal echt abgefragt und genannt -
+        # eine Uhrzeit ausserhalb dieser Liste waere keine echte Reservierung
+        # (das Widget wuerde sie beim finalen Klick ablehnen). Liste bleibt
+        # bestehen, damit die naechste Antwort wieder dagegen geprueft wird.
+        #
+        # BEWUSST KEINE erneute Live-Abfrage hier, wenn eine genannte Zeit
+        # AKZEPTIERT wird (TOCTOU: die Liste kann bis zu
+        # PENDING_RESERVATION_DETAILS_TTL_SECONDS alt sein) - eine zweite
+        # Safari-Runde wuerde die Latenz verdoppeln, und der eigentliche
+        # Sicherheitsnetz-Schritt ist ohnehin Leons eigener finaler Klick auf
+        # der echten TheFork-Seite, der die Wahrheit immer aktuell zeigt.
+        # Abgewogene Entscheidung, kein uebersehener Fall (Codex-Adversarial-
+        # Review 2026-08-27).
+        #
+        # Die abgelehnte Zeitangabe MUSS hier aus accumulated_text entfernt
+        # werden (anders als bei der "schon vorbei"-Ablehnung oben) - sonst
+        # findet re.search() bei der naechsten Extraktion weiterhin die alte,
+        # abgelehnte Zeit zuerst und eine Korrektur ("19 Uhr" nach "21 Uhr")
+        # kaeme nie an. Anders als beim generischen "schon vorbei"-Fall kennen
+        # wir hier den exakten abgelehnten Wert (when) und koennen ihn gezielt
+        # herausschneiden - deckt die beiden von _extract_time() erkannten
+        # Formate ab ("H Uhr", immer mit Minute 0; "H:MM" mit Doppelpunkt),
+        # live entdeckt beim Testen dieser Funktion 2026-08-27.
+        if when.minute == 0:
+            rejected_time_re = re.compile(
+                rf"\b(?:um\s+)?0*{when.hour}\s*uhr\b|\b0*{when.hour}:00\b", re.IGNORECASE
+            )
+        else:
+            rejected_time_re = re.compile(rf"\b0*{when.hour}:{when.minute:02d}\b")
+        rejected_match = rejected_time_re.search(accumulated_text)
+        if rejected_match:
+            accumulated_text = accumulated_text[: rejected_match.start()] + accumulated_text[rejected_match.end() :]
+        if available_times:
+            return _ask(f"Diese Uhrzeit ist bei {name} nicht mehr frei. Diese stehen zur Verfügung: {', '.join(available_times)}. Welche passt dir?")
+        # available_times ist eine leere Liste (echt abgefragt, aber der Tag ist
+        # komplett ausgebucht) - keine Uhrzeit waere hier je gueltig, egal welche
+        # der Nutzer nennt. In rejected_dates eintragen, falls noch nicht
+        # geschehen, damit der fruehe Kurzschluss-Check oben (siehe dort) auch
+        # bei einer komplett neuen Nachricht mit demselben Datum sofort greift.
+        if when.strftime("%Y-%m-%d") not in rejected_dates:
+            rejected_dates = rejected_dates + [when.strftime("%Y-%m-%d")]
+        return _ask(f"Bei {name} ist an diesem Tag für {party_size} Personen leider nichts mehr frei. Für welchen anderen Tag soll ich schauen?")
 
     settings.pop("pending_reservation_details", None)
     memory.set("settings", settings)
