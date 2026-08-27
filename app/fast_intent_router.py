@@ -125,6 +125,21 @@ class FastIntentRouter:
         "notiz", "notizen", "aufgabe", "aufgaben", "eintragen", "trage ein",
         "trag ein", "plane", "planen", "verschiebe", "verschieben", "lösche",
         "loesche",
+        # Ergaenzt fuer die Tischreservierung (siehe jarvis.py::
+        # handle_reservation_command) - ohne diese Woerter fing der Zeit-Fast-
+        # Intent (unten, wegen "Uhr" in "...19 Uhr...") jede Reservierungs-
+        # Anfrage vor der eigentlichen Dispatch-Kette ab und antwortete
+        # faelschlich nur mit der aktuellen Uhrzeit, live beobachtet 2026-08-27 -
+        # exakt derselbe Fehlerklasse wie der schon dokumentierte
+        # Kalender-Vorfall oben. "reservier(ung)" faengt per Fuzzy-Match alle
+        # DOMAIN_TERMS["reservation"]-Phrasen mit diesem Wortstamm ab (siehe
+        # jarvis.py) - "tisch buchen" enthaelt ihn nicht und wurde deshalb
+        # weiterhin faelschlich vom Zeit-Fast-Intent verschluckt, per
+        # Mehrwort-Teilstring ergaenzt (matcht nur die exakte Phrase, kein
+        # generisches Einzelwort wie "tisch" allein - das wuerde legitime
+        # Zeit-/Datumsfragen blockieren, die zufaellig "Tisch" enthalten;
+        # Codex-Review 2026-08-27, zwei Runden).
+        "reservier", "reservierung", "tisch buchen",
     )
 
     def _looks_like_time_query(self, text: str) -> bool:
