@@ -6437,12 +6437,53 @@ ACTION_ENGINE.register("open_url", execute_open_url)
 
 
 _RESTAURANT_URL_RE = re.compile(r"(https?://(?:www\.)?thefork\.[a-z]+/restaurant/[a-zA-Z0-9\-]+)")
+
+# Ausgeschriebene deutsche Zahlwoerter fuer die Personenzahl (1-20 deckt jede
+# realistische Restaurant-Reservierung ab) - live beobachtet 2026-08-28:
+# "reserviere mir doch bitte einen tisch fuer zwei Personen" und die
+# Folgeantwort "Zwei Personen bitte" wurden beide NICHT erkannt, weil
+# _PARTY_SIZE_RE/der Blanke-Zahl-Fallback unten nur Ziffern verstanden -
+# Jarvis wiederholte die "Fuer wie viele Personen...?"-Frage endlos, obwohl
+# die Personenzahl (in Worten) bereits klar genannt worden war. Beide
+# Schreibweisen der Umlaut-Zahlwoerter als eigene Schluessel gefuehrt, damit
+# kein separater Normalisierungsschritt noetig ist.
+_GERMAN_PARTY_SIZE_WORDS: dict[str, int] = {
+    "ein": 1, "eine": 1, "einen": 1, "eins": 1,
+    "zwei": 2, "drei": 3, "vier": 4,
+    "fünf": 5, "fuenf": 5,
+    "sechs": 6, "sieben": 7, "acht": 8, "neun": 9, "zehn": 10,
+    "elf": 11,
+    "zwölf": 12, "zwoelf": 12,
+    "dreizehn": 13, "vierzehn": 14,
+    "fünfzehn": 15, "fuenfzehn": 15,
+    "sechzehn": 16, "siebzehn": 17, "achtzehn": 18, "neunzehn": 19,
+    "zwanzig": 20,
+}
+# \b...\b um die GESAMTE Alternation (nicht nur um einzelne Alternativen) -
+# ohne Wortgrenzen matcht z.B. "eine" als Teilstring in "keine" ("keine
+# Personen" wuerde faelschlich als 1 Person gebucht) oder "zwanzig" als
+# Suffix von "einundzwanzig" (faelschlich 20 statt 21) (Codex-Review
+# 2026-08-28).
+_PARTY_SIZE_NUMBER_RE = r"\b(?:\d{1,2}|" + "|".join(
+    sorted(_GERMAN_PARTY_SIZE_WORDS, key=len, reverse=True)
+) + r")\b"
+
+
+def _parse_party_size_token(token: str) -> int:
+    lowered = token.lower()
+    if lowered in _GERMAN_PARTY_SIZE_WORDS:
+        return _GERMAN_PARTY_SIZE_WORDS[lowered]
+    return int(token)
+
+
 # "für"/"mit" optional (nicht nur als Praefix erlaubt) - eine Folgeantwort auf
 # "Fuer wie viele Personen...?" lautet natuerlicherweise oft schlicht "2
 # Personen" statt "fuer 2 Personen"; ohne den optionalen Praefix waere das
 # durchgefallen und haette die Frage endlos wiederholt (Codex-Review
 # 2026-08-23).
-_PARTY_SIZE_RE = re.compile(r"(?:für|mit)?\s*(\d{1,2})\s*(?:personen|leute|gäste|erwachsene)", re.IGNORECASE)
+_PARTY_SIZE_RE = re.compile(
+    rf"(?:für|mit)?\s*({_PARTY_SIZE_NUMBER_RE})\s*(?:personen|leute|gäste|erwachsene)", re.IGNORECASE
+)
 
 
 def _known_restaurant(memory: Memory, hint: str = "") -> tuple[str, str] | None:
@@ -6503,9 +6544,24 @@ def _known_restaurant(memory: Memory, hint: str = "") -> tuple[str, str] | None:
 # das wuerde eine solche kurze Folgenachricht has_domain(text, "reservation")
 # nicht matchen und die Anfrage haenge tot, der Nutzer muesste alles nochmal
 # von vorn sagen (Codex-Review 2026-08-23).
+# Zahlwoerter (siehe _GERMAN_PARTY_SIZE_WORDS) mit aufgenommen - eine blanke
+# ausgeschriebene Personenzahl-Antwort wie "zwei" (ohne "Personen" dran, ohne
+# Ziffer) enthielt sonst kein einziges der obigen Schluesselwoerter und wurde
+# gar nicht erst als Fortsetzung der offenen Rueckfrage erkannt, sondern
+# komplett verworfen, bevor die eigentliche Personenzahl-Extraktion ueberhaupt
+# lief (live beobachtet 2026-08-28, direkte Folge derselben Luecke wie bei
+# _PARTY_SIZE_RE).
 _RESERVATION_CONTINUATION_RE = re.compile(
     r"\d|uhr|personen|leute|gäste|erwachsene|heute|morgen|übermorgen|"
-    r"montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag",
+    r"montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag|"
+    # \b...\b um die Zahlwoerter (nicht um die uebrigen, laengeren
+    # Schluesselwoerter oben - dort ist eine zufaellige Teilstring-
+    # Ueberlappung mit einem kurzen, unabhaengigen Wort unrealistisch) -
+    # ohne Wortgrenzen matchte z.B. "ein" als Teilstring in "nein" und
+    # behandelte eine Ablehnung wie "nein, abbrechen" faelschlich als
+    # Fortsetzung der offenen Reservierungs-Rueckfrage statt sie zu
+    # verwerfen (Codex-Review 2026-08-28).
+    + rf"\b(?:{'|'.join(_GERMAN_PARTY_SIZE_WORDS)})\b",
     re.IGNORECASE,
 )
 
@@ -6745,7 +6801,7 @@ def handle_reservation_command(text: str, memory: Memory | None = None) -> str |
     # braucht sie schon als Parameter fuer die Verfuegbarkeits-Abfrage.
     party_match = _PARTY_SIZE_RE.search(accumulated_text)
     if party_match:
-        party_size = int(party_match.group(1))
+        party_size = _parse_party_size_token(party_match.group(1))
     else:
         # Eine blanke Zahl als Antwort ("2" auf "Für wie viele Personen...?")
         # ist eindeutig und die natuerlichste Antwort ueberhaupt. Ohne diesen
@@ -6754,9 +6810,12 @@ def handle_reservation_command(text: str, memory: Memory | None = None) -> str |
         # (Codex-Review 2026-08-23). Bewusst nur auf DIESER (der neuesten,
         # nicht der aufaddierten) Nachricht geprueft, damit keine zufaellige
         # Zahl aus einer frueheren Nachricht im Kontext faelschlich als
-        # Personenzahl gelesen wird.
-        bare_number = re.fullmatch(r"\s*(\d{1,2})\s*", text)
-        party_size = int(bare_number.group(1)) if bare_number else 0
+        # Personenzahl gelesen wird. Ausgeschrieben ("zwei") genauso wie
+        # Ziffern ("2") zugelassen, aus demselben Grund wie bei
+        # _PARTY_SIZE_RE oben (Codex-Review 2026-08-23; ausgeschriebene
+        # Zahlwoerter live beobachtet 2026-08-28).
+        bare_number = re.fullmatch(rf"\s*({_PARTY_SIZE_NUMBER_RE})\s*", text, re.IGNORECASE)
+        party_size = _parse_party_size_token(bare_number.group(1)) if bare_number else 0
     # 0 wuerde sonst unbemerkt in die TheFork-URL rutschen (z.B. bei einem
     # Spracherkennungs-Ausrutscher "fuer 0 Personen") - keine echte Reservierung,
     # also nachfragen statt eine sinnlose Bestaetigung zu zeigen (Codex-

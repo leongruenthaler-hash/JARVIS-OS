@@ -508,6 +508,71 @@ def test_bare_number_answers_party_size_question(memory):
     assert "partySize=2" in pending["url"]
 
 
+def test_spelled_out_party_size_is_recognized_in_initial_message_and_followup(memory):
+    # Live beobachtet 2026-08-28: sowohl _PARTY_SIZE_RE als auch der blanke-
+    # Zahl-Fallback verstanden nur Ziffern ("2 Personen"), keine ausge-
+    # schriebenen deutschen Zahlwoerter ("zwei Personen"). "Reserviere mir
+    # doch bitte einen Tisch fuer zwei Personen" fragte deshalb trotzdem
+    # wieder nach der Personenzahl, und die Folgeantwort "Zwei Personen
+    # bitte" loeste dieselbe Frage ein zweites Mal aus statt sie zu
+    # beantworten - Jarvis haengte sich in einer Endlosschleife auf.
+    _remember_restaurant(memory)
+
+    first = jarvis.handle_reservation_command(
+        "Reserviere mir doch bitte einen Tisch für zwei Personen", memory=memory
+    )
+    # Personenzahl war jetzt schon bekannt - die naechste fehlende Angabe
+    # (Datum/Uhrzeit) wird erfragt, nicht nochmal die Personenzahl.
+    assert "personen" not in first.lower()
+
+    with patch.object(jarvis, "send_push", return_value=True):
+        result = jarvis.handle_reservation_command(
+            "reserviere einen tisch bei Hans im Glück morgen um 19 Uhr", memory=memory
+        )
+    pending = memory.get("settings").get("pending_reservation_open")
+    assert pending is not None and "partySize=2" in pending["url"]
+
+
+def test_bare_spelled_out_number_answers_party_size_question(memory):
+    # Wie test_bare_number_answers_party_size_question(), aber mit einer
+    # ausgeschriebenen Zahl statt einer Ziffer als blanke Folgeantwort -
+    # live beobachtet 2026-08-28 als "Zwei Personen bitte" (mit "Personen"
+    # dran, matcht bereits ueber _PARTY_SIZE_RE) UND als reine Zahl allein.
+    _remember_restaurant(memory)
+    jarvis.handle_reservation_command("reserviere einen tisch bei Hans im Glück morgen um 19 Uhr", memory=memory)
+
+    with patch.object(jarvis, "send_push", return_value=True):
+        result = jarvis.handle_reservation_command("zwei", memory=memory)
+
+    assert "hans im glück" in result.lower()
+    pending = memory.get("settings").get("pending_reservation_open")
+    assert "partySize=2" in pending["url"]
+
+
+def test_party_size_number_words_require_whole_word_match(memory):
+    # Regression: die urspruengliche Fassung matchte Zahlwoerter als reinen
+    # Teilstring - "eine" matchte auch als Teilstring in "keine" (eine
+    # Ablehnung "keine Personen" waere faelschlich als 1 Person gebucht
+    # worden) und "zwanzig" als Suffix von "einundzwanzig" (faelschlich 20
+    # statt 21 Personen) (Codex-Review 2026-08-28).
+    assert jarvis._PARTY_SIZE_RE.search("keine Personen") is None
+    match = jarvis._PARTY_SIZE_RE.search("einundzwanzig Personen")
+    assert match is None or jarvis._parse_party_size_token(match.group(1)) != 20
+
+
+def test_reservation_continuation_regex_does_not_match_number_word_substring(memory):
+    # Regression: "ein" (Zahlwort) matchte als Teilstring auch in "nein" -
+    # eine Ablehnung wie "nein, abbrechen" auf eine offene Reservierungs-
+    # Rueckfrage waere faelschlich als Fortsetzung behandelt worden statt die
+    # Anfrage zu verwerfen (Codex-Review 2026-08-28).
+    assert jarvis._RESERVATION_CONTINUATION_RE.search("nein, abbrechen") is None
+    _remember_restaurant(memory)
+    jarvis.handle_reservation_command("reserviere einen tisch bei Hans im Glück morgen um 19 Uhr", memory=memory)
+    result = jarvis.handle_reservation_command("nein, abbrechen", memory=memory)
+    assert result is None
+    assert memory.get("settings").get("pending_reservation_details") is None
+
+
 def test_unrelated_followup_discards_pending_details(memory):
     _remember_restaurant(memory)
     jarvis.handle_reservation_command("reserviere einen tisch bei Hans im Glück heute", memory=memory)
