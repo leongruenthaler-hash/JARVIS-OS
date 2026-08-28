@@ -6544,26 +6544,129 @@ def _known_restaurant(memory: Memory, hint: str = "") -> tuple[str, str] | None:
 # das wuerde eine solche kurze Folgenachricht has_domain(text, "reservation")
 # nicht matchen und die Anfrage haenge tot, der Nutzer muesste alles nochmal
 # von vorn sagen (Codex-Review 2026-08-23).
-# Zahlwoerter (siehe _GERMAN_PARTY_SIZE_WORDS) mit aufgenommen - eine blanke
-# ausgeschriebene Personenzahl-Antwort wie "zwei" (ohne "Personen" dran, ohne
-# Ziffer) enthielt sonst kein einziges der obigen Schluesselwoerter und wurde
-# gar nicht erst als Fortsetzung der offenen Rueckfrage erkannt, sondern
-# komplett verworfen, bevor die eigentliche Personenzahl-Extraktion ueberhaupt
-# lief (live beobachtet 2026-08-28, direkte Folge derselben Luecke wie bei
-# _PARTY_SIZE_RE).
+#
+# BEWUSST OHNE die ausgeschriebenen Zahlwoerter (siehe
+# _GERMAN_PARTY_SIZE_WORDS) - ein frueherer Versuch nahm sie hier per
+# .search() irgendwo im Text auf, aber anders als "personen"/"uhr" sind
+# einzelne kleine Zahlwoerter ("acht", "zehn", ...) im Alltagsdeutsch extrem
+# haeufig und voellig unspezifisch fuer eine Reservierung (Alter, Uhrzeiten,
+# beliebige Mengenangaben, ...) - jede Nachricht, die zufaellig eines davon
+# enthaelt, waere faelschlich als Fortsetzung einer laengst veralteten
+# Reservierungs-Rueckfrage behandelt worden, statt als neue, unabhaengige
+# Anfrage zu gelten (Codex-Review 2026-08-28, Stop-Hook-Folgerunde). Eine
+# blanke ausgeschriebene Personenzahl-Antwort ("zwei" ohne "Personen" dran)
+# wird stattdessen gezielt ueber _BARE_PARTY_SIZE_ANSWER_RE erkannt (siehe
+# Aufrufstelle) - fullmatch auf die GESAMTE Nachricht statt Teilstring-Suche,
+# genau wie beim bestehenden bare_number-Fallback in
+# handle_reservation_command().
 _RESERVATION_CONTINUATION_RE = re.compile(
     r"\d|uhr|personen|leute|gäste|erwachsene|heute|morgen|übermorgen|"
-    r"montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag|"
-    # \b...\b um die Zahlwoerter (nicht um die uebrigen, laengeren
-    # Schluesselwoerter oben - dort ist eine zufaellige Teilstring-
-    # Ueberlappung mit einem kurzen, unabhaengigen Wort unrealistisch) -
-    # ohne Wortgrenzen matchte z.B. "ein" als Teilstring in "nein" und
-    # behandelte eine Ablehnung wie "nein, abbrechen" faelschlich als
-    # Fortsetzung der offenen Reservierungs-Rueckfrage statt sie zu
-    # verwerfen (Codex-Review 2026-08-28).
-    + rf"\b(?:{'|'.join(_GERMAN_PARTY_SIZE_WORDS)})\b",
+    r"montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag",
     re.IGNORECASE,
 )
+
+# Erkennt eine Nachricht, die IM WESENTLICHEN NUR aus einer Personenzahl
+# besteht (Ziffer oder ausgeschriebenes Zahlwort), optional mit einer
+# hoeflichen Floskel ("bitte") und/oder Satzzeichen drumherum - z.B. "zwei",
+# "2", "zwei bitte" oder "zwei." als alleinige Antwort auf "Fuer wie viele
+# Personen...?". Bewusst per fullmatch() statt Teilstring-Suche (siehe
+# Kommentar bei _RESERVATION_CONTINUATION_RE oben) - eine unabhaengige
+# Nachricht, die ein Zahlwort nur ERWAEHNT, darf dadurch nicht faelschlich
+# als Reservierungs-Fortsetzung gelten. Eine erste, zu strikte Fassung
+# (nur Leerraum drumherum erlaubt) verwarf die gesamte offene Reservierung
+# schon bei der ganz natuerlichen Antwort "zwei bitte" oder "zwei." statt
+# sie fortzusetzen (Codex-Review 2026-08-28, Folgerunde) - "bitte" und ein
+# einzelnes abschliessendes Satzzeichen bleiben deshalb bewusst noch
+# zugelassen, ohne die Praezision gegenueber echten, unabhaengigen Saetzen
+# ("ich habe acht Katzen") zu verlieren.
+# Mit einer Capture-Gruppe um die eigentliche Zahl - wird sowohl fuer die
+# Fortsetzungs-Erkennung (siehe Aufrufstelle) als auch fuer die tatsaechliche
+# Personenzahl-Extraktion (siehe bare_number-Fallback in
+# handle_reservation_command) genutzt, EINE gemeinsame Definition statt
+# zweier separater Muster - eine fruehere Fassung hatte hier zwei
+# unabhaengige, leicht unterschiedlich strikte Regexe, wodurch eine
+# Nachricht wie "zwei bitte" zwar (nach diesem Fix) als Fortsetzung erkannt
+# wurde, die eigentliche Extraktion aber trotzdem scheiterte (Codex-Review
+# 2026-08-28, Folgerunde).
+_BARE_PARTY_SIZE_ANSWER_RE = re.compile(
+    rf"\s*({_PARTY_SIZE_NUMBER_RE})\s*(?:bitte\s*)?[.!]?\s*", re.IGNORECASE
+)
+
+
+# Fragt gezielt nach VERFUEGBAREN Terminen/Zeiten fuer die Reservierung
+# ("Welche Uhrzeiten waeren denn zur Verfuegung", "was ist noch frei",
+# "welche Termine gibt es noch") - bewusst ENGER als
+# _RESERVATION_CONTINUATION_RE (die dort per .search() u.a. jeden Treffer
+# von "uhr"/einer Ziffer/einem Wochentag akzeptiert): fuer
+# fast_intent_would_hijack_pending_reservation() waere diese Breite zu
+# riskant, weil eine WIRKLICH unabhaengige Frage wie "Wie spaet ist es
+# morgen?" oder "Welcher Wochentag ist der 28.?" dieselben Woerter enthaelt.
+# Anders als beim reinen "wird als Fortsetzung verworfen statt beantwortet"-
+# Risiko der urspruenglichen Version koennte eine so unabhaengige Frage
+# sonst sogar faelschlich als NEUE Datumsangabe in die laufende Reservierung
+# aufgenommen werden ("morgen" ist ein gueltiges Datums-Schluesselwort) -
+# eine engere, auf die konkrete Formulierung "welche Zeiten/Uhrzeiten/
+# Termine (sind) noch frei/verfuegbar" beschraenkte Erkennung vermeidet das,
+# auf Kosten seltenerer, noch nicht beobachteter Formulierungen (Codex-Review
+# 2026-08-28, weitere Folgerunde).
+_RESERVATION_AVAILABILITY_QUERY_RE = re.compile(
+    r"welche\s+(?:uhrzeiten|zeiten|termine)|"
+    r"(?:uhrzeiten|zeiten|termine)\s+(?:w[aä]ren|sind|gibt\s+es)|"
+    r"zur\s+verf[uü]gung|noch\s+frei|(?:frei|verf[uü]gbar)e?\s+(?:uhrzeiten|zeiten|termine)",
+    re.IGNORECASE,
+)
+
+
+def fast_intent_would_hijack_pending_reservation(question: str, memory: Memory) -> bool:
+    """True, wenn eine offene Reservierungs-Rueckfrage (pending_reservation_
+    details) besteht UND diese Nachricht danach aussieht, als wolle sie sie
+    fortsetzen (Restaurant/Personenzahl/Verfuegbarkeits-Frage, siehe
+    has_reservation_domain()/_BARE_PARTY_SIZE_ANSWER_RE/
+    _RESERVATION_AVAILABILITY_QUERY_RE) - in diesem Fall darf
+    route_fast_intent() NICHT zuerst zuschlagen: eine Folgeantwort wie
+    "Welche Uhrzeiten waeren denn zur Verfuegung" enthaelt keines der
+    Reservierungs-Schluesselwoerter, matcht aber route_fast_intent()s
+    Uhrzeit-Heuristik - live beobachtet 2026-08-28, Jarvis antwortete
+    faelschlich nur mit der aktuellen Uhrzeit statt die Reservierung
+    fortzusetzen. Von BEIDEN Aufrufstellen genutzt (local_server.py -
+    tatsaechlicher Einstiegspunkt der App - und main()s CLI-Sprachschleife
+    hier in jarvis.py), damit sie nicht auseinanderlaufen (Codex-Review
+    2026-08-28, Folgerunde).
+
+    Bewusst NICHT einfach "ist irgendeine Reservierung offen" - das haette
+    auch einen echten Themenwechsel waehrend einer offenen Reservierung
+    (z.B. "Wie spaet ist es?") vom schnellen, deterministischen Fast-Pfad
+    ausgeschlossen (Codex-Review 2026-08-28, Folgerunde). Und bewusst NICHT
+    die breite _RESERVATION_CONTINUATION_RE (matcht schon bei jeder Ziffer/
+    jedem Wochentag/"uhr" als Teilstring) - eine erste Fassung nutzte sie
+    hier mit, wodurch "Wie spaet ist es morgen?" oder "Welcher Wochentag ist
+    der 28.?" faelschlich als Fortsetzung galten und potenziell sogar als
+    NEUE (falsche) Datumsangabe in die laufende Reservierung aufgenommen
+    worden waeren, statt die eigentlich unabhaengige Frage zu beantworten -
+    schwerwiegender als nur eine verpasste Rueckfrage (Codex-Review
+    2026-08-28, weitere Folgerunde). Siehe
+    _RESERVATION_AVAILABILITY_QUERY_RE fuer die stattdessen genutzte, engere
+    Formulierungs-Erkennung.
+
+    Aus demselben "keine falsche Korrelation"-Grund zaehlt eine bereits
+    abgelaufene (TTL-ueberschrittene) Reservierung hier NICHT mehr als offen
+    - handle_reservation_command() wuerde sie ohnehin nur noch verwerfen,
+    ohne diesen Check bliebe der Fast-Pfad fuer eine laengst abgelaufene
+    Reservierung sonst unnoetig blockiert (Codex-Review 2026-08-28, weitere
+    Folgerunde)."""
+    pending = (memory.get("settings") or {}).get("pending_reservation_details")
+    if not isinstance(pending, dict):
+        return False
+    set_at = pending.get("set_at")
+    age_seconds = (time.time() - set_at) if isinstance(set_at, (int, float)) else None
+    if age_seconds is None or age_seconds > PENDING_RESERVATION_DETAILS_TTL_SECONDS:
+        return False
+    return (
+        has_reservation_domain(question)
+        or bool(_BARE_PARTY_SIZE_ANSWER_RE.fullmatch(question))
+        or bool(_RESERVATION_AVAILABILITY_QUERY_RE.search(question))
+    )
+
 
 PENDING_RESERVATION_DETAILS_TTL_SECONDS = 300
 
@@ -6726,7 +6829,10 @@ def handle_reservation_command(text: str, memory: Memory | None = None) -> str |
     if not has_pending and not has_reservation_domain(text):
         return None
 
-    if has_pending and not has_reservation_domain(text) and not _RESERVATION_CONTINUATION_RE.search(text):
+    looks_like_continuation = bool(_RESERVATION_CONTINUATION_RE.search(text)) or bool(
+        _BARE_PARTY_SIZE_ANSWER_RE.fullmatch(text)
+    )
+    if has_pending and not has_reservation_domain(text) and not looks_like_continuation:
         # _RESERVATION_CONTINUATION_RE matcht Zeit-/Personenzahl-Antworten, aber
         # keinen blossen Restaurantnamen ("Hans im Glück" auf "Welches Restaurant
         # meinst du?") - zusaetzlich pruefen, ob die neue Nachricht ein Restaurant
@@ -6810,11 +6916,10 @@ def handle_reservation_command(text: str, memory: Memory | None = None) -> str |
         # (Codex-Review 2026-08-23). Bewusst nur auf DIESER (der neuesten,
         # nicht der aufaddierten) Nachricht geprueft, damit keine zufaellige
         # Zahl aus einer frueheren Nachricht im Kontext faelschlich als
-        # Personenzahl gelesen wird. Ausgeschrieben ("zwei") genauso wie
-        # Ziffern ("2") zugelassen, aus demselben Grund wie bei
-        # _PARTY_SIZE_RE oben (Codex-Review 2026-08-23; ausgeschriebene
-        # Zahlwoerter live beobachtet 2026-08-28).
-        bare_number = re.fullmatch(rf"\s*({_PARTY_SIZE_NUMBER_RE})\s*", text, re.IGNORECASE)
+        # Personenzahl gelesen wird. Ausgeschrieben ("zwei") und mit
+        # hoeflicher Floskel/Satzzeichen ("zwei bitte", "zwei.") genauso wie
+        # blosse Ziffern ("2") zugelassen - siehe _BARE_PARTY_SIZE_ANSWER_RE.
+        bare_number = _BARE_PARTY_SIZE_ANSWER_RE.fullmatch(text)
         party_size = _parse_party_size_token(bare_number.group(1)) if bare_number else 0
     # 0 wuerde sonst unbemerkt in die TheFork-URL rutschen (z.B. bei einem
     # Spracherkennungs-Ausrutscher "fuer 0 Personen") - keine echte Reservierung,
@@ -8809,7 +8914,15 @@ def main():
                 speak(answer, voice=voice)
                 continue
 
-            fast_intent_answer = route_fast_intent(question)
+            # Siehe fast_intent_would_hijack_pending_reservation() - derselbe
+            # Fast-Pfad-vs-offene-Reservierung-Konflikt wie im Server-Pfad
+            # (local_server.py::_answer_with_core()), hier fuer die CLI-
+            # Sprachschleife (Codex-Review 2026-08-28, Folgerunde).
+            fast_intent_answer = (
+                None
+                if fast_intent_would_hijack_pending_reservation(question, memory)
+                else route_fast_intent(question)
+            )
             if fast_intent_answer is not None:
                 print(f"\nJARVIS: {console_text(fast_intent_answer, 'answer')}")
                 speak(fast_intent_answer, voice=voice)

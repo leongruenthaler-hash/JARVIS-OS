@@ -549,6 +549,28 @@ def test_bare_spelled_out_number_answers_party_size_question(memory):
     assert "partySize=2" in pending["url"]
 
 
+def test_bare_party_size_answer_with_polite_suffix_or_punctuation(memory):
+    # Regression: die urspruengliche strikte Fassung von
+    # _BARE_PARTY_SIZE_ANSWER_RE erlaubte nur Leerraum um die Zahl - eine
+    # ganz natuerliche Antwort wie "zwei bitte" oder "zwei." matchte weder
+    # die Fortsetzungs-Erkennung noch die eigentliche Extraktion, wodurch
+    # die GESAMTE offene Reservierung faelschlich verworfen wurde statt
+    # fortgesetzt zu werden (Codex-Review 2026-08-28, Folgerunde).
+    _remember_restaurant(memory)
+
+    for reply, expected_party_size in [("zwei bitte", 2), ("zwei.", 2), ("2 bitte", 2)]:
+        memory.set("settings", {})
+        jarvis.handle_reservation_command("reserviere einen tisch bei Hans im Glück morgen um 19 Uhr", memory=memory)
+        assert memory.get("settings").get("pending_reservation_details") is not None
+
+        with patch.object(jarvis, "send_push", return_value=True):
+            result = jarvis.handle_reservation_command(reply, memory=memory)
+
+        assert result is not None and "hans im glück" in result.lower(), reply
+        pending = memory.get("settings").get("pending_reservation_open")
+        assert pending is not None and f"partySize={expected_party_size}" in pending["url"], reply
+
+
 def test_party_size_number_words_require_whole_word_match(memory):
     # Regression: die urspruengliche Fassung matchte Zahlwoerter als reinen
     # Teilstring - "eine" matchte auch als Teilstring in "keine" (eine
@@ -569,6 +591,30 @@ def test_reservation_continuation_regex_does_not_match_number_word_substring(mem
     _remember_restaurant(memory)
     jarvis.handle_reservation_command("reserviere einen tisch bei Hans im Glück morgen um 19 Uhr", memory=memory)
     result = jarvis.handle_reservation_command("nein, abbrechen", memory=memory)
+    assert result is None
+    assert memory.get("settings").get("pending_reservation_details") is None
+
+
+def test_reservation_continuation_regex_does_not_match_generic_number_word_mentions(memory):
+    # Regression (Codex Stop-Hook 2026-08-28): ein frueherer Fix nahm die
+    # ausgeschriebenen Zahlwoerter (siehe _GERMAN_PARTY_SIZE_WORDS) per
+    # .search() irgendwo im Text in _RESERVATION_CONTINUATION_RE auf, damit
+    # eine blanke Antwort wie "zwei" als Fortsetzung erkannt wird. Anders als
+    # "personen"/"uhr" sind kleine Zahlwoerter im Alltagsdeutsch aber extrem
+    # haeufig und voellig unspezifisch (Alter, Mengen, ...) - jede voellig
+    # unabhaengige Folgenachricht, die zufaellig eines davon enthielt, waere
+    # faelschlich in die laengst veraltete Reservierungs-Rueckfrage gezogen
+    # worden statt als neue, unabhaengige Anfrage zu gelten. Die blanke
+    # Personenzahl-Antwort wird stattdessen ueber das gezielte
+    # _BARE_PARTY_SIZE_ANSWER_RE (fullmatch) erkannt.
+    assert jarvis._RESERVATION_CONTINUATION_RE.search("ich habe acht Katzen") is None
+
+    _remember_restaurant(memory)
+    jarvis.handle_reservation_command("reserviere einen tisch bei Hans im Glück morgen um 19 Uhr", memory=memory)
+    # Eine voellig unabhaengige Nachricht, die zufaellig ein Zahlwort enthaelt
+    # und kein Reservierungs-Restaurant aufloest, muss verworfen werden
+    # (None), nicht in die offene Personenzahl-Rueckfrage gezogen werden.
+    result = jarvis.handle_reservation_command("ich habe acht Katzen", memory=memory)
     assert result is None
     assert memory.get("settings").get("pending_reservation_details") is None
 

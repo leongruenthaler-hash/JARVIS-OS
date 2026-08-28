@@ -2029,7 +2029,27 @@ class JarvisLocalServer:
             if hasattr(core, "is_end_command") and core.is_end_command(question):
                 return "Alles klar. Ich bin wieder still, bis Sie Jarvis sagen."
 
-            if hasattr(core, "route_fast_intent"):
+            # route_fast_intent() kennt nur den aktuellen Text, nicht den
+            # Gespraechs-Zustand (pending_reservation_details) - eine
+            # Folgeantwort innerhalb einer laufenden Reservierung wie
+            # "Welche Uhrzeiten waeren denn zur Verfuegung" enthaelt keines
+            # der DOMAIN_TERMS["reservation"]-Schluesselwoerter und keinen
+            # der _ACTION_CONTEXT_WORDS-Begriffe in fast_intent_router.py,
+            # matcht aber die Uhrzeit-Heuristik ("Uhrzeiten") - wurde live
+            # beobachtet 2026-08-28: Jarvis antwortete faelschlich nur mit
+            # der aktuellen Uhrzeit, statt die Reservierungs-Rueckfrage
+            # (handle_reservation_command(), siehe Dispatch-Kette unten) zu
+            # beantworten. core.fast_intent_would_hijack_pending_reservation()
+            # gibt nur bei einer PLAUSIBLEN Fortsetzung True zurueck (nicht
+            # schon bei jeder offenen Reservierung) - ein echter Themenwechsel
+            # ("Wie spaet ist es?") nutzt den Fast-Pfad weiterhin (Codex-Review
+            # 2026-08-28, Folgerunde). Dieselbe Funktion wird auch von main()s
+            # CLI-Sprachschleife in jarvis.py genutzt, damit beide
+            # Einstiegspunkte nicht auseinanderlaufen.
+            skip_fast_intent = hasattr(core, "fast_intent_would_hijack_pending_reservation") and (
+                core.fast_intent_would_hijack_pending_reservation(question, memory)
+            )
+            if hasattr(core, "route_fast_intent") and not skip_fast_intent:
                 fast_intent = core.route_fast_intent(question)
                 if fast_intent is not None:
                     return self._finalize_answer(core, question, fast_intent)
