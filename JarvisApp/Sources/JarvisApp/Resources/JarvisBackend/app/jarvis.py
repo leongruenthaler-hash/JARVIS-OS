@@ -90,7 +90,7 @@ from core import (
     voice_mode_disables_web_search,
     normalize_voice_mode,
 )
-from core.intent_matching import has_domain_fuzzy, normalize_umlauts
+from core.intent_matching import has_domain_fuzzy, levenshtein_distance, normalize_umlauts
 from core.multistep_planner import plan_multistep
 from memory import Memory
 from model_manager import ModelManager
@@ -893,10 +893,17 @@ DOMAIN_TERMS = {
         "liefern lassen",
         "was liefern lassen",
     ),
-    # Gleiche Vorsicht wie bei "food": enge Phrasen statt generischem "tisch"/
-    # "reservieren" allein - siehe handle_reservation_command(), oeffnet nach
-    # Bestaetigung nur die vorausgefuellte TheFork-Seite, reserviert selbst
-    # nichts endgueltig.
+    # Bewusst enge Mehrwort-Phrasen statt generischem "tisch"/"reservieren"
+    # allein - siehe handle_reservation_command(), oeffnet nach Bestaetigung
+    # nur die vorausgefuellte TheFork-Seite, reserviert selbst nichts
+    # endgueltig. "reservieren" als bare Einzelwort-Fuzzy-Kandidat wurde
+    # kurzzeitig ergaenzt (siehe unten, _looks_like_table_reservation()), dann
+    # aber wieder ENTFERNT - haette per Fuzzy-Match auch "ein Hotel
+    # reservieren" (falsche Domaene) und "das Essen SERVIEREN" (Distanz 2,
+    # komplett unabhaengig) ausgeloest (Codex-Review 2026-08-27, Folgerunde).
+    # Siehe _looks_like_table_reservation() fuer den stattdessen gewaehlten,
+    # ENGEREN Fix: ein Reservierungs-Verb MUSS zusammen mit einem Tisch-/
+    # Restaurant-Signal im selben Satz stehen.
     "reservation": (
         "tisch reservieren",
         "reservierung",
@@ -995,6 +1002,170 @@ def has_domain(text: str, domain: str) -> bool:
     return has_domain_fuzzy(normalized, normalized_terms)
 
 
+# Erkennt das Reservierungs-VERB (auch mit Tippfehler/Verhoerer wie
+# "resarviere" oder Flexionsform wie "reserviert"/"reservierung") ueber den
+# gemeinsamen, sehr distinktiven WORTSTAMM "reservier" statt ueber eine
+# Fuzzy-Distanz auf das GANZE Wort. Ein Distanz-Schwellwert von 2 auf das
+# ganze Wort (noetig, damit "resarviere" noch matcht) faengt zwangslaeufig
+# auch voellig unabhaengige deutsche Verben derselben Laenge/desselben
+# "-ieren"-Musters mit ein - erst "servieren" (Codex-Review 2026-08-27), dann
+# "referieren" (Codex-Review 2026-08-27, Folgerunde: "ich soll ueber das
+# Restaurant referieren" haette sonst trotz UND-Bedingung faelschlich
+# gematcht) - und ein Denylist-Ansatz pro Einzelwort skaliert nicht (es gibt
+# beliebig viele weitere "-ieren"-Verben in aehnlicher Editierdistanz:
+# revidieren, residieren, respektieren, revanchieren, registrieren,
+# rezensieren, recherchieren, renovieren, restaurieren, ...). Der
+# Wortstamm-Vergleich umgeht das strukturell: "reserv-" ist als PRAEFIX
+# unter allen deutschen Alltagsverben einzigartig distinktiv, waehrend ein
+# Vergleich des GANZEN Wortes bei laengeren, thematisch verwandten
+# "-ieren"-Verben zwangslaeufig zufaellig nah beieinander liegt.
+#
+# Ein zu KURZES Praefix-Fenster (urspruenglich 7 Zeichen, "reservi") war
+# selbst noch nicht distinktiv genug: die voellig unabhaengigen Substantive
+# "Reservat" und "Reservoir" haben ebenfalls Praefix-Distanz 1 zu "reservi"
+# (weichen nur an genau der letzten, damals verglichenen Stelle ab), haetten
+# also trotz UND-Bedingung faelschlich gematcht ("Restaurant im Reservat")
+# (Codex-Review 2026-08-27, Folgerunde). Ein laengeres, 9 Zeichen umfassendes
+# Fenster ("reservier") loest das: Live verifiziert (2026-08-27) - reservieren/
+# reserviere/reserviert/reservierst/reserviertest/reservierten/reservierend/
+# reservierung und der Tippfehler resarviere/resarvieren landen alle bei
+# Praefix-Distanz <= 1, waehrend jedes getestete unabhaengige Wort (servieren,
+# referieren, reservat, reservoir, ...) bei Praefix-Distanz >= 2 liegt.
+_RESERVATION_VERB_STEM = "reservier"
+
+
+def _looks_like_reservation_verb(word: str) -> bool:
+    if len(word) < 8:
+        return False
+    return levenshtein_distance(word[:9], _RESERVATION_VERB_STEM) <= 1
+
+
+# Tisch-/Restaurant-Signalwoerter - bewusst NICHT als eigenstaendiges
+# DOMAIN_TERMS-Stichwort ("tisch" kommt in vielen unabhaengigen Kontexten vor,
+# siehe Kommentar bei DOMAIN_TERMS["reservation"]), aber sicher als die ANDERE
+# Haelfte derselben UND-Bedingung: "raeum den Tisch auf" hat kein
+# Reservierungs-Verb, "ein Hotel reservieren" hat kein Tisch-/Restaurant-Wort -
+# nur die Kombination beider loest aus. Enthaelt bewusst auch die gaengigen
+# Pluralformen ("Tische"/"Tischen"/"Restaurants") - eine reine Exakt-Singular-
+# Liste haette "reserviere bitte zwei Tische fuer morgen" verpasst, obwohl das
+# Verb korrekt erkannt wird (Codex-Review 2026-08-27, Folgerunde).
+_RESERVATION_TABLE_SIGNAL_WORDS = ("tisch", "tische", "tischen", "restaurant", "restaurants")
+
+
+def _looks_like_table_reservation(text: str) -> bool:
+    """Erkennt eine Tischreservierungs-Absicht per UND-Bedingung statt eines
+    einzelnen breiten Fuzzy-Stichworts: ein Reservierungs-Verb (auch mit
+    Tippfehler/Verhoerer wie "resarviere" oder Flexionsform wie "reserviert")
+    MUSS zusammen mit einem Tisch-/Restaurant-Signal im selben SATZ stehen
+    (nicht nur irgendwo im gesamten Text). Ergaenzt has_domain(text,
+    "reservation")s engere, exakte Mehrwort-Phrasen um freiere
+    Wortstellungen wie "reserviere doch bitte einen tisch fuer 2 Personen"
+    - live beobachtet 2026-08-27, passte zu KEINER der hartcodierten
+    Phrasen.
+
+    BEWUSST KEIN zusaetzliches Wortabstands-Limit innerhalb des Satzes: ein
+    frueherer Versuch (max. 6 Woerter Abstand) sollte einen konstruierten
+    Fall wie "Im Restaurant besprechen wir, wie wir ein Hotel reservieren"
+    ausschliessen (Restaurant = Ort des Gespraechs, Hotel = eigentliches
+    Reservierungsobjekt) - brach dabei aber ganz gewoehnliche, detailreiche
+    Anfragen wie "Reserviere bitte fuer morgen Abend um 19 Uhr einen Tisch"
+    (Wortabstand 9, groesser als im Konstrukt oben), weil es keinen
+    Schwellwert gibt, der beide Faelle sauber trennt (Codex-Review
+    2026-08-27, mehrere Folgerunden). Die echte, haeufige Formulierung
+    wiegt schwerer als der seltene, unnatuerliche Konstrukt-Fall - deshalb
+    bewusst akzeptierte, dokumentierte Einschraenkung: ein Reservierungs-
+    Verb und ein Tisch-/Restaurant-Wort im selben Satz gelten immer als
+    zusammengehoerig, auch wenn sie in einem sehr ungewoehnlichen Satzbau
+    tatsaechlich nicht dasselbe Objekt meinen. Folgenlos, falls doch
+    faelschlich ausgeloest: Jarvis fragt hoechstens nach der
+    Reservierungs-Berechtigung oder bereitet eine TheFork-Seite vor, die
+    der Nutzer einfach ignorieren/ablehnen kann - reserviert nie
+    endgueltig etwas.
+
+    WEITERE BEKANNTE, BEWUSST NICHT GELOESTE EINSCHRAENKUNG: keine Unter-
+    scheidung zwischen einer Bitte/Aufforderung ("reserviere einen Tisch")
+    und einer bereits abgeschlossenen Aussage in Vergangenheitsform ("ich
+    habe den Tisch schon reserviert", "der Tisch, den ich gestern
+    reservierte, war gut") - beides matcht gleich. Eine zuverlaessige
+    Unterscheidung braeuchte echte Tempus-/Modus-Analyse (Grammatik), nicht
+    nur Stichwort-/Abstands-Heuristiken wie den Rest dieser Funktion - klar
+    ausserhalb dessen, was diese Codebasis an Absichtserkennung sonst
+    einsetzt (durchgehend Keyword-/Regex-basiert, siehe DOMAIN_TERMS/
+    has_domain_fuzzy()). Nach mehreren Codex-Review-Folgerunden zu genau
+    diesem Erkennungspfad (2026-08-27) bewusst hier gestoppt statt weiter
+    verfeinert: dieselbe Folgenlosigkeit wie oben gilt auch hier."""
+    normalized = normalize_umlauts(normalize_text(text))
+    # Satzweise statt ueber den GESAMTEN Text pruefen - sonst wuerde z.B.
+    # "Wir sitzen im Restaurant. Morgen reserviere ich ein Hotel" (zwei
+    # voellig unabhaengige Saetze) faelschlich matchen (Codex-Review
+    # 2026-08-27, Folgerunde). Satzgrenzen (./!/?) bleiben deshalb bewusst
+    # VOR dem Entfernen der uebrigen Satzzeichen erhalten und die Pruefung
+    # laeuft separat pro Satz.
+    #
+    # BEKANNTE EINSCHRAENKUNG: zwei Saetze OHNE jegliches Satzzeichen
+    # dazwischen, nur durch einen Zeilenumbruch getrennt (z.B. "Wir sitzen
+    # im Restaurant\nMorgen reserviere ich ein Hotel"), werden hier nicht
+    # erkannt - normalize_text() wandelt Zeilenumbrueche schon vor dieser
+    # Funktion in Leerzeichen um. Ein derart interpunktionsloser Zwei-Satz-
+    # Zeilenumbruch ist fuer diese primaer sprach-/chatbasierte App ein
+    # sehr seltenes Eingabeformat; nach bereits mehreren Folgerunden auf
+    # genau diesem Erkennungspfad (2026-08-27) bewusst hier nicht weiter
+    # verfeinert - dieselbe Folgenlosigkeit wie beim Tempus-Fall oben gilt
+    # auch hier (siehe Docstring).
+    #
+    # BEKANNTE EINSCHRAENKUNG: ein Punkt nach einer Abkuerzung ("z. B.", "d.
+    # h.", "usw.") wird hier wie ein echtes Satzende behandelt und trennt
+    # Reservierungs-Verb und Tisch-/Restaurant-Wort dann u.U. faelschlich in
+    # zwei "Saetze" - eine vollstaendige Abkuerzungsliste ist unverhaeltnis-
+    # maessiger Aufwand fuer diesen seltenen Fall, bewusst nicht geloest
+    # (Codex-Review 2026-08-27, Folgerunde).
+    #
+    # Deutsche Uhrzeit-Notation MIT Punkt ("19.30") ist alltaeglich, nicht der
+    # seltene Abkuerzungsfall oben - der INNERE Punkt zwischen zwei kurzen
+    # Zifferngruppen (Stunde/Minute oder Tag/Monat) wird deshalb VOR dem
+    # Satz-Split maskiert, damit er nicht faelschlich als Satzende zaehlt
+    # (Codex-Review 2026-08-27, Folgerunde: "Reserviere um 19.30 einen Tisch"
+    # trennte das Verb sonst vom Tisch-Wort).
+    #
+    # BEWUSST NUR der innere Punkt, NICHT ein optionaler AEUSSERER Punkt
+    # danach (wie bei "28.08." als deutsches Tagesdatum): dieser aeussere
+    # Punkt ist grundsaetzlich nicht von einem echten Satzende zu
+    # unterscheiden, ohne den restlichen Satz zu verstehen - "Wir essen im
+    # Restaurant am 28.08. Morgen reserviere ich ein Hotel" haette bei einer
+    # frueheren Fassung (die auch den aeusseren Punkt maskierte) beide Saetze
+    # zu einem verschmolzen und die Restaurant-/Hotel-Verwechslung von oben
+    # wieder eingefuehrt (Codex-Review 2026-08-27, Folgerunde). Korrekte
+    # Satzgrenzen-Erkennung wiegt hier schwerer als die selten problematische
+    # Formulierung "...28.08. einen Tisch" (Datum MIT Punkt, OHNE eigenes
+    # Satzende danach) - akzeptierte, dokumentierte Einschraenkung.
+    protected = re.sub(r"(\d{1,2})\.(\d{1,2})", lambda m: m.group(0).replace(".", "\x00"), normalized)
+    for sentence in re.split(r"[.!?]+", protected):
+        # normalize_text() entfernt Satzzeichen nur an den RAENDERN des
+        # GESAMTEN Texts, nicht pro Wort - ein Tisch-/Restaurant-Signal
+        # MITTEN im Satz vor einem Komma o.ae. (z.B. "Resarviere bitte
+        # einen Tisch, fuer morgen bitte") blieb dadurch als "tisch,"
+        # stehen und matchte den exakten Woertervergleich unten nicht -
+        # genau der freie-Wortstellung-Fall, fuer den dieser Pfad
+        # ueberhaupt gebaut wurde (Codex-Review 2026-08-27, Folgerunde).
+        # Satzendezeichen sind hier schon durch den re.split() oben weg,
+        # nur noch uebrige Satzzeichen (Komma, Anfuehrungszeichen, ...)
+        # pro Wort entfernen.
+        words = [word.strip(",;:()[]\"'„“”‚‘’").replace("\x00", ".") for word in sentence.split()]
+        has_verb = any(_looks_like_reservation_verb(word) for word in words)
+        has_table_signal = any(word in _RESERVATION_TABLE_SIGNAL_WORDS for word in words)
+        if has_verb and has_table_signal:
+            return True
+    return False
+
+
+def has_reservation_domain(text: str) -> bool:
+    """Wie has_domain(text, "reservation"), erweitert um
+    _looks_like_table_reservation() als zusaetzlichen, UND-basierten
+    Erkennungspfad - siehe dort fuer den Grund, warum das nicht einfach als
+    weiterer DOMAIN_TERMS-Eintrag geloest wurde."""
+    return has_domain(text, "reservation") or _looks_like_table_reservation(text)
+
+
 def record_pattern_event_if_matched(text: str) -> None:
     """Baustein D (siehe plans/2026-08-08-jarvis-verhaltensmuster-erkennen.md):
     zaehlt fuer jede erkannte Faehigkeit ein Muster-Ereignis (nur Kategorie +
@@ -1003,7 +1174,15 @@ def record_pattern_event_if_matched(text: str) -> None:
     das bewusst nicht selbst, um keine Abhaengigkeit auf den PermissionManager
     einzufuehren."""
     for domain in DOMAIN_TERMS:
-        if has_domain(text, domain):
+        # "reservation" hat einen ZUSAETZLICHEN Erkennungspfad ueber
+        # has_reservation_domain() (siehe dort) - has_domain() allein sieht
+        # z.B. "reserviere doch bitte einen tisch" nicht, obwohl
+        # handle_reservation_command() dafuer laeuft. Ohne diesen Sonderfall
+        # wuerden genau diese Anfragen aus der Nutzungsmuster-Erkennung
+        # herausfallen, obwohl diese Funktion verspricht, JEDE erkannte
+        # Faehigkeit zu zaehlen (Codex-Review 2026-08-27, Folgerunde).
+        matched = has_reservation_domain(text) if domain == "reservation" else has_domain(text, domain)
+        if matched:
             record_pattern_event(domain)
 
 
@@ -3564,7 +3743,19 @@ def looks_like_multistep_request(text: str) -> bool:
     padded = f" {normalized} "
     if not any(connector in padded for connector in _MULTISTEP_CONNECTOR_WORDS):
         return False
-    matched_domains = {domain for domain in DOMAIN_TERMS if has_domain(text, domain)}
+    # "reservation" hat einen ZUSAETZLICHEN Erkennungspfad ueber
+    # has_reservation_domain() (siehe dort) - has_domain() allein sieht z.B.
+    # "reserviere doch bitte einen tisch" nicht. Ohne diesen Sonderfall waere
+    # ein Satz wie "reserviere doch bitte einen tisch und schreibe eine
+    # notiz" von der Einzelschritt-Kette abgefangen worden, statt korrekt
+    # als Zwei-Domaenen-Mehrschritt-Auftrag erkannt zu werden (Codex-Review
+    # 2026-08-27, Folgerunde - gleiche Inkonsistenz-Klasse wie bereits bei
+    # record_pattern_event_if_matched() behoben).
+    matched_domains = {
+        domain
+        for domain in DOMAIN_TERMS
+        if (has_reservation_domain(text) if domain == "reservation" else has_domain(text, domain))
+    }
     # "camera" und "photos" teilen sich absichtlich das Stichwort "foto" (siehe
     # Kommentar bei DOMAIN_TERMS["camera"]) - ein einzelner, zusammenhaengender
     # Kamera-Wunsch wie "Mach ein Foto von mir und sag mir wie ich aussehe."
@@ -6476,10 +6667,10 @@ def handle_reservation_command(text: str, memory: Memory | None = None) -> str |
             has_pending = False
             pending_details = None
 
-    if not has_pending and not has_domain(text, "reservation"):
+    if not has_pending and not has_reservation_domain(text):
         return None
 
-    if has_pending and not has_domain(text, "reservation") and not _RESERVATION_CONTINUATION_RE.search(text):
+    if has_pending and not has_reservation_domain(text) and not _RESERVATION_CONTINUATION_RE.search(text):
         # _RESERVATION_CONTINUATION_RE matcht Zeit-/Personenzahl-Antworten, aber
         # keinen blossen Restaurantnamen ("Hans im Glück" auf "Welches Restaurant
         # meinst du?") - zusaetzlich pruefen, ob die neue Nachricht ein Restaurant
@@ -8300,7 +8491,7 @@ def answer_message(
     reservation_in_progress = bool((memory.get("settings") or {}).get("pending_reservation_details"))
     reservation_permission = (
         ensure_privacy_domain_permission(memory, "reservation", "Jarvis würde eine Tischreservierung bei TheFork vorbereiten - reserviert selbst nichts endgültig.")
-        if has_domain(question, "reservation") or reservation_in_progress
+        if has_reservation_domain(question) or reservation_in_progress
         else None
     )
     if reservation_permission is not None:

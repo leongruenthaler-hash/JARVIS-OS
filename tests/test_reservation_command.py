@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -39,6 +40,34 @@ def _remember_restaurant(memory: Memory) -> None:
         "Restaurant Hans im Glück: https://www.thefork.de/restaurant/hans-im-gluck-burgergrill-bar-amberg-spitalkirche-r615551",
         category="facts",
     )
+
+
+def _past_time_today() -> str:
+    # Dynamisch berechnet statt fest "8 Uhr" - ein fester Wert waere je nach
+    # Tageszeit des Testlaufs noch in der Zukunft gewesen (live so
+    # aufgefallen). Einfaches "jetzt minus 1 Minute" kann in der ersten Minute
+    # nach Mitternacht auf den VORTAG zurueckrollen (z.B. 23:59) - "heute um
+    # 23:59" waere dann noch in der Zukunft und die "schon vorbei"-Assertion
+    # schluege fehl (Codex-Review 2026-08-27, Folgerunde). Faellt in diesem
+    # engen Fenster stattdessen auf "00:00" zurueck, das fuer "heute"
+    # garantiert im selben Kalendertag bleibt.
+    now = datetime.now()
+    candidate = now - timedelta(minutes=1)
+    if candidate.date() != now.date():
+        candidate = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return candidate.strftime("%H:%M")
+
+
+def _correction_time_distinct_from(past_time: str) -> str:
+    # +12 Stunden (mod 24) auf die MINUTE genau statt eines fest verdrahteten
+    # "19 Uhr" - ein fester Wert kann zufaellig exakt mit past_time
+    # zusammenfallen (z.B. beide "19:00", wenn der Testlauf um 19:01 startet)
+    # und wuerde dann sowohl die "ist jetzt frei"- als auch die "alte Zeit
+    # nicht mehr enthalten"-Assertion widerspruechlich machen (Codex-Review
+    # 2026-08-27, Folgerunde). +12h mod 24 auf denselben Wert kann nie mit ihm
+    # uebereinstimmen.
+    hour, minute = (int(part) for part in past_time.split(":"))
+    return f"{(hour + 12) % 24:02d}:{minute:02d}"
 
 
 class _FakeLLM:
@@ -371,14 +400,22 @@ def test_time_paired_with_a_superseded_date_is_not_reused_for_the_new_date(memor
     # Folgerunde).
     _remember_restaurant(memory)
 
+    # Siehe _past_time_today() fuer den Grund, warum das nicht einfach "8 Uhr"
+    # oder ein naives "jetzt minus 1 Minute" ist. Ein ISO-Datum von "gestern"
+    # waere ebenfalls robust, deckt aber einen unabhaengigen, bereits
+    # bestehenden Fehler in _safe_datetime() auf (rollt ein EXPLIZIT
+    # genanntes, bereits vergangenes Jahr faelschlich auf naechstes Jahr vor)
+    # - nicht Teil dieser Aenderung, deshalb hier bewusst umgangen.
+    past_time = _past_time_today()
     first = jarvis.handle_reservation_command(
-        "reserviere einen tisch bei Hans im Glück heute um 8 Uhr für 2 Personen", memory=memory
+        f"reserviere einen tisch bei Hans im Glück heute um {past_time} für 2 Personen", memory=memory
     )
     assert "schon vorbei" in first.lower()
 
-    second = jarvis.handle_reservation_command("morgen um 19 Uhr", memory=memory)
-    assert "19:00" in second
-    assert "08:00" not in second
+    correction_time = _correction_time_distinct_from(past_time)
+    second = jarvis.handle_reservation_command(f"morgen um {correction_time}", memory=memory)
+    assert correction_time in second
+    assert past_time not in second
 
 
 def test_time_removal_window_does_not_swallow_an_intervening_valid_date(memory):
@@ -391,14 +428,22 @@ def test_time_removal_window_does_not_swallow_an_intervening_valid_date(memory):
     # (Codex-Review 2026-08-27, sechste Folgerunde).
     _remember_restaurant(memory)
 
+    # Siehe _past_time_today() fuer den Grund, warum das nicht einfach "8 Uhr"
+    # oder ein naives "jetzt minus 1 Minute" ist. Ein ISO-Datum von "gestern"
+    # waere ebenfalls robust, deckt aber einen unabhaengigen, bereits
+    # bestehenden Fehler in _safe_datetime() auf (rollt ein EXPLIZIT
+    # genanntes, bereits vergangenes Jahr faelschlich auf naechstes Jahr vor)
+    # - nicht Teil dieser Aenderung, deshalb hier bewusst umgangen.
+    past_time = _past_time_today()
     first = jarvis.handle_reservation_command(
-        "reserviere einen tisch bei Hans im Glück heute um 8 Uhr für 2 Personen", memory=memory
+        f"reserviere einen tisch bei Hans im Glück heute um {past_time} für 2 Personen", memory=memory
     )
     assert "schon vorbei" in first.lower()
 
-    second = jarvis.handle_reservation_command("morgen übermorgen um 19 Uhr", memory=memory)
-    assert "19:00" in second
-    assert "08:00" not in second
+    correction_time = _correction_time_distinct_from(past_time)
+    second = jarvis.handle_reservation_command(f"morgen übermorgen um {correction_time}", memory=memory)
+    assert correction_time in second
+    assert past_time not in second
 
 
 def test_stale_availability_cache_is_not_used_for_a_different_corrected_date(memory):

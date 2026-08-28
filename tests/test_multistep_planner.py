@@ -118,6 +118,21 @@ def test_looks_like_multistep_request_false_without_connector_word():
     assert jarvis.looks_like_multistep_request("mach eine notiz erinnere mich morgen") is False
 
 
+def test_looks_like_multistep_request_recognizes_reservation_via_wider_matcher():
+    # Regression: looks_like_multistep_request() baute matched_domains
+    # ausschliesslich ueber has_domain() - fuer "reservation" gibt es aber
+    # einen zusaetzlichen, breiteren Erkennungspfad (has_reservation_domain(),
+    # siehe _looks_like_table_reservation()). Ein Satz wie "reserviere doch
+    # bitte einen tisch und schreibe eine notiz" wurde vom Reservierungs-
+    # Handler zwar als Reservierung erkannt, aber NICHT als eine der zwei
+    # Domaenen fuer die Mehrschritt-Planung gezaehlt - ein frueherer
+    # Einzelschritt-Handler haette die Anfrage dadurch abgefangen, bevor der
+    # zweite Schritt (Notiz) je ankam (Codex-Review 2026-08-27, Folgerunde -
+    # gleiche Inkonsistenz-Klasse wie bereits bei
+    # record_pattern_event_if_matched() behoben).
+    assert jarvis.looks_like_multistep_request("reserviere doch bitte einen tisch und schreibe eine notiz") is True
+
+
 # --- jarvis.py::execute_multistep_plan --------------------------------------
 
 

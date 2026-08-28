@@ -5,6 +5,8 @@ app/jarvis.py::has_domain) und der LLM-Klassifikations-Rueckfrage als
 Sicherheitsnetz (Stufe 2, app/jarvis.py).
 """
 
+from unittest.mock import patch
+
 import pytest
 
 from core.intent_matching import (
@@ -108,6 +110,170 @@ def test_has_domain_single_word_term_no_longer_matches_as_substring_of_longer_wo
 def test_has_domain_single_word_term_still_matches_as_standalone_word():
     assert jarvis.has_domain("zeig mir das bild", "photos") is True
     assert jarvis.has_domain("zeig mir meine bilder", "photos") is True
+
+
+def test_has_reservation_domain_tolerates_typo_and_natural_phrasing():
+    # Live beobachtet 2026-08-27: DOMAIN_TERMS["reservation"] enthielt nur enge
+    # Mehrwort-Phrasen (z.B. "reserviere einen tisch") und ein einzelnes
+    # Fuzzy-Wort ("reservierung") - eine ganz natuerliche Formulierung wie
+    # "reserviere doch bitte einen tisch fuer 2 Personen" (passt zu KEINER der
+    # hartcodierten Phrasen wortwoertlich) UND ihr Tippfehler "resarviere"
+    # matchten dadurch ueberhaupt nicht; Jarvis wich auf eine generische
+    # "Meinten Sie Kalender/Erinnerung?"-Rueckfrage aus statt die Reservierung
+    # zu starten.
+    #
+    # Ein bare Einzelwort-Fuzzy-Muster fuer "reservieren" in DOMAIN_TERMS
+    # selbst haette aber auch "ein Hotel reservieren" (falsche Domaene) und
+    # "das Essen SERVIEREN" (Distanz 2, unabhaengiges Wort) ausgeloest -
+    # deshalb stattdessen has_reservation_domain(): has_domain(text,
+    # "reservation") ERWEITERT um eine UND-Bedingung (Reservierungs-Verb UND
+    # Tisch-/Restaurant-Signal im selben Satz), siehe
+    # _looks_like_table_reservation(). Ein Denylist einzelner Verben
+    # ("servieren" ausschliessen) skalierte dabei nicht - "referieren" haette
+    # denselben Ueberlapp gehabt und war nicht ausgeschlossen. Die finale
+    # Loesung vergleicht stattdessen nur den distinktiven Wortstamm "reservi"
+    # als PRAEFIX statt das ganze Wort (siehe _looks_like_reservation_verb(),
+    # Codex-Review 2026-08-27, mehrere Folgerunden).
+    assert jarvis.has_reservation_domain("Jarvis resarviere doch bitte einen tisch für 2 Personen für mich") is True
+    assert jarvis.has_reservation_domain("reserviere doch bitte einen tisch für 2 Personen") is True
+    assert jarvis.has_reservation_domain("reserviere doch bitte im Restaurant für 2 Personen") is True
+    # Pluralformen ("Tische"/"Restaurants") muessen genauso zaehlen wie der
+    # Singular - eine reine Exakt-Singular-Liste haette diese ganz normale
+    # Formulierung verpasst (Codex-Review 2026-08-27, Folgerunde).
+    assert jarvis.has_reservation_domain("reserviere bitte zwei Tische für morgen") is True
+    assert jarvis.has_reservation_domain("reserviere bitte in einem der Restaurants für morgen") is True
+    # Reservierungs-Verb OHNE Tisch-/Restaurant-Signal darf ueber den NEUEN
+    # UND-Pfad (_looks_like_table_reservation()) nicht matchen.
+    assert jarvis.has_reservation_domain("ich habe schon reserviert") is False
+    # "ich moechte ein Hotel reservieren" matcht trotzdem noch (True) - aber
+    # ueber einen VORBESTEHENDEN, unabhaengigen Pfad: has_domain_fuzzy()
+    # vergleicht "reservieren" (Verb) mit dem bereits laenger existierenden
+    # Einzelwort-Term "reservierung" (Distanz 2, exakt dieselbe Toleranz).
+    # Dieser Ueberlapp bestand schon VOR dieser Aenderung (nicht Teil des
+    # heute neu ergaenzten Wortstamm-Pfads, den dieser Test prueft) und wird
+    # hier bewusst nicht mitgeloest - siehe
+    # test_has_domain_pre_existing_reservierung_overlap_with_hotel_booking.
+    assert jarvis.has_reservation_domain("ich möchte ein Hotel reservieren") is True
+    # "servieren" hat Editierdistanz 2 zu "reservieren" auf Wortebene, aber
+    # sein Wortstamm ("servier") liegt weit vom distinktiven "reservi"-Praefix
+    # entfernt - darf trotz Tisch-Erwaehnung in der Naehe nicht als
+    # Reservierungs-Verb durchgehen.
+    assert jarvis.has_reservation_domain("bitte das Essen am Tisch servieren") is False
+    # "referieren" ist genauso weit von "reservieren" entfernt wie
+    # "servieren" (Editierdistanz 2 auf Wortebene) - ein reiner
+    # Ganzwort-Denylist haette das nicht abgedeckt, der Wortstamm-Vergleich
+    # schon (Codex-Review 2026-08-27, Folgerunde).
+    assert jarvis.has_reservation_domain("ich soll über das Restaurant referieren") is False
+    # "Reservat"/"Reservoir" (voellig unabhaengige Substantive) haben mit dem
+    # urspruenglich 7 Zeichen kurzen Praefix-Fenster ("reservi") ebenfalls nur
+    # Distanz 1 gehabt - erst das laengere, 9 Zeichen umfassende Fenster
+    # ("reservier") unterscheidet sie zuverlaessig vom Reservierungs-Verb
+    # (Codex-Review 2026-08-27, Folgerunde).
+    assert jarvis.has_reservation_domain("Restaurant im Reservat") is False
+    assert jarvis.has_reservation_domain("Reservoir beim Restaurant") is False
+    # Darf keine voellig unabhaengigen Anfragen faelschlich als Reservierung
+    # erkennen.
+    assert jarvis.has_reservation_domain("was soll ich heute essen") is False
+    assert jarvis.has_reservation_domain("trag das bitte in meinen kalender ein") is False
+
+
+def test_looks_like_table_reservation_allows_detailed_date_time_phrasing():
+    # Ein frueherer Versuch begrenzte den Wortabstand zwischen Verb und
+    # Tisch-/Restaurant-Signal (max. 6 Woerter), um ein konstruiertes
+    # Beispiel auszuschliessen, in dem das Tisch-/Restaurant-Wort semantisch
+    # nicht das Objekt des Verbs ist ("Im Restaurant besprechen wir, wie wir
+    # ein Hotel reservieren", Wortabstand 7). Das brach aber ganz normale,
+    # detailreiche Anfragen wie diese hier (Wortabstand 9) - es gibt keinen
+    # Schwellwert, der beide Faelle sauber trennt. Die haeufige, echte
+    # Formulierung wiegt schwerer als der seltene Konstrukt-Fall, deshalb
+    # bewusst KEIN Wortabstands-Limit mehr (Codex-Review 2026-08-27, mehrere
+    # Folgerunden) - siehe Docstring von _looks_like_table_reservation() fuer
+    # die vollstaendige Abwaegung.
+    assert jarvis._looks_like_table_reservation(
+        "Reserviere bitte für morgen Abend um 19 Uhr einen Tisch"
+    ) is True
+
+
+def test_looks_like_table_reservation_does_not_distinguish_past_from_command():
+    # Dokumentiert eine bewusst NICHT geloeste Einschraenkung (siehe
+    # Docstring von _looks_like_table_reservation()): eine bereits
+    # abgeschlossene Aussage in Vergangenheitsform matcht genauso wie eine
+    # Aufforderung, weil die Funktion nur Stichwoerter/Wortabstand prueft,
+    # keine Tempus-/Modus-Analyse. Folgenlos: fuehrt hoechstens zu einer
+    # unnoetigen, leicht ablehnbaren Rueckfrage - reserviert nie etwas
+    # endgueltig (Codex-Review 2026-08-27, Folgerunde - nach mehreren
+    # Runden auf genau diesem Pfad bewusst als Grenze akzeptiert statt
+    # weiter verfeinert).
+    assert jarvis._looks_like_table_reservation("Ich habe den Tisch schon reserviert") is True
+
+
+def test_has_reservation_domain_strips_punctuation_from_mid_sentence_words():
+    # Regression: normalize_text() entfernt Satzzeichen nur an den Raendern
+    # des GESAMTEN Texts, nicht pro Wort - ein Tisch-/Restaurant-Signal MITTEN
+    # im Satz vor einem Punkt (z.B. "Resarviere bitte einen Tisch. Fuer
+    # morgen.") blieb dadurch als "tisch." stehen und matchte den exakten
+    # Woertervergleich in _looks_like_table_reservation() nicht mehr - genau
+    # der freie-Wortstellung-/Tippfehler-Fall, fuer den dieser Pfad ueberhaupt
+    # gebaut wurde (Codex-Review 2026-08-27, Folgerunde).
+    assert jarvis.has_reservation_domain("Resarviere bitte einen Tisch. Für morgen.") is True
+
+
+def test_looks_like_table_reservation_does_not_cross_sentence_boundaries():
+    # Regression: der vorherige Fix (Satzzeichen pro Wort entfernen, siehe
+    # test_has_reservation_domain_strips_punctuation_from_mid_sentence_words)
+    # entfernte dabei versehentlich auch die SatzENDE-Zeichen selbst, bevor
+    # der Wortabstand gemessen wurde - "Wir sitzen im Restaurant. Morgen
+    # reserviere ich ein Hotel" (zwei voellig unabhaengige Saetze) landete
+    # dadurch bei Wortabstand 2 und matchte faelschlich (Codex-Review
+    # 2026-08-27, Folgerunde). Fix: Satzgrenzen bleiben erhalten, die
+    # Wortabstands-Pruefung laeuft separat PRO SATZ.
+    assert jarvis._looks_like_table_reservation(
+        "Wir sitzen im Restaurant. Morgen reserviere ich ein Hotel"
+    ) is False
+
+
+def test_looks_like_table_reservation_preserves_german_time_period():
+    # Regression: der Satzgrenzen-Split (siehe
+    # test_looks_like_table_reservation_does_not_cross_sentence_boundaries)
+    # behandelte JEDEN Punkt als Satzende - deutsche Uhrzeit-Notation
+    # ("19.30") nutzt den Punkt aber ganz alltaeglich, nicht nur seltene
+    # Abkuerzungen. "Reserviere um 19.30 einen Tisch" trennte das Verb
+    # dadurch faelschlich vom Tisch-Wort in zwei "Saetze" (Codex-Review
+    # 2026-08-27, Folgerunde). Der INNERE Punkt zwischen zwei kurzen
+    # Zifferngruppen wird deshalb vor dem Satz-Split maskiert.
+    assert jarvis._looks_like_table_reservation("Reserviere um 19.30 einen Tisch") is True
+
+
+def test_looks_like_table_reservation_trailing_date_period_stays_a_sentence_boundary():
+    # Bewusst akzeptierte Einschraenkung (siehe Docstring von
+    # _looks_like_table_reservation()): ein AEUSSERER Punkt nach einer
+    # Datumsangabe ("28.08.", deutsches Tagesdatum-Format) bleibt ein
+    # potenzielles Satzende, auch wenn er tatsaechlich Teil der
+    # Datumsnotation war und der Satz eigentlich weitergeht - er ist ohne
+    # echtes Satzverstaendnis nicht zuverlaessig von einem GENUINEN
+    # Satzende zu unterscheiden. Ein frueherer Versuch maskierte diesen
+    # aeusseren Punkt ebenfalls und fuehrte dadurch die Restaurant-/
+    # Hotel-Verwechslung von test_looks_like_table_reservation_does_not_
+    # cross_sentence_boundaries wieder ein ("Wir essen im Restaurant am
+    # 28.08. Morgen reserviere ich ein Hotel" waere sonst wieder ein
+    # einziger Satz gewesen) (Codex-Review 2026-08-27, Folgerunde).
+    assert jarvis._looks_like_table_reservation("Reserviere am 28.08. einen Tisch") is False
+    assert jarvis._looks_like_table_reservation(
+        "Wir essen im Restaurant am 28.08. Morgen reserviere ich ein Hotel"
+    ) is False
+
+
+def test_has_domain_pre_existing_reservierung_overlap_with_hotel_booking():
+    # Dokumentiert einen bereits VOR dem heutigen Fuzzy-Fix bestehenden
+    # Nebeneffekt, nicht dessen Ursache: DOMAIN_TERMS["reservation"] enthielt
+    # "reservierung" schon vorher als einzelnes Fuzzy-Wort - "reservieren"
+    # (Verb) hat Editierdistanz 2 dazu, exakt dieselbe Toleranz wie beim
+    # Tippfehler "resarviere". Eine Hotel-/Flugbuchung wird dadurch weiterhin
+    # (schon immer) faelschlich als Tischreservierungs-Domaene erkannt - bewusst
+    # NICHT im Rahmen dieser Aenderung geloest (Aufwand/Nutzen, siehe
+    # Session-Notizen 2026-08-27), da es unabhaengig vom heute neu ergaenzten
+    # UND-basierten Pfad besteht.
+    assert jarvis.has_domain("ich möchte ein Hotel reservieren", "reservation") is True
 
 
 # --- Stufe 2: LLM-Klassifikation als Sicherheitsnetz ------------------------
@@ -223,3 +389,17 @@ def test_pending_domain_clarification_flow_unrelated_reply_falls_through(memory)
 
 def test_pending_domain_clarification_flow_has_no_pending_state_returns_none(memory):
     assert jarvis.handle_pending_domain_clarification_flow(memory, "ja") is None
+
+
+def test_record_pattern_event_if_matched_counts_reservation_via_the_wider_matcher():
+    # Regression: record_pattern_event_if_matched() prueft jede Domaene ueber
+    # has_domain() - fuer "reservation" gibt es aber einen zusaetzlichen,
+    # breiteren Erkennungspfad (has_reservation_domain(), siehe
+    # _looks_like_table_reservation()). Eine nur darueber erkannte Anfrage wie
+    # "reserviere doch bitte einen tisch fuer 2 Personen" haette die
+    # Nutzungsmuster-Zaehlung deshalb verpasst, obwohl handle_reservation_command()
+    # dafuer tatsaechlich anlief - die Funktion verspricht aber, JEDE erkannte
+    # Faehigkeit zu zaehlen (Codex-Review 2026-08-27, Folgerunde).
+    with patch.object(jarvis, "record_pattern_event") as record:
+        jarvis.record_pattern_event_if_matched("reserviere doch bitte einen tisch für 2 Personen")
+    assert any(call.args == ("reservation",) for call in record.call_args_list)
