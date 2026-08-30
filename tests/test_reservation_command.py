@@ -318,6 +318,56 @@ def test_empty_availability_is_not_treated_as_a_failed_lookup(memory):
     assert "nichts mehr frei" in second.lower()
 
 
+def test_rejected_day_suggests_alternative_dates_found_by_the_scan(memory):
+    # Nutzer-Wunsch 2026-08-30: statt blind "fuer welchen anderen Tag soll
+    # ich schauen?" zu fragen, soll Jarvis gleich die naechsten Tage pruefen
+    # und die freien direkt mitnennen.
+    _remember_restaurant(memory)
+
+    def fake_fetch(url, date, party_size, timeout=None):
+        return {"2026-09-03": ["19:00", "20:00"]}.get(date, [])
+
+    with patch.object(jarvis.thefork_client, "fetch_available_time_slots", side_effect=fake_fetch):
+        result = jarvis.handle_reservation_command(
+            "reserviere einen tisch bei Hans im Glück morgen für 2 Personen", memory=memory
+        )
+
+    assert "nichts mehr frei" in result.lower()
+    assert "03.09." in result
+    assert "19:00" in result and "20:00" in result
+
+
+def test_rejected_day_falls_back_to_plain_question_when_scan_finds_nothing(memory):
+    _remember_restaurant(memory)
+
+    with patch.object(jarvis.thefork_client, "fetch_available_time_slots", return_value=[]):
+        result = jarvis.handle_reservation_command(
+            "reserviere einen tisch bei Hans im Glück morgen für 2 Personen", memory=memory
+        )
+
+    assert "nichts mehr frei" in result.lower()
+    assert "für welchen anderen tag soll ich schauen" in result.lower()
+
+
+def test_rejected_day_falls_back_to_plain_question_when_scan_itself_fails(memory):
+    _remember_restaurant(memory)
+
+    def fake_fetch(url, date, party_size, timeout=None):
+        # Der abgelehnte Tag selbst liefert eine leere Liste (echt
+        # ausgebucht), der anschliessende Scan schlaegt fuer JEDEN
+        # weiteren Tag komplett fehl (None) - find_available_dates() gibt
+        # dann selbst None zurueck, die Rueckfrage bleibt die reine Frage.
+        return [] if date == "2026-08-31" else None
+
+    with patch.object(jarvis.thefork_client, "fetch_available_time_slots", side_effect=fake_fetch):
+        result = jarvis.handle_reservation_command(
+            "reserviere einen tisch bei Hans im Glück morgen für 2 Personen", memory=memory
+        )
+
+    assert "nichts mehr frei" in result.lower()
+    assert "für welchen anderen tag soll ich schauen" in result.lower()
+
+
 def test_rejected_date_does_not_repeat_query_but_a_new_date_does(memory):
     # Regression: das abgelehnte Datum blieb im aufaddierten Text stehen -
     # eine Korrektur-Antwort mit einem neuen Tag haette _extract_datetime()
@@ -330,18 +380,22 @@ def test_rejected_date_does_not_repeat_query_but_a_new_date_does(memory):
     with patch.object(jarvis.thefork_client, "fetch_available_time_slots", return_value=[]) as fetch:
         first = jarvis.handle_reservation_command("reserviere einen tisch bei Hans im Glück morgen für 2 Personen", memory=memory)
         assert "nichts mehr frei" in first.lower()
-        fetch.assert_called_once()
+        # 1 Aufruf fuer den abgelehnten Tag selbst + 7 fuer den anschliessenden
+        # Alternativtage-Scan (_reject_day_with_alternative_suggestions(), mit
+        # return_value=[] fuer JEDEN Tag findet der Scan nichts und die
+        # Rueckfrage bleibt die reine "fuer welchen anderen Tag"-Frage).
+        assert fetch.call_count == 8
 
         # Derselbe (bereits abgelehnte) Tag nochmal genannt - keine neue Abfrage.
         second = jarvis.handle_reservation_command("morgen", memory=memory)
         assert "nichts mehr frei" in second.lower()
-        fetch.assert_called_once()  # weiterhin nur der erste Aufruf
+        assert fetch.call_count == 8  # weiterhin nur die Aufrufe von oben
 
         # Ein WIRKLICH anderer Tag - muss eine neue, echte Abfrage ausloesen.
         fetch.return_value = ["18:00"]
         third = jarvis.handle_reservation_command("übermorgen", memory=memory)
         assert "18:00" in third
-        assert fetch.call_count == 2
+        assert fetch.call_count == 9  # sofort Zeiten gefunden, kein Scan noetig
     assert memory.get("settings").get("pending_reservation_open") is None
 
 
@@ -359,12 +413,14 @@ def test_rejected_absolute_date_does_not_block_a_new_absolute_date(memory):
             "reserviere einen tisch bei Hans im Glück am 2026-09-01 für 2 Personen", memory=memory
         )
         assert "nichts mehr frei" in first.lower()
-        fetch.assert_called_once()
+        # 1 Aufruf fuer den abgelehnten Tag + 7 fuer den Alternativtage-Scan
+        # (siehe test_rejected_date_does_not_repeat_query_but_a_new_date_does).
+        assert fetch.call_count == 8
 
         fetch.return_value = ["18:00"]
         second = jarvis.handle_reservation_command("am 2026-09-15", memory=memory)
         assert "18:00" in second
-        assert fetch.call_count == 2
+        assert fetch.call_count == 9  # sofort Zeiten gefunden, kein Scan noetig
 
 
 def test_user_can_change_the_date_before_it_was_ever_rejected(memory):

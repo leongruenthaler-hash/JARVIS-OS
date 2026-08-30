@@ -23,10 +23,15 @@ Aufrufer darf durch dieses Feature crashen oder haengen bleiben."""
 
 import json
 import subprocess
+import time
+from datetime import datetime, timedelta
 from typing import Any
 
 _DEFAULT_TIMEOUT_SECONDS = 15.0
 _CLEANUP_TIMEOUT_SECONDS = 5.0
+_DEFAULT_SCAN_DAYS = 7
+_DEFAULT_SCAN_TIMEOUT_PER_DAY_SECONDS = 10.0
+_DEFAULT_SCAN_MAX_TOTAL_SECONDS = 30.0
 
 
 def _escape_applescript_text(value: str) -> str:
@@ -270,5 +275,92 @@ end tell
             if isinstance(entry, dict) and entry.get("available") is True and isinstance(entry.get("time"), str):
                 times.append(entry["time"])
         return times
+    except Exception:
+        return None
+
+
+def find_available_dates(
+    restaurant_base_url: str,
+    start_date: str,
+    party_size: int,
+    *,
+    num_days: int = _DEFAULT_SCAN_DAYS,
+    timeout_per_day: float = _DEFAULT_SCAN_TIMEOUT_PER_DAY_SECONDS,
+    max_total_seconds: float = _DEFAULT_SCAN_MAX_TOTAL_SECONDS,
+) -> list[dict] | None:
+    """Prueft bis zu `num_days` aufeinanderfolgende Tage AB EINSCHLIESSLICH
+    `start_date` (Format "YYYY-MM-DD") und liefert eine Liste
+    `[{"date": "YYYY-MM-DD", "times": [...]}, ...]` fuer jeden Tag mit
+    mindestens einer freien Uhrzeit - oder None, wenn KEIN einziger Tag
+    erfolgreich abgefragt werden konnte (z.B. fehlende Safari-Berechtigung,
+    Timeout bei jedem Versuch). Ein Tag ohne freie Zeit taucht einfach nicht
+    in der Liste auf; eine leere Liste heisst "alle Tage wurden erfolgreich
+    geprueft, aber keiner hatte etwas frei" - ein ANDERER Fall als None
+    (komplett fehlgeschlagene Abfrage), analog zur "is not None"-
+    Unterscheidung von fetch_available_time_slots() selbst.
+
+    Ruft dafuer fetch_available_time_slots() sequenziell fuer jeden Tag auf
+    (kein paralleles Oeffnen mehrerer Safari-Tabs - das wuerde Leons eigene
+    Safari-Sitzung mit mehreren gleichzeitigen Tabs ueberladen und das
+    Tab-Aufraeumen in _run_safari_script() verkomplizieren).
+
+    HARTES ZEITBUDGET (Codex-Review 2026-08-30, P1): der aufrufende Chat-
+    Client (`JarvisAPIClient.sendChat`) hat ein 60-Sekunden-Request-Timeout.
+    7 sequenzielle Tage mit dem Standard-15s-Timeout von
+    fetch_available_time_slots() haetten im Worst Case (jede Abfrage laeuft
+    komplett in den Timeout) ca. 64+ Sekunden gebraucht - genug, um dieses
+    Client-Timeout zu reissen, WAEHREND genau der langsame Fall vorlag, den
+    dieses Feature eigentlich abfedern sollte (der Nutzer haette dann gar
+    keine Antwort bekommen, nicht mal den dokumentierten Fallback). Deshalb:
+    ein knapperer Timeout pro Tag (Standard 10s statt 15s) UND ein
+    Gesamt-Zeitbudget (Standard 30s). Vor jedem weiteren Tag (ab dem
+    zweiten) wird das VERBLEIBENDE Budget berechnet und der fuer DIESEN Tag
+    erlaubte Timeout darauf gedeckelt - abzueglich `_CLEANUP_TIMEOUT_SECONDS`
+    (Codex-Review 2026-08-30, zweite Runde, P1): fetch_available_time_slots()
+    kann bei einem echten externen Timeout zusaetzlich bis zu
+    `_CLEANUP_TIMEOUT_SECONDS` in _close_stray_tab() verbringen - eine erste
+    Fassung dieses Zeitbudgets uebersah das und haette im Worst Case (Aufruf
+    startet knapp vor Budget-Ende, laeuft dann trotzdem in den vollen
+    Timeout+Cleanup) das Gesamtbudget spuerbar reissen koennen. Reicht das
+    verbleibende Budget nicht mal fuer die Cleanup-Zeit, bricht der Scan
+    sofort ab, statt einen praktisch nutzlosen Mini-Timeout-Aufruf zu
+    versuchen. Der ERSTE Tag (offset 0) laeuft immer mit dem vollen
+    `timeout_per_day` (das Budget beginnt erst danach zu wirken) - der reale
+    Worst Case fuer den GESAMTEN Scan liegt damit bei
+    `max(timeout_per_day + _CLEANUP_TIMEOUT_SECONDS, max_total_seconds)`
+    (Standard: 30s), zusammen mit dem vorherigen Einzel-Check (worst case
+    `_DEFAULT_TIMEOUT_SECONDS + _CLEANUP_TIMEOUT_SECONDS` = 20s) komfortabel
+    unter den 60s des Chat-Clients.
+
+    Ein einzelner fehlgeschlagener Tag (fetch_available_time_slots()
+    liefert None fuer diesen einen Tag, z.B. TheFork zeigt fuer DIESEN Tag
+    kurzzeitig einen Ladefehler) bricht den gesamten Scan NICHT ab - der
+    Tag wird einfach uebersprungen, die uebrigen Tage werden trotzdem
+    geprueft (best-effort, siehe Moduldoc)."""
+    try:
+        try:
+            start = datetime.strptime(start_date, "%Y-%m-%d")
+        except ValueError:
+            return None
+        results: list[dict] = []
+        any_successful_check = False
+        scan_started_at = time.monotonic()
+        for offset in range(num_days):
+            day_timeout = timeout_per_day
+            if offset > 0:
+                remaining = max_total_seconds - (time.monotonic() - scan_started_at)
+                if remaining <= _CLEANUP_TIMEOUT_SECONDS:
+                    break
+                day_timeout = min(timeout_per_day, remaining - _CLEANUP_TIMEOUT_SECONDS)
+            day = (start + timedelta(days=offset)).strftime("%Y-%m-%d")
+            slots = fetch_available_time_slots(restaurant_base_url, day, party_size, timeout=day_timeout)
+            if slots is None:
+                continue
+            any_successful_check = True
+            if slots:
+                results.append({"date": day, "times": slots})
+        if not any_successful_check:
+            return None
+        return results
     except Exception:
         return None

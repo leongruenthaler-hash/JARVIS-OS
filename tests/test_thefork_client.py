@@ -3,6 +3,8 @@ from __future__ import annotations
 import subprocess
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 import thefork_client
 
 
@@ -299,3 +301,128 @@ def test_only_slots_matching_time_pattern_are_kept_service_headers_excluded():
 
     script = captured["script"]
     assert "^timeslot-\\\\d{1,2}:\\\\d{2}$" in script
+
+
+def test_find_available_dates_returns_only_days_with_free_times():
+    # Nur Tage mit MINDESTENS einer freien Uhrzeit landen in der Liste -
+    # Tage mit leerer Liste (echt ausgebucht) tauchen einfach nicht auf,
+    # analog zu fetch_available_time_slots()'s "is not None"-Unterscheidung.
+    def fake_fetch(url, date, party_size, timeout=None):
+        return {"2026-09-02": ["18:00"], "2026-09-04": ["19:00", "20:00"]}.get(date, [])
+
+    with patch.object(thefork_client, "fetch_available_time_slots", side_effect=fake_fetch):
+        result = thefork_client.find_available_dates(
+            "https://www.thefork.de/restaurant/nobless-r598675", "2026-09-01", 2, num_days=5
+        )
+    assert result == [
+        {"date": "2026-09-02", "times": ["18:00"]},
+        {"date": "2026-09-04", "times": ["19:00", "20:00"]},
+    ]
+
+
+def test_find_available_dates_scans_num_days_starting_at_start_date_inclusive():
+    calls = []
+
+    def fake_fetch(url, date, party_size, timeout=None):
+        calls.append(date)
+        return []
+
+    with patch.object(thefork_client, "fetch_available_time_slots", side_effect=fake_fetch):
+        thefork_client.find_available_dates(
+            "https://www.thefork.de/restaurant/nobless-r598675", "2026-09-01", 2, num_days=3
+        )
+    assert calls == ["2026-09-01", "2026-09-02", "2026-09-03"]
+
+
+def test_find_available_dates_stops_early_once_time_budget_is_exhausted():
+    # Regression (Codex-Review 2026-08-30, P1): der aufrufende Chat-Client
+    # hat ein 60s-Request-Timeout - ohne dieses Zeitbudget haetten 7
+    # sequenzielle Tage im Worst Case laenger gebraucht und die Antwort waere
+    # nie beim Nutzer angekommen. Der Scan muss abbrechen, SOBALD das Budget
+    # vor dem naechsten Tag ausgeschoepft ist - nicht erst nach allen 7 Tagen.
+    calls = []
+
+    def fake_fetch(url, date, party_size, timeout=None):
+        calls.append(date)
+        return ["18:00"] if date == "2026-09-01" else []
+
+    # scan_started_at (1. Aufruf) = 0.0; die Budget-Pruefung vor Tag 2
+    # (offset=1) sieht bereits 100.0 - deutlich ueber max_total_seconds.
+    with patch.object(thefork_client, "fetch_available_time_slots", side_effect=fake_fetch), patch.object(
+        thefork_client.time, "monotonic", side_effect=[0.0, 100.0]
+    ):
+        result = thefork_client.find_available_dates(
+            "https://www.thefork.de/restaurant/nobless-r598675",
+            "2026-09-01",
+            2,
+            num_days=7,
+            max_total_seconds=30.0,
+        )
+    assert calls == ["2026-09-01"]  # nur der erste Tag wurde ueberhaupt geprueft
+    assert result == [{"date": "2026-09-01", "times": ["18:00"]}]  # trotzdem ein gueltiges Teilergebnis
+
+
+def test_find_available_dates_caps_per_day_timeout_by_remaining_budget_minus_cleanup():
+    # Regression (Codex-Review 2026-08-30, dritte Runde, P1): eine erste
+    # Fassung des Zeitbudgets uebergab jedem Tag ab dem zweiten weiterhin den
+    # vollen `timeout_per_day`, ohne die bis zu `_CLEANUP_TIMEOUT_SECONDS`
+    # zusaetzliche Zeit von fetch_available_time_slots()'s eigenem
+    # Aufraeum-Pfad (_close_stray_tab()) im Restbudget zu beruecksichtigen -
+    # ein Aufruf kurz vor Budget-Ende haette das Gesamtbudget trotzdem
+    # reissen koennen. Der an fetch_available_time_slots() weitergereichte
+    # Timeout fuer den ZWEITEN Tag muss deshalb auf
+    # (Restbudget - _CLEANUP_TIMEOUT_SECONDS) gedeckelt sein.
+    captured_timeouts = []
+
+    def fake_fetch(url, date, party_size, timeout=None):
+        captured_timeouts.append(timeout)
+        return []
+
+    # scan_started_at=0.0; vor Tag 2 (offset=1) sieht die Restbudget-Pruefung
+    # 22.0 - bei max_total_seconds=30 sind das noch 8s Restbudget, abzueglich
+    # 5s Cleanup bleiben 3s (< timeout_per_day=10) fuer diesen einen Aufruf.
+    with patch.object(thefork_client, "fetch_available_time_slots", side_effect=fake_fetch), patch.object(
+        thefork_client.time, "monotonic", side_effect=[0.0, 22.0]
+    ):
+        thefork_client.find_available_dates(
+            "https://www.thefork.de/restaurant/nobless-r598675",
+            "2026-09-01",
+            2,
+            num_days=2,
+            timeout_per_day=10.0,
+            max_total_seconds=30.0,
+        )
+    assert captured_timeouts[0] == 10.0  # 1. Tag laeuft immer mit dem vollen Timeout
+    assert captured_timeouts[1] == pytest.approx(3.0)  # 2. Tag: 8s Restbudget - 5s Cleanup
+
+
+def test_find_available_dates_returns_none_when_every_day_fails():
+    with patch.object(thefork_client, "fetch_available_time_slots", return_value=None):
+        result = thefork_client.find_available_dates(
+            "https://www.thefork.de/restaurant/nobless-r598675", "2026-09-01", 2, num_days=3
+        )
+    assert result is None
+
+
+def test_find_available_dates_skips_a_single_failed_day_but_keeps_going():
+    # Ein einzelner fehlgeschlagener Tag (None) darf den gesamten Scan nicht
+    # abbrechen - die uebrigen Tage muessen trotzdem geprueft werden.
+    def fake_fetch(url, date, party_size, timeout=None):
+        if date == "2026-09-02":
+            return None
+        return ["18:00"] if date == "2026-09-03" else []
+
+    with patch.object(thefork_client, "fetch_available_time_slots", side_effect=fake_fetch):
+        result = thefork_client.find_available_dates(
+            "https://www.thefork.de/restaurant/nobless-r598675", "2026-09-01", 2, num_days=3
+        )
+    assert result == [{"date": "2026-09-03", "times": ["18:00"]}]
+
+
+def test_find_available_dates_invalid_start_date_returns_none():
+    with patch.object(thefork_client, "fetch_available_time_slots") as fetch:
+        result = thefork_client.find_available_dates(
+            "https://www.thefork.de/restaurant/nobless-r598675", "not-a-date", 2
+        )
+    assert result is None
+    fetch.assert_not_called()

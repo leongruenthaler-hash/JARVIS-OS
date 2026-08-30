@@ -6787,6 +6787,59 @@ def _resolve_latest_date(accumulated_text: str, config: dict) -> tuple[datetime,
     return _extract_datetime(cleaned, config)
 
 
+def _reject_day_with_alternative_suggestions(
+    name: str, base_url: str, rejected_date: datetime, party_size: int
+) -> str:
+    """Baut die Rueckfrage, wenn ein Tag bei TheFork bestaetigt komplett
+    ausgebucht ist (nicht bei "keine Online-Verfuegbarkeit", siehe
+    thefork_client.py - dieser Fall liefert None, nicht eine leere Liste,
+    und landet deshalb nie hier). Statt blind "fuer welchen anderen Tag
+    soll ich schauen?" zu fragen, prueft die Funktion best-effort gleich
+    die naechsten 7 Tage NACH dem abgelehnten Datum per
+    thefork_client.find_available_dates() und nennt die freien Tage direkt
+    mit - der Nutzer muss dann nicht mehrere Tage nacheinander selbst
+    durchprobieren. Schlaegt dieser zusaetzliche Scan fehl oder findet
+    nichts (None oder leere Liste), faellt die Funktion still auf die
+    bisherige, reine Rueckfrage zurueck - kein Unterschied fuer den Nutzer
+    ausser der fehlenden Vorauswahl (best-effort, wie der Rest dieses
+    Features).
+
+    Bewusst SEQUENZIELL bis zu 7 weitere Safari-Abfragen, per hartem
+    Zeitbudget in find_available_dates() auf ca. 40s begrenzt (Codex-Review
+    2026-08-30, P1 - ohne dieses Budget haette der Worst Case das
+    60-Sekunden-Request-Timeout des Chat-Clients reissen koennen, siehe dort
+    fuer Details). Zusammen mit dem vorherigen Einzel-Check (worst case 15s)
+    bleibt der gesamte Pfad komfortabel unter 60s. In Kauf genommen, weil
+    dieser Pfad nur EINMAL pro tatsaechlich ausgebuchtem Tag laeuft (nicht
+    bei jeder Nachricht), und der Nutzer explizit eine solche Vorschau statt
+    einzelner Rueckfragen wollte (Nutzer-Entscheidung 2026-08-30)."""
+    plain_question = (
+        f"Bei {name} ist an diesem Tag für {party_size} Personen leider nichts mehr frei. "
+        "Für welchen anderen Tag soll ich schauen?"
+    )
+    scan_start = (rejected_date + timedelta(days=1)).strftime("%Y-%m-%d")
+    found = thefork_client.find_available_dates(base_url, scan_start, party_size)
+    if not found:
+        return plain_question
+    day_entries = []
+    for entry in found:
+        try:
+            date_label = datetime.strptime(entry["date"], "%Y-%m-%d").strftime("%d.%m.")
+        except (KeyError, ValueError):
+            continue
+        times = entry.get("times")
+        if not isinstance(times, list) or not times:
+            continue
+        day_entries.append(f"{date_label} ({', '.join(times)})")
+    if not day_entries:
+        return plain_question
+    return (
+        f"Bei {name} ist an diesem Tag für {party_size} Personen leider nichts mehr frei. "
+        f"Ich habe die nächsten Tage geprüft - frei sind: {'; '.join(day_entries)}. "
+        "Welcher Tag und welche Uhrzeit passt dir?"
+    )
+
+
 def handle_reservation_command(text: str, memory: Memory | None = None) -> str | None:
     """Bereitet eine Tischreservierung bei TheFork vor (Datum/Uhrzeit/
     Personenzahl vorausgefuellt per URL-Parameter) und schickt die
@@ -6983,7 +7036,7 @@ def handle_reservation_command(text: str, memory: Memory | None = None) -> str |
             if slots:
                 return _ask(f"Diese Zeiten sind bei {name} noch frei: {', '.join(slots)}. Welche passt dir?")
             rejected_dates = rejected_dates + [when.strftime("%Y-%m-%d")]
-            return _ask(f"Bei {name} ist an diesem Tag für {party_size} Personen leider nichts mehr frei. Für welchen anderen Tag soll ich schauen?")
+            return _ask(_reject_day_with_alternative_suggestions(name, base_url, when, party_size))
         return _ask(f"Um wie viel Uhr soll ich bei {name} reservieren?")
     if when < datetime.now():
         # _extract_datetime() gibt fuer "heute" immer den heutigen Tag zurueck,
@@ -7045,7 +7098,7 @@ def handle_reservation_command(text: str, memory: Memory | None = None) -> str |
         # bei einer komplett neuen Nachricht mit demselben Datum sofort greift.
         if when.strftime("%Y-%m-%d") not in rejected_dates:
             rejected_dates = rejected_dates + [when.strftime("%Y-%m-%d")]
-        return _ask(f"Bei {name} ist an diesem Tag für {party_size} Personen leider nichts mehr frei. Für welchen anderen Tag soll ich schauen?")
+        return _ask(_reject_day_with_alternative_suggestions(name, base_url, when, party_size))
 
     settings.pop("pending_reservation_details", None)
     memory.set("settings", settings)
