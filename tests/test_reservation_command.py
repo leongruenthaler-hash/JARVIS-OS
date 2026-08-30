@@ -235,9 +235,9 @@ def test_happy_path_proposes_and_sends_push_with_prefilled_url(memory):
     settings = memory.get("settings") or {}
     pending = settings.get("pending_reservation_open")
     assert isinstance(pending, dict)
-    assert "hour=1140" in pending["url"]  # 19:00 = 19*60 = 1140 Minuten seit Mitternacht
+    assert "hour=19%3A00" in pending["url"]
     assert "partySize=2" in pending["url"]
-    assert pending["url"].startswith("https://www.thefork.de/restaurant/hans-im-gluck-burgergrill-bar-amberg-spitalkirche-r615551?")
+    assert pending["url"].startswith("https://www.thefork.de/restaurant/hans-im-gluck-burgergrill-bar-amberg-spitalkirche-r615551#booking=")
     assert "set_at" in pending
 
     send_push.assert_called_once()
@@ -295,7 +295,7 @@ def test_available_times_are_offered_and_validated(memory):
     assert "hans im glück" in third.lower()
     pending = memory.get("settings").get("pending_reservation_open")
     assert pending is not None
-    assert "hour=1140" in pending["url"]
+    assert "hour=19%3A00" in pending["url"]
     assert "partySize=2" in pending["url"]
 
 

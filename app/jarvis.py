@@ -7050,8 +7050,18 @@ def handle_reservation_command(text: str, memory: Memory | None = None) -> str |
     settings.pop("pending_reservation_details", None)
     memory.set("settings", settings)
 
-    hour_minutes = when.hour * 60 + when.minute
-    url = f"{base_url}?date={when.strftime('%Y-%m-%d')}&hour={hour_minutes}&partySize={party_size}"
+    # Hash-Fragment statt Query-String: TheForks Buchungswidget liest den
+    # Zustand ausschliesslich aus einem "#booking=..."-Hash beim initialen
+    # Laden der Seite - Query-Parameter (?date=...) haben live verifiziert
+    # (2026-08-30) KEINE Wirkung, das Widget startet dann leer im
+    # Default-Zustand statt vorausgefuellt. "%3A" ist der URL-kodierte
+    # Doppelpunkt fuer die Uhrzeit (HH:MM), wie live im Hash der echten
+    # Seite nach Abschluss des Buchungswidgets beobachtet.
+    url = (
+        f"{base_url}#booking=&date={when.strftime('%Y-%m-%d')}"
+        f"&hour={when.strftime('%H:%M').replace(':', '%3A')}"
+        f"&offer=default&partySize={party_size}"
+    )
     date_label = when.strftime("%d.%m.%Y")
     time_label = when.strftime("%H:%M")
 

@@ -40,8 +40,9 @@ def _close_stray_tab(request_url: str) -> None:
     einem geaenderten Selektor, o.ae.), bleibt der Tab offen stehen (Codex-
     Adversarial-Review 2026-08-27).
 
-    `request_url` ist die VOLLE URL dieser einen Anfrage (Restaurant + Datum +
-    Personenzahl als Query-Parameter), nicht nur die Restaurant-Basis-URL -
+    `request_url` ist die VOLLE URL dieser einen Anfrage (Restaurant-Basis-URL
+    plus Datum/Personenzahl als Hash-Fragment), nicht nur die Restaurant-
+    Basis-URL allein -
     eine erste Fassung matchte auf die Basis-URL allein und haette so einen
     eigenen, unabhaengigen Tab treffen koennen, den Leon selbst fuer GENAU
     dieses Restaurant offen hatte (dritter Codex-Review-Fund, 2026-08-27).
@@ -109,11 +110,23 @@ def fetch_available_time_slots(
     """Liefert eine Liste verfuegbarer Uhrzeiten (z.B. ["18:00", "19:30"]) fuer
     das Restaurant an diesem Datum/dieser Personenzahl, oder None bei jedem
     Fehlschlag (siehe Moduldoc - niemals eine Exception, niemals haengen).
-    Oeffnet dafuer kurz einen neuen Safari-Tab, klickt durch das Buchungs-
-    Widget und schliesst den Tab wieder - live gegen die echte Seite
-    verifiziertes Vorgehen (2026-08-27): "Reservieren"-Button oeffnen, den
-    passenden Kalendertag anklicken, dann die gerenderten Uhrzeit-Buttons
-    auslesen (Muster HH:MM, `disabled` = nicht mehr verfuegbar).
+
+    Oeffnet dafuer kurz einen neuen Safari-Tab direkt mit einer URL, die
+    Datum und Personenzahl als Hash-Fragment traegt (z.B.
+    "...#booking=&date=2026-09-14&partySize=2") - live verifiziert
+    (2026-08-30): TheForks Buchungswidget liest diesen Hash beim initialen
+    Laden der Seite und zeigt danach direkt die passenden Uhrzeit-Buttons,
+    OHNE dass irgendein Klick simuliert werden muss. Query-Parameter
+    (?date=...) haben dagegen live verifiziert KEINE Wirkung - eine fruehere
+    Fassung dieser Funktion nutzte sie faelschlich zusammen mit einem
+    Klick auf einen "calendar-day-{date}"-Testid, den es auf der echten
+    Seite nicht (mehr) gibt; die Abfrage schlug dadurch seit einer
+    TheFork-Aenderung nach dem 2026-08-27-Review still IMMER fehl (nie
+    bemerkt, weil genau das der eingebaute Fallback ist). Die
+    Uhrzeit-Buttons selbst tragen ein stabiles
+    `data-testid="timeslot-HH:MM"` (bzw. "timeslot-service-lunch"/
+    "timeslot-service-diner" fuer die beiden Abschnittsueberschriften, die
+    hier explizit herausgefiltert werden).
 
     Die komplette Funktion laeuft in einem breiten try/except - dieser
     experimentelle, externe UI-Automationspfad darf nie durch einen
@@ -121,89 +134,78 @@ def fetch_available_time_slots(
     die hier noch nicht bedacht wurde) den aufrufenden Chat-Turn zum Absturz
     bringen (Codex-Adversarial-Review 2026-08-27)."""
     try:
-        url = f"{restaurant_base_url}?date={date}&partySize={party_size}"
-        day_testid = f"calendar-day-{date}"
+        url = f"{restaurant_base_url}#booking=&date={date}&partySize={party_size}"
 
-        # Beide Klick-Skripte geben jetzt explizit 'true'/'false' zurueck, statt
-        # unconditional 'true' - vorher lieferte ein NICHT gefundener Button
-        # (Seite langsam geladen, Cookie-Overlay blockiert, TheFork hat den
-        # Selektor geaendert) trotzdem "Erfolg", und die anschliessende leere
-        # Uhrzeit-Liste wurde faelschlich als "echt abgefragt, Tag ausgebucht"
-        # missverstanden statt als "Abfrage im Grunde fehlgeschlagen" (Codex-
-        # Review 2026-08-27, P1).
-        click_reserve_js = (
-            "(function(){var b=Array.from(document.querySelectorAll('button'))"
-            ".find(function(x){return x.textContent.trim()==='Reservieren';});"
-            "if(b){b.click();return 'true';}return 'false';})();"
-        )
-        click_date_js = (
-            "(function(){var el=document.querySelector('[data-testid=\"%s\"]');"
-            "if(el){el.click();return 'true';}return 'false';})();" % day_testid
-        )
+        # Neuer Tab mit dieser URL ist ein ECHTER, frischer Seitenaufbau (kein
+        # blosser Hash-Wechsel auf einer bereits offenen Seite) - genau das
+        # ist entscheidend, damit TheForks Widget den Hash beim Mounten liest.
+        # Ein blosser Hash-Wechsel auf einer schon geladenen Seite (z.B. per
+        # "set URL of theTab" auf einen bereits offenen Tab) wuerde vom
+        # Browser als reine In-Page-Navigation behandelt und vom Widget NICHT
+        # neu ausgewertet (live verifiziert 2026-08-30) - deshalb hier bewusst
+        # immer ein neuer Tab statt Wiederverwendung.
+        # "ready" ist das vom Codex-Review geforderte Unterscheidungssignal
+        # (2026-08-30, P2/P1 ueber zwei Runden verschaerft): eine erste
+        # Fassung zaehlte dafuer JEDES "[data-testid^='timeslot-']"-Element,
+        # auch die beiden Abschnittsueberschriften "timeslot-service-lunch"/
+        # "timeslot-service-diner" - die rendern aber live verifiziert schon
+        # SOFORT beim Mounten, BEVOR TheForks asynchrone
+        # Verfuegbarkeitsabfrage fuer dieses Datum ueberhaupt fertig ist. Das
+        # haette den gerade erst behobenen Fehler nur verschoben: ein noch
+        # ladendes Widget haette sofort "ready:true" mit leerer Zeiten-Liste
+        # gemeldet - exakt wie ein echt ausgebuchter Tag (Codex-Review
+        # 2026-08-30, zweite Runde, P1). "ready" haengt deshalb jetzt
+        # ausschliesslich an ECHTEN Uhrzeit-Buttons (Muster HH:MM) - die
+        # koennen erst erscheinen, NACHDEM die Verfuegbarkeitsdaten geladen
+        # sind.
+        #
+        # BEKANNTE EINSCHRAENKUNG: TheFork hat live kein bestaetigtes
+        # explizites "an diesem Tag ist definitiv nichts frei"-Signal im DOM
+        # gezeigt (nie live gegen einen echt ausgebuchten Tag getestet) - ein
+        # Tag, der nach allen Retries immer noch KEINEN einzigen echten
+        # Uhrzeit-Button zeigt, bleibt deshalb bewusst "ready:false" (->
+        # None -> alte, datenlose Rueckfrage), statt riskant als "sicher
+        # ausgebucht" gewertet zu werden. Der "leere Liste = ausgebucht"-Fall
+        # greift nur noch, wenn TheFork fuer diesen Tag WENIGSTENS EINEN
+        # (dann `available:false`) Uhrzeit-Button rendert.
         read_slots_js = (
-            "(function(){var btns=Array.from(document.querySelectorAll('button'))"
-            ".filter(function(b){return /^\\d{1,2}:\\d{2}$/.test(b.textContent.trim());});"
-            "return JSON.stringify(btns.map(function(b){"
-            "return {time:b.textContent.trim(), available:!b.disabled};}));})();"
+            "(function(){var btns=Array.from(document.querySelectorAll('[data-testid^=\"timeslot-\"]'));"
+            "var real=btns.filter(function(b){return /^timeslot-\\d{1,2}:\\d{2}$/.test(b.getAttribute('data-testid'));});"
+            "return JSON.stringify({ready:real.length>0, slots:real.map(function(b){"
+            "var t=b.getAttribute('data-testid').slice('timeslot-'.length);"
+            "var avail=!b.disabled&&b.getAttribute('aria-disabled')!=='true';"
+            "return {time:t, available:avail};})});})();"
         )
 
         # try/on error mit der ECHTEN theTab-Referenz statt eines spaeteren,
         # separaten URL-basierten Aufraeum-Versuchs - schliesst bei JEDEM
-        # innerhalb des Skripts auftretenden Fehler (Button/Kalendertag nicht
-        # gefunden, "do JavaScript" verweigert, ...) exakt den selbst
-        # erstellten Tab, nie einen zufaellig aehnlichen, unabhaengigen Tab
-        # von Leon (Codex-Review 2026-08-27, P1). Nur ein externer Timeout
-        # (osascript wird von Python abgewuergt, bevor dieser Block ueberhaupt
-        # fertig laufen kann) bleibt aussen vor - dafuer siehe
-        # _close_stray_tab() in _run_safari_script().
-        # Nach dem Kalendertag-Klick MEHRFACH (bis zu 2x) erneut lesen, wenn
-        # der bisherige Versuch leer war, statt eine leere Liste sofort als
-        # "definitiv ausgebucht" zu werten - bei einer langsam ladenden Seite
-        # koennten die Uhrzeit-Buttons erst nach mehreren festen
-        # 2-Sekunden-Delays erscheinen (eine einzelne feste Wiederholung
-        # reichte laut Codex-Review u.U. immer noch nicht, 2026-08-27, dritte
-        # Folgerunde) - bewusst weiterhin eine feste, kleine Obergrenze statt
-        # unbegrenztem Polling, damit ein echt ausgebuchter Tag nicht
-        # unnoetig lange auf sich warten laesst.
+        # innerhalb des Skripts auftretenden Fehler (z.B. "do JavaScript"
+        # verweigert) exakt den selbst erstellten Tab, nie einen zufaellig
+        # aehnlichen, unabhaengigen Tab von Leon (Codex-Review 2026-08-27,
+        # P1). Nur ein externer Timeout (osascript wird von Python
+        # abgewuergt, bevor dieser Block ueberhaupt fertig laufen kann)
+        # bleibt aussen vor - dafuer siehe _close_stray_tab() in
+        # _run_safari_script().
         #
-        # read_slots_js oben faengt bewusst ALLE Uhrzeit-Buttons ein (auch
-        # `disabled`, siehe `available:!b.disabled`), nicht nur die freien -
-        # das "[]"-Retry hier ist damit bereits ein "hat das Widget UEBERHAUPT
-        # etwas gerendert"-Signal, kein reiner "gibt es freie Zeiten"-Check.
-        # Zeigt TheFork an einem ausgebuchten Tag deaktivierte Zeit-Buttons
-        # (statt gar keine), unterscheidet dieser Mechanismus "noch am Laden"
-        # (leeres Array) sauber von "echt ausgebucht" (nicht-leeres Array,
-        # aber alle disabled).
-        #
-        # BEKANNTE EINSCHRAENKUNG: ein staerkeres, TheFork-markup-spezifisches
-        # "fertig geladen"-Signal (z.B. ein expliziter Lade-Indikator) wurde
-        # bewusst NICHT gebaut - ein Live-Check dafuer braucht Leons echte,
-        # bereits vertrauenswuerdige Safari-Sitzung; ein Test in einer
-        # anderen, cookie-losen Browser-Sitzung zeigte hier ein abweichendes,
-        # nicht repraesentatives Widget-Verhalten (Kalendertage blieben ohne
-        # Leons Session durchgehend disabled, selbst nach Klick auf
-        # "Reservieren") und waere keine verlaessliche Grundlage fuer ein
-        # spezifisches Markup-Signal gewesen (Codex-Review 2026-08-27, vierte
-        # Folgerunde - Live-Verifikationsversuch am selben Tag). Die bewusst
-        # gewaehlte, kleine Obergrenze oben ist der proportionale Kompromiss;
-        # Leons eigener finaler Klick auf der echten Seite bleibt wie bei der
-        # dokumentierten TOCTOU-Einschraenkung das eigentliche
-        # Sicherheitsnetz.
+        # MEHRFACH (bis zu 2x) erneut lesen, wenn "ready" noch false ist,
+        # statt sofort aufzugeben - bei einer langsam ladenden Seite/
+        # Verfuegbarkeitsabfrage koennen die echten Uhrzeit-Buttons erst nach
+        # mehreren festen 2-Sekunden-Delays erscheinen. Ein Tag mit
+        # "ready:true" hat per Definition (siehe read_slots_js) IMMER
+        # mindestens einen echten Uhrzeit-Button geliefert bekommen und
+        # bricht dadurch sofort ab, statt unnoetig weiter zu warten; ein Tag,
+        # der auch nach allen Retries "ready:false" bleibt, gilt als
+        # Abfrage-Fehlschlag (siehe bekannte Einschraenkung oben), nicht als
+        # "sicher ausgebucht".
         script = f'''
 tell application "Safari"
     activate
     set theTab to make new tab at end of tabs of front window with properties {{URL:"{_escape_applescript_text(url)}"}}
     try
         delay 4
-        set reserveClicked to (do JavaScript "{_escape_applescript_text(click_reserve_js)}" in theTab)
-        if reserveClicked is not "true" then error "Reservieren-Button nicht gefunden"
-        delay 2
-        set dateClicked to (do JavaScript "{_escape_applescript_text(click_date_js)}" in theTab)
-        if dateClicked is not "true" then error "Kalendertag nicht gefunden"
-        delay 2
         set slotsJson to (do JavaScript "{_escape_applescript_text(read_slots_js)}" in theTab)
         repeat 2 times
-            if slotsJson is not "[]" then exit repeat
+            if slotsJson contains "\\"ready\\":true" then exit repeat
             delay 2
             set slotsJson to (do JavaScript "{_escape_applescript_text(read_slots_js)}" in theTab)
         end repeat
@@ -223,11 +225,24 @@ end tell
             data: Any = json.loads(raw)
         except json.JSONDecodeError:
             return None
-        if not isinstance(data, list):
+        if not isinstance(data, dict) or data.get("ready") is not True:
+            # Kein einziger echter Uhrzeit-Button ist trotz der Retries
+            # erschienen - entweder ist das Widget nie gemountet (Hash
+            # ignoriert, Seite blockiert, Cookie-Overlay, geaendertes Markup)
+            # oder die Verfuegbarkeitsdaten waren noch nicht fertig geladen.
+            # Beides ist ein Abfrage-Fehlschlag, KEIN bestaetigtes "an diesem
+            # Tag ist nichts frei" (siehe bekannte Einschraenkung in der
+            # read_slots_js-Doku oben). None loest beim Aufrufer die
+            # bisherige, datenlose Rueckfrage aus statt eine falsche
+            # "ausgebucht"-Aussage zu treffen (Codex-Review 2026-08-30, zwei
+            # Runden).
+            return None
+        slots = data.get("slots")
+        if not isinstance(slots, list):
             return None
 
         times: list[str] = []
-        for entry in data:
+        for entry in slots:
             if isinstance(entry, dict) and entry.get("available") is True and isinstance(entry.get("time"), str):
                 times.append(entry["time"])
         return times
