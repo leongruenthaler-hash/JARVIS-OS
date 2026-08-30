@@ -159,19 +159,28 @@ def fetch_available_time_slots(
         # koennen erst erscheinen, NACHDEM die Verfuegbarkeitsdaten geladen
         # sind.
         #
-        # BEKANNTE EINSCHRAENKUNG: TheFork hat live kein bestaetigtes
-        # explizites "an diesem Tag ist definitiv nichts frei"-Signal im DOM
-        # gezeigt (nie live gegen einen echt ausgebuchten Tag getestet) - ein
-        # Tag, der nach allen Retries immer noch KEINEN einzigen echten
-        # Uhrzeit-Button zeigt, bleibt deshalb bewusst "ready:false" (->
-        # None -> alte, datenlose Rueckfrage), statt riskant als "sicher
-        # ausgebucht" gewertet zu werden. Der "leere Liste = ausgebucht"-Fall
-        # greift nur noch, wenn TheFork fuer diesen Tag WENIGSTENS EINEN
-        # (dann `available:false`) Uhrzeit-Button rendert.
+        # Live nachgetragen (2026-08-30, gegen ein echtes Restaurant ohne
+        # Online-Verfuegbarkeit getestet, "Nobless"/Maxhuette-Haidhof): TheFork
+        # hat doch ein explizites Signal, wenn fuer ein Restaurant/Datum gar
+        # keine Online-Verfuegbarkeit hinterlegt ist - ein Element mit
+        # `data-testid="booking-widget-no-availability-message"` und dem Text
+        # "Leider ist für das Restaurant derzeit keine Verfügbarkeit
+        # angegeben". "noAvailability" wird separat mitgegeben (statt es wie
+        # eine erste Fassung direkt auf eine leere Zeiten-Liste abzubilden) -
+        # Codex-Review 2026-08-30, P2: "keine Online-Verfuegbarkeitspruefung
+        # moeglich" ist NICHT dasselbe wie "an diesem Tag alles ausgebucht"
+        # (die Uhrzeit-Buttons wuerden dann trotzdem gerendert, nur alle
+        # `available:false`) - eine telefonische Reservierung koennte trotzdem
+        # moeglich sein. Der Aufrufer (siehe unten) behandelt "noAvailability"
+        # deshalb wie einen Abfrage-Fehlschlag (None), nicht wie "definitiv
+        # nichts frei" ([]) - der einzige Nutzen dieses Signals ist, die
+        # sinnlosen Retries zu ueberspringen, wenn das Ergebnis schon feststeht
+        # (kuerzere Latenz), NICHT eine positive "ausgebucht"-Aussage.
         read_slots_js = (
             "(function(){var btns=Array.from(document.querySelectorAll('[data-testid^=\"timeslot-\"]'));"
             "var real=btns.filter(function(b){return /^timeslot-\\d{1,2}:\\d{2}$/.test(b.getAttribute('data-testid'));});"
-            "return JSON.stringify({ready:real.length>0, slots:real.map(function(b){"
+            "var noAvail=!!document.querySelector('[data-testid=\"booking-widget-no-availability-message\"]');"
+            "return JSON.stringify({ready:real.length>0||noAvail, noAvailability:noAvail, slots:real.map(function(b){"
             "var t=b.getAttribute('data-testid').slice('timeslot-'.length);"
             "var avail=!b.disabled&&b.getAttribute('aria-disabled')!=='true';"
             "return {time:t, available:avail};})});})();"
@@ -236,6 +245,21 @@ end tell
             # bisherige, datenlose Rueckfrage aus statt eine falsche
             # "ausgebucht"-Aussage zu treffen (Codex-Review 2026-08-30, zwei
             # Runden).
+            return None
+        if data.get("noAvailability") is True:
+            # TheFork bietet fuer dieses Restaurant/Datum ueberhaupt KEINE
+            # Online-Verfuegbarkeitspruefung an (z.B. nur telefonische
+            # Reservierung) - live entdeckt bei "Nobless"/Maxhuette-Haidhof.
+            # Das ist NICHT dasselbe wie "echt ausgebucht" (dort wuerden
+            # Uhrzeit-Buttons gerendert, nur alle `available:false`) - eine
+            # leere Liste wuerde der Aufrufer als bestaetigtes "nichts frei"
+            # missverstehen und den Tag ablehnen, obwohl telefonisch u.U.
+            # noch etwas moeglich ist. None behandelt diesen Fall deshalb wie
+            # einen Abfrage-Fehlschlag (bisherige, datenlose Rueckfrage) -
+            # der einzige Zweck des "noAvailability"-Signals ist, die
+            # sinnlosen Retries in read_slots_js zu ueberspringen (kuerzere
+            # Latenz), NICHT eine positive "ausgebucht"-Aussage zu treffen
+            # (Codex-Review 2026-08-30, P2).
             return None
         slots = data.get("slots")
         if not isinstance(slots, list):

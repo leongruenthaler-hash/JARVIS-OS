@@ -58,6 +58,46 @@ def test_widget_never_ready_returns_none_not_empty_list():
     assert result is None
 
 
+def test_explicit_no_availability_message_returns_none_not_empty_list():
+    # Live entdeckt 2026-08-30 gegen ein echtes Restaurant ("Nobless",
+    # Maxhuette-Haidhof) ohne Online-Verfuegbarkeit: TheFork rendert dafuer
+    # NIE echte Uhrzeit-Buttons (strukturell, nicht "noch am Laden"), zeigt
+    # aber ein explizites Element
+    # `[data-testid="booking-widget-no-availability-message"]`.
+    #
+    # Regression (Codex-Review 2026-08-30, dritte Runde, P2): eine erste
+    # Fassung bildete dieses Signal auf eine leere Zeiten-Liste ab ([]) -
+    # dieselbe Antwort wie bei einem echt ausgebuchten Tag. "Keine
+    # Online-Verfuegbarkeitspruefung moeglich" ist aber NICHT dasselbe wie
+    # "definitiv nichts frei" (eine telefonische Reservierung koennte trotzdem
+    # gehen) - live beim Nutzer beobachtet, dass diese Formulierung
+    # verwirrend war. None behandelt diesen Fall deshalb wie einen
+    # Abfrage-Fehlschlag (bisherige, datenlose Rueckfrage), nicht wie ein
+    # bestaetigtes "ausgebucht".
+    stdout = '{"ready":true,"noAvailability":true,"slots":[]}'
+    with patch.object(thefork_client.subprocess, "run", return_value=_fake_result(stdout=stdout)):
+        result = thefork_client.fetch_available_time_slots(
+            "https://www.thefork.de/restaurant/nobless-r598675", "2026-08-28", 2
+        )
+    assert result is None
+
+
+def test_ready_signal_also_checks_no_availability_message_selector():
+    captured = {}
+
+    def _fake_run(cmd, **kwargs):
+        captured["script"] = cmd[2]
+        return _fake_result(stdout='{"ready":false,"slots":[]}')
+
+    with patch.object(thefork_client.subprocess, "run", side_effect=_fake_run):
+        thefork_client.fetch_available_time_slots("https://www.thefork.de/restaurant/nobless-r598675", "2026-08-28", 2)
+
+    script = captured["script"]
+    assert 'booking-widget-no-availability-message' in script
+    assert "noAvailability:noAvail" in script
+    assert "ready:real.length>0||noAvail" in script
+
+
 def test_list_shaped_json_returns_none():
     # Das erwartete Format ist jetzt ein Objekt ({"ready":..., "slots":...}),
     # kein bares Array mehr - ein Array (z.B. Rueckstand des alten Formats)
