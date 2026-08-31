@@ -352,12 +352,14 @@ def test_rejected_day_falls_back_to_plain_question_when_scan_finds_nothing(memor
 def test_rejected_day_falls_back_to_plain_question_when_scan_itself_fails(memory):
     _remember_restaurant(memory)
 
+    tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+
     def fake_fetch(url, date, party_size, timeout=None):
         # Der abgelehnte Tag selbst liefert eine leere Liste (echt
         # ausgebucht), der anschliessende Scan schlaegt fuer JEDEN
         # weiteren Tag komplett fehl (None) - find_available_dates() gibt
         # dann selbst None zurueck, die Rueckfrage bleibt die reine Frage.
-        return [] if date == "2026-08-31" else None
+        return [] if date == tomorrow else None
 
     with patch.object(jarvis.thefork_client, "fetch_available_time_slots", side_effect=fake_fetch):
         result = jarvis.handle_reservation_command(
