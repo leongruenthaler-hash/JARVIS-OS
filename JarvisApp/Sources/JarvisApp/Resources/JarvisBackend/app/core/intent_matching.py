@@ -70,6 +70,12 @@ _FUZZY_STOPWORDS = frozenset(
         "war", "wir", "ihr", "sie", "für", "fuer", "von", "vor", "bei", "aus",
         "auf", "mit", "zum", "zur", "ans", "ins", "am", "im", "um", "an", "in",
         "zu", "so", "ja", "nein", "ich", "du", "es", "mir", "dir", "mich", "dich",
+        # "dabei" (sehr haeufiges Fuellwort) hat Editierdistanz 1 zu "datei" -
+        # dasselbe Muster wie "mal"/"mail" oben, live beobachtet 2026-09-02: "...ich
+        # muss dabei nur die Arbeitsvertraege und Kundenvertraege passend machen"
+        # loeste faelschlich die files-Domaene aus und landete als kompletter
+        # Rohsatz in der Desktop-Dateisuche ("nichts Passendes zu ...").
+        "dabei",
     }
 )
 

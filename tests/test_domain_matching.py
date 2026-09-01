@@ -90,6 +90,18 @@ def test_has_domain_does_not_false_positive_on_common_filler_word():
     assert jarvis.has_domain("spiel mal musik", "music") is True
 
 
+def test_has_domain_does_not_false_positive_on_dabei_vs_datei():
+    # Live-Bug 2026-09-02: "dabei" (sehr haeufiges Fuellwort) hat Editierdistanz 1
+    # zu "datei" und loeste faelschlich die files-Domaene aus - der komplette
+    # Rohsatz landete dann als "nichts Passendes zu ..." in der Desktop-Dateisuche.
+    text = (
+        "nein dabei brauche ich so derzeit keine hilfe ich muss halt nur die "
+        "arbeitsvertraege und noch die kundenvertraege und so weiter alles "
+        "ziemlich passend machen"
+    )
+    assert jarvis.has_domain(text, "files") is False
+
+
 def test_has_domain_existing_multiword_phrases_still_work():
     assert jarvis.has_domain("erinnere mich an den zahnarzt", "calendar") is True
     assert jarvis.has_domain("zeig mir bilder von rom", "photos") is True
