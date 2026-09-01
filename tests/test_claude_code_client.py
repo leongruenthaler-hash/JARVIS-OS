@@ -25,6 +25,30 @@ def test_is_claude_code_available_reflects_binary_presence():
         assert cc.is_claude_code_available(force=True) is False
 
 
+def test_find_claude_binary_falls_back_to_common_install_paths_when_which_fails(tmp_path, monkeypatch):
+    """Bugreport 2026-09-02: JarvisApp wird ueber Finder/LaunchServices gestartet,
+    dessen geerbtes PATH enthaelt nicht ~/.local/bin - shutil.which() fand 'claude'
+    dort live nicht, obwohl interaktiv im Terminal sofort auffindbar."""
+    fake_home = tmp_path / "home"
+    fake_bin = fake_home / ".local" / "bin"
+    fake_bin.mkdir(parents=True)
+    fake_claude = fake_bin / "claude"
+    fake_claude.write_text("#!/bin/sh\necho fake\n")
+    fake_claude.chmod(0o755)
+    monkeypatch.setenv("HOME", str(fake_home))
+
+    with patch.object(cc.shutil, "which", return_value=None):
+        found = cc.find_claude_binary()
+
+    assert found == str(fake_claude)
+
+
+def test_find_claude_binary_returns_none_when_nowhere_found():
+    with patch.object(cc.shutil, "which", return_value=None), \
+         patch.object(cc.Path, "is_file", return_value=False):
+        assert cc.find_claude_binary() is None
+
+
 def test_ask_claude_code_raises_when_binary_missing():
     with patch.object(cc, "find_claude_binary", return_value=None):
         with pytest.raises(cc.ClaudeCodeError):

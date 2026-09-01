@@ -39,8 +39,28 @@ class ClaudeCodeError(RuntimeError):
     unbrauchbare/leere Antwort zurueckgegeben."""
 
 
+_COMMON_CLAUDE_INSTALL_PATHS: tuple[str, ...] = (
+    "~/.local/bin/claude",
+    "/opt/homebrew/bin/claude",
+    "/usr/local/bin/claude",
+)
+
+
 def find_claude_binary() -> str | None:
-    return shutil.which(CLAUDE_BINARY_NAME)
+    """Sucht die claude-CLI. shutil.which() allein reicht nicht - JarvisApp wird ueber
+    Finder/LaunchServices gestartet, dessen PATH enthaelt nicht die Shell-rc-Ergaenzungen
+    (z.B. ~/.local/bin), unter denen npm/curl-Installer die CLI typischerweise ablegen.
+    Live beobachtet 2026-09-02: 'claude' war interaktiv im Terminal sofort auffindbar,
+    im laufenden Jarvis-Prozess (geerbtes PATH ohne ~/.local/bin) aber nicht - deshalb
+    zusaetzlich die ueblichen Installationsorte direkt pruefen."""
+    found = shutil.which(CLAUDE_BINARY_NAME)
+    if found:
+        return found
+    for candidate in _COMMON_CLAUDE_INSTALL_PATHS:
+        path = Path(candidate).expanduser()
+        if path.is_file() and os.access(path, os.X_OK):
+            return str(path)
+    return None
 
 
 def is_claude_code_available(*, force: bool = False) -> bool:
