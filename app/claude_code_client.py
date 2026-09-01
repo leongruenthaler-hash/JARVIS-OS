@@ -65,6 +65,13 @@ def ask_claude_code(
         "--tools",
         "",
         "--no-session-persistence",
+        # Deaktiviert CLAUDE.md-Auto-Discovery, Plugins, Hooks, Skills etc. - fuer
+        # diesen reinen Frage-Antwort-Pfad irrelevanter Overhead, der pro Aufruf
+        # spuerbar Kontext-Token (und damit Kontingent) kostet, live gemessen
+        # 2026-09-01: cache_creation_input_tokens fiel von 6635 auf 1858 durch
+        # diese eine Option, Login/Abo-Auth bleibt davon unberuehrt (anders als
+        # --bare, das zwingend einen API-Key statt OAuth verlangt).
+        "--safe-mode",
     ]
     if system_prompt.strip():
         args += ["--system-prompt", system_prompt]
