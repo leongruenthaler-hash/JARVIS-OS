@@ -2353,7 +2353,7 @@ def handle_claude_research_command(text: str, memory: Memory | None = None) -> s
         if internet_permission is not None:
             return internet_permission
 
-    research_dirs = CONFIG.get("claude_code_research_dirs") or ["~/Desktop", "~/Projekte"]
+    research_dirs = CONFIG.get("claude_code_research_dirs") or ["~/Projekte"]
     system_prompt = (
         f"Du bist Jarvis, {configured_user_name()}s persönlicher Assistent. Du recherchierst gerade "
         "in seinen eigenen Dateien/Code und/oder im Internet, auf ausdrücklichen Wunsch. Antworte auf "
