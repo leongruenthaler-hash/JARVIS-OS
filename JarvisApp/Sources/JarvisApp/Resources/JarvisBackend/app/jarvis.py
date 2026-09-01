@@ -61,6 +61,7 @@ from files_client import (
     summarize_folder,
 )
 from llm_client import LLMClient
+from claude_code_client import ask_claude_code_research, is_claude_code_available, ClaudeCodeError
 from mail_client import (
     MailAccessError,
     export_categorized_mail_documents,
@@ -318,11 +319,16 @@ def has_permission(permission: str) -> bool:
 
 def ensure_cloud_llm_permission(memory: Memory, question: str) -> str | None:
     provider = ModelManager(CONFIG).provider
-    if provider not in {"openai", "anthropic", "google"}:
+    if provider not in {"openai", "anthropic", "google", "claude_code"}:
         return None
-    external = ensure_permission(memory, "external_api", "Jarvis würde einen externen API-Dienst verwenden.")
-    if external:
-        return external
+    # claude_code laeuft ueber die lokale CLI als Subprozess statt ueber einen von
+    # Jarvis selbst aufgerufenen API-Endpunkt - "external_api" (Jarvis macht einen
+    # eigenen Netzwerkaufruf an einen Cloud-Dienst) trifft hier nicht zu, "cloud_llm"
+    # (die Anfrage geht an eine Cloud-KI) aber schon.
+    if provider != "claude_code":
+        external = ensure_permission(memory, "external_api", "Jarvis würde einen externen API-Dienst verwenden.")
+        if external:
+            return external
     return ensure_permission(
         memory,
         "cloud_llm",
@@ -2299,6 +2305,71 @@ def handle_model_command(
         return manager.use_claude_code()
 
     return None
+
+
+CLAUDE_RESEARCH_TRIGGER_TERMS: tuple[str, ...] = (
+    "recherchier",
+    "recherche",
+    "durchsuch meine dateien",
+    "durchsuche meine dateien",
+    "durchsuch meinen code",
+    "durchsuche meinen code",
+    "schau in meinem projekt",
+    "schau in meinen projekten",
+    "was steht in meinem code",
+    "durchsuch das internet",
+    "durchsuche das internet",
+    "such im internet",
+    "suche im internet",
+)
+
+
+def handle_claude_research_command(text: str, memory: Memory | None = None) -> str | None:
+    """Recherche-Modus: Claude Code bekommt Read/Grep/Glob/WebSearch, aber NUR
+    innerhalb einer sandbox-exec-Sandbox (siehe claude_code_client.py), die den
+    Dateizugriff hart auf CONFIG["claude_code_research_dirs"] beschraenkt - anders
+    als der normale Chat-Pfad (_ask_claude_code() ueber LLMClient), der bewusst
+    KEINEN Werkzeugzugriff hat. Nutzerwunsch 2026-09-02: "voller Zugriff auf
+    Dateien/Code/Internetrecherche", umgesetzt mit einer echten OS-Grenze statt
+    reiner Konfiguration, siehe Sicherheitsdiskussion in derselben Sitzung."""
+    normalized = normalize_text(text)
+    if not any(term in normalized for term in CLAUDE_RESEARCH_TRIGGER_TERMS):
+        return None
+
+    if not is_claude_code_available():
+        return (
+            "Für die Recherche brauche ich Claude Code, das ist gerade nicht verfügbar. "
+            "Sag: Jarvis, nutze Claude Code."
+        )
+
+    if memory is not None:
+        cloud_permission = ensure_permission(memory, "cloud_llm", "Jarvis würde eine Anfrage an Claude Code (Recherche-Modus) senden.")
+        if cloud_permission is not None:
+            return cloud_permission
+        files_permission = ensure_permission(memory, "files", "Jarvis würde Dateien in den freigegebenen Recherche-Ordnern lesen.")
+        if files_permission is not None:
+            return files_permission
+        internet_permission = ensure_permission(memory, "internet", "Jarvis würde bei Bedarf im Internet recherchieren.")
+        if internet_permission is not None:
+            return internet_permission
+
+    research_dirs = CONFIG.get("claude_code_research_dirs") or ["~/Desktop", "~/Projekte"]
+    system_prompt = (
+        f"Du bist Jarvis, {configured_user_name()}s persönlicher Assistent. Du recherchierst gerade "
+        "in seinen eigenen Dateien/Code und/oder im Internet, auf ausdrücklichen Wunsch. Antworte auf "
+        "Deutsch, knapp und konkret, im üblichen trockenen Jarvis-Ton. Wenn du nichts Passendes findest, "
+        "sag das ehrlich statt zu raten."
+    )
+    try:
+        return ask_claude_code_research(
+            text,
+            allowed_dirs=list(research_dirs),
+            system_prompt=system_prompt,
+            model=str(CONFIG.get("claude_code_model", "sonnet")),
+            timeout=float(CONFIG.get("claude_code_research_timeout", 120)),
+        )
+    except ClaudeCodeError as exc:
+        return f"Die Recherche ist gerade fehlgeschlagen: {exc}"
 
 
 def handle_system_command(text: str) -> str | None:
@@ -8584,6 +8655,7 @@ def answer_message(
         ("handle_local_command", (question,), {}, "none"),
         ("handle_privacy_command", (memory, question), {}, "none"),
         ("handle_model_command", (question,), {"memory": memory, "model_manager": workers.model_manager}, "no_auto_memory"),
+        ("handle_claude_research_command", (question,), {"memory": memory}, "normal"),
         ("handle_memory_command", (memory, question), {}, "no_auto_memory"),
         ("handle_pending_note_flow", (memory, question), {}, "normal"),
         ("handle_pending_domain_clarification_flow", (memory, question), {"photo_worker": workers.photo_worker}, "normal"),
