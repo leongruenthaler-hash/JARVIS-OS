@@ -27,7 +27,7 @@ from memory import Memory
 def _make_server(memory: Memory) -> local_server.JarvisLocalServer:
     server = local_server.JarvisLocalServer.__new__(local_server.JarvisLocalServer)
     server.memory = memory
-    server.models = SimpleNamespace(active_model="phi4-mini")
+    server.models = SimpleNamespace(active_model="phi4-mini", provider="ollama")
     server.photo_worker = None
     server.mail_worker = None
     server.pending_mail_followup = False

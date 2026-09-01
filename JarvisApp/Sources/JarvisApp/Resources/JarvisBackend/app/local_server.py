@@ -2022,7 +2022,13 @@ class JarvisLocalServer:
         question = self._clean_question(text)
         if not question.strip():
             question = "Ja?"
-        self._last_answer_source = "local"
+        # Default fuer den Fall, dass unten eine Exception auftritt, bevor
+        # answer_message() den echten Provider zurueckmeldet (Zeile ~2099) - muss den
+        # TATSAECHLICH konfigurierten Provider widerspiegeln, nicht hartcodiert "local"
+        # sein, sonst zeigt die App bei jedem Fehler faelschlich "Antwort über lokal"
+        # an, selbst wenn z.B. Claude Code aktiv war und ein Apple-Mail-Timeout (nichts
+        # mit dem Provider zu tun) die eigentliche Ursache ist. Bugreport 2026-09-02.
+        self._last_answer_source = self.models.provider
         self._last_answer_model = self.models.active_model
 
         try:
@@ -2114,7 +2120,16 @@ class JarvisLocalServer:
                 self._pipeline_log("missingFilePath", text=str(missing))
                 return f"Mir fehlt lokal eine Datei oder ein Pfad: {missing}"
             if isinstance(exc, RuntimeError) and detail:
-                return f"Ich erreiche das lokale Modell gerade nicht sauber. {detail}"
+                # Frueher stand hier immer "Ich erreiche das lokale Modell gerade nicht
+                # sauber." vorangestellt - das war schon fuer Ollama-Fehler redundant
+                # (die Detail-Meldungen sind bereits vollstaendige Saetze) und wurde mit
+                # Claude Code sowie den domain-spezifischen *AccessError-Klassen (Mail,
+                # Kalender, Kamera, Fotos - alle RuntimeError-Unterklassen) schlicht
+                # FALSCH: ein Apple-Mail-AppleScript-Timeout wurde live als "lokales
+                # Modell nicht erreichbar" angezeigt, obwohl Claude Code der aktive,
+                # cloud-basierte Provider war und mit dem eigentlichen Fehler nichts zu
+                # tun hatte. Bugreport 2026-09-02.
+                return detail
             return f"Ich konnte die Anfrage gerade nicht sauber ausführen. Technisch war es: {_safe_error(exc)}."
 
 
