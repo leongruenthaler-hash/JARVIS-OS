@@ -2932,6 +2932,34 @@ def _mail_preview_snippet(preview: str, limit: int = 140) -> str:
     return snippet or "Kein Auszug lesbar."
 
 
+def humanize_mail_sender(raw_sender: str) -> str:
+    """Macht einen rohen Apple-Mail-Absender ('Name <adresse@domain>' oder nur
+    eine blanke Adresse) sprechbar: keine spitzen Klammern, keine E-Mail-Adresse,
+    keine Anfuehrungszeichen. Bugreport 2026-09-01: Jarvis las Absender beim
+    Vorlesen/Zusammenfassen von Mails wortwoertlich mit '<...@...>' und Sonderzeichen
+    vor, weil der rohe AppleScript-Absenderstring unveraendert in den Digest wanderte,
+    den summarize_mail_digest_via_llm() als Kontext bekommt."""
+    sender = str(raw_sender or "").strip()
+    if not sender:
+        return "Unbekannt"
+
+    match = re.match(r'^"?([^"<]+?)"?\s*<[^>]*>\s*$', sender)
+    if match:
+        name = match.group(1).strip()
+    elif "<" in sender and ">" in sender:
+        name = re.sub(r"[<>]", "", sender).strip()
+    else:
+        name = sender
+
+    if "@" in name and " " not in name:
+        local_part = name.split("@", 1)[0]
+        name = re.sub(r"[._+-]+", " ", local_part).strip().title()
+
+    name = re.sub(r'["\'`]', "", name)
+    name = re.sub(r"\s{2,}", " ", name).strip()
+    return name or "Unbekannt"
+
+
 def build_mail_summary_digest(
     messages: list[Any],
     account_name: str | None = None,
@@ -2968,7 +2996,7 @@ def build_mail_summary_digest(
         for message in sample:
             digest_lines.append(
                 "  - "
-                f"Von: {message.sender} | "
+                f"Von: {humanize_mail_sender(message.sender)} | "
                 f"Betreff: {message.subject} | "
                 f"Kurz: {_mail_preview_snippet(message.preview)}"
             )
@@ -3019,9 +3047,11 @@ def summarize_mail_digest_via_llm(
                 "Wichtig: niemals die Mails einzeln als Liste herunterbeten, keine Zeile-für-Zeile-Wiedergabe, "
                 "keine langen Aufzählungen, keine Tabellen und kein Markdown. "
                 "Gruppiere ähnliche Mails immer nach Thema und nenne nur die Kernaussagen. "
-                "Erwähne Absender, Betreff oder Datum nur, wenn es wirklich hilft. "
+                "Erwähne Absender, Betreff oder Datum nur, wenn es wirklich hilft, und dann immer nur den "
+                "Namen der Person oder Firma - niemals eine E-Mail-Adresse, spitze Klammern oder andere "
+                "Sonderzeichen aus der Kopfzeile vorlesen. "
                 "Die Antwort ist IMMER ein einziger zusammenhängender Fließtext-Absatz ohne Zeilenumbrüche, "
-                "am besten in 2 bis 3 Sätzen. Beginne niemals eine Zeile mit einem Kategorie-Namen gefolgt von "
+                "am besten in 1 bis 2 Sätzen. Beginne niemals eine Zeile mit einem Kategorie-Namen gefolgt von "
                 "Doppelpunkt (also NICHT 'Wichtig: ...' oder 'Newsletter: ...' als eigene Zeile) - wenn du eine "
                 "Kategorie erwähnst, dann nur beiläufig innerhalb eines normalen Satzes. "
                 "Wenn mehrere ähnliche Mails dabei sind, fasse sie in einem Satz zusammen. "
@@ -5172,7 +5202,7 @@ def execute_mail_delete(data: dict) -> str:
         )
 
     moved_subjects = "; ".join(
-        f"{message.sender or 'Unbekannt'}: {message.subject}"
+        f"{humanize_mail_sender(message.sender)}: {message.subject}"
         for message in moved_messages[:3]
     )
     return (
@@ -5690,7 +5720,7 @@ def check_mail_status() -> str:
         )
 
     subjects = "; ".join(
-        f"{message.sender or 'Unbekannt'}: {message.subject}" for message in messages[:3]
+        f"{humanize_mail_sender(message.sender)}: {message.subject}" for message in messages[:3]
     )
     return (
         f"Apple Mail funktioniert. {inbox_account} {inbox_mailbox} ist sichtbar mit "
