@@ -294,7 +294,13 @@ def list_inbox_messages(
     if include_preview:
         script_timeout = min(60, max(15, 3 + int(max_messages) * 2))
     else:
-        script_timeout = 8
+        # War lange 8s - live beobachtet 2026-09-02: unter spuerbarer Systemlast
+        # (fileproviderd/iCloud-Nachhol-Sync mit Load-Average > 20, Mail.app war
+        # dabei bereits offen und in Benutzung) reichte selbst der 8s+12s-Retry
+        # nicht, "welche Mails habe ich bekommen" schlug zuverlaessig fehl. Auf
+        # denselben Bereich wie der Kalender-Timeout (20s, siehe dortige
+        # Historie) angehoben, statt weiter am unteren Limit zu kleben.
+        script_timeout = 20
     raw_output = _run_applescript(script, timeout=script_timeout)
     return _parse_messages(raw_output)
 

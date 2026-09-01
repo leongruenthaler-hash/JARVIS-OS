@@ -11,11 +11,14 @@ from mail_client import list_inbox_messages
 
 
 def test_list_inbox_messages_uses_default_timeout_without_preview():
+    # War lange 8s, auf 20s angehoben (2026-09-02) - unter spuerbarer Systemlast
+    # (fileproviderd/iCloud-Nachhol-Sync) reichte selbst 8s+12s-Retry nicht,
+    # obwohl Mail.app bereits offen und in Benutzung war.
     with patch("mail_client._run_applescript", return_value="") as fake_run:
         list_inbox_messages(max_messages=20, include_preview=False)
 
     _, kwargs = fake_run.call_args
-    assert kwargs["timeout"] == 8
+    assert kwargs["timeout"] == 20
 
 
 def test_list_inbox_messages_scales_timeout_with_preview_and_message_count():
@@ -23,7 +26,7 @@ def test_list_inbox_messages_scales_timeout_with_preview_and_message_count():
         list_inbox_messages(max_messages=20, include_preview=True)
 
     _, kwargs = fake_run.call_args
-    assert kwargs["timeout"] > 8
+    assert kwargs["timeout"] > 20
 
 
 def test_list_inbox_messages_preview_timeout_capped_at_sixty():
