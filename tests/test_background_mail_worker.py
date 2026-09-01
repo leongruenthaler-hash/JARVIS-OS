@@ -160,6 +160,30 @@ def test_resolve_pending_calendar_action_unknown_key_returns_not_found(worker):
     assert result == {"ok": False, "error": "not_found"}
 
 
+def test_resolve_pending_calendar_action_second_confirmation_reports_already_done(worker):
+    """Live-Bug (Screenshot 2026-09-01): eine erneute proaktive Meldung kann
+    pending_mail_calendar_confirmation ein zweites Mal mit denselben action_keys
+    setzen, bevor die erste Bestaetigung beantwortet wurde. Die zweite
+    Bestaetigung fand die Keys dann nicht mehr in pending_calendar_actions und
+    meldete faelschlich "konnte nicht eintragen", obwohl der Termin laengst
+    existiert - jetzt erst in resolved_calendar_actions nachschauen."""
+    with patch("background_tasks.list_inbox_messages", return_value=[_msg("m1")]):
+        worker._scan(reason="manual", max_messages=20)
+
+    new_message = _msg("m2", sender="shop@example.de", subject="Rechnung", preview="Zahlbar bis zum 15.03.2027, Betrag 49,90 Euro.")
+    with patch("background_tasks.list_inbox_messages", return_value=[_msg("m1"), new_message]):
+        worker._scan(reason="manual", max_messages=20)
+
+    action_key = worker.pending_calendar_actions()[0]["action_key"]
+    with patch("mail_calendar_actions.create_reminder"):
+        first = worker.resolve_pending_calendar_action(action_key, approve=True)
+    assert first["ok"] is True
+    assert "already_done" not in first
+
+    second = worker.resolve_pending_calendar_action(action_key, approve=True)
+    assert second == {"ok": True, "action": first["action"], "already_done": True}
+
+
 def test_scan_without_auto_calendar_enabled_creates_no_proposals(tmp_path):
     config = {"auto_calendar_from_mail_enabled": False}
     w = MailBackgroundWorker(config, _FakeLLM(), base_path=tmp_path)

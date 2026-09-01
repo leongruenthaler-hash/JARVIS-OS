@@ -4435,7 +4435,14 @@ def handle_pending_action_flow(
             memory.set("settings", settings)
             resolved = mail_worker.resolve_pending_calendar_actions(action_keys, approve=True) if mail_worker is not None else []
             count = len(resolved)
-            if count:
+            if count and all(item.get("already_done") for item in resolved):
+                # Eine zweite proaktive Meldung kann dieselben action_keys erneut
+                # zur Bestaetigung vorlegen, obwohl eine erste Bestaetigung sie
+                # bereits eingetragen hat (siehe resolve_pending_calendar_action()
+                # in background_tasks.py) - das ist kein Fehler, nur ein doppelter
+                # Nachfrager, der die bereits erledigten Termine bestaetigt.
+                message = "Das habe ich bereits erledigt, die Termine stehen schon in Ihrem Kalender."
+            elif count:
                 noun = "Termin" if count == 1 else "Termine"
                 message = f"Erledigt, ich habe {count} {noun} aus Ihren Mails eingetragen."
             else:

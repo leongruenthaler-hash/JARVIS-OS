@@ -96,6 +96,27 @@ def test_explicit_confirmation_creates_events():
     mail_worker.resolve_pending_calendar_actions.assert_called_once_with(["k1"], approve=True)
 
 
+def test_confirmation_of_already_resolved_actions_reports_success_not_failure():
+    """Live-Bug (Screenshot 2026-09-01): eine zweite, ueberlappende Bestaetigungs-
+    Anfrage fuer dieselben, bereits eingetragenen Termine meldete faelschlich
+    "konnte nicht eintragen" statt zu erkennen, dass die Termine schon existieren."""
+    settings = {"pending_mail_calendar_confirmation": _pending_marker(["k1", "k2"])}
+    memory = MagicMock()
+    memory.get.return_value = settings
+
+    mail_worker = MagicMock()
+    mail_worker.resolve_pending_calendar_actions.return_value = [
+        {"status": "created", "already_done": True},
+        {"status": "created", "already_done": True},
+    ]
+
+    answer = jarvis.handle_pending_action_flow(memory, "ja", mail_worker=mail_worker)
+
+    assert answer is not None
+    assert "bereits erledigt" in answer
+    assert "nicht eintragen" not in answer
+
+
 def test_expired_marker_is_discarded_silently():
     old_marker = _pending_marker(["k1"], set_at=0.0)
     settings = {"pending_mail_calendar_confirmation": old_marker}

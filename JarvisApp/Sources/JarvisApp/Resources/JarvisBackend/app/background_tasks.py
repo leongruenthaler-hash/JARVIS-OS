@@ -256,6 +256,22 @@ class MailBackgroundWorker:
             pending = list(cache.get("pending_calendar_actions", []))
             match = next((action for action in pending if action.get("action_key") == action_key), None)
             if match is None:
+                # Live-Bug (Screenshot 2026-09-01): eine erneute proaktive
+                # "X Kalender-Vorschlaege warten..."-Meldung (proactivity_events()
+                # in local_server.py) kann pending_mail_calendar_confirmation ein
+                # zweites Mal mit denselben action_keys setzen, bevor der Nutzer
+                # die erste Bestaetigung tatsaechlich beantwortet hat - eine zweite
+                # Bestaetigung findet die Keys dann nicht mehr in
+                # pending_calendar_actions (schon abgearbeitet) und meldete bisher
+                # faelschlich "konnte nicht eintragen", obwohl der Termin laengst
+                # existiert. Erst in resolved_calendar_actions nachschauen, bevor
+                # "nicht gefunden" als echter Fehler gilt.
+                already_resolved = next(
+                    (action for action in cache.get("resolved_calendar_actions", []) if action.get("action_key") == action_key),
+                    None,
+                )
+                if already_resolved is not None:
+                    return {"ok": True, "action": already_resolved, "already_done": True}
                 return {"ok": False, "error": "not_found"}
 
             remaining = [action for action in pending if action.get("action_key") != action_key]
