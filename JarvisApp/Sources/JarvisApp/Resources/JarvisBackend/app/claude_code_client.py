@@ -112,6 +112,49 @@ def _run_claude(args: list[str], timeout: float, cwd: str | None = None) -> str:
     raise ClaudeCodeError("Claude Code Antwort enthielt kein 'result'-Feld.")
 
 
+def _run_claude_structured(args: list[str], timeout: float, cwd: str | None = None) -> dict:
+    try:
+        result = subprocess.run(args, capture_output=True, text=True, timeout=timeout, cwd=cwd, stdin=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired as exc:
+        raise ClaudeCodeError(f"Claude Code hat nach {timeout:.0f} Sekunden nicht geantwortet.") from exc
+    except OSError as exc:
+        raise ClaudeCodeError(f"Claude Code konnte nicht gestartet werden: {exc}") from exc
+
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        raise ClaudeCodeError(f"Claude Code Fehler (Code {result.returncode}): {stderr[:300] or 'unbekannt'}")
+
+    stdout = (result.stdout or "").strip()
+    if not stdout:
+        raise ClaudeCodeError("Claude Code lieferte eine leere Antwort.")
+
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        raise ClaudeCodeError("Claude Code lieferte kein valides JSON fuer die strukturierte Antwort.") from exc
+
+    if data.get("is_error"):
+        raise ClaudeCodeError(f"Claude Code meldete einen Fehler: {str(data.get('result') or '')[:300]}")
+
+    structured = data.get("structured_output")
+    if isinstance(structured, dict):
+        return structured
+
+    # Fallback: manche CLI-Versionen liefern das Schema-Objekt nur im "result"-Feld als
+    # JSON-String statt im separaten "structured_output"-Feld - lieber selbst parsen als
+    # hart zu scheitern, bevor das ueberhaupt live beobachtet wurde.
+    result_text = data.get("result")
+    if isinstance(result_text, str) and result_text.strip():
+        try:
+            parsed = json.loads(result_text)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict):
+            return parsed
+
+    raise ClaudeCodeError("Claude Code Antwort enthielt kein 'structured_output'-Feld.")
+
+
 def ask_claude_code(
     prompt: str,
     system_prompt: str = "",
@@ -149,6 +192,49 @@ def ask_claude_code(
         args += ["--model", model]
 
     return _run_claude(args, timeout=timeout)
+
+
+def ask_claude_code_structured(
+    prompt: str,
+    json_schema: dict,
+    system_prompt: str = "",
+    model: str = "sonnet",
+    timeout: float = 60.0,
+) -> dict:
+    """Wie ask_claude_code(), aber erzwingt schema-validierte JSON-Ausgabe ueber
+    --json-schema statt freien Text - Grundlage des Intent-Routers (core/intent_router.py):
+    das Modell entscheidet EINMAL strukturiert (Chat vs. welche Faehigkeit vs. Bestaetigung),
+    statt dass die App den Freitext selbst per Regex zerlegen muss. Live verifiziert
+    2026-09-02: --json-schema liefert ein zusaetzliches "structured_output"-Feld mit dem
+    schon geparsten Objekt, unabhaengig vom "result"-Textfeld. Laeuft weiterhin ueber
+    dasselbe --tools ""-Abo-Setup wie ask_claude_code(), keine neue Abhaengigkeit/Kosten."""
+    binary = find_claude_binary()
+    if not binary:
+        raise ClaudeCodeError(
+            "Claude Code CLI ('claude') wurde nicht gefunden. Ist sie installiert und im PATH?"
+        )
+    if not prompt.strip():
+        raise ClaudeCodeError("Leerer Prompt fuer Claude Code.")
+
+    args = [
+        binary,
+        "-p",
+        prompt,
+        "--output-format",
+        "json",
+        "--tools",
+        "",
+        "--no-session-persistence",
+        "--safe-mode",
+        "--json-schema",
+        json.dumps(json_schema),
+    ]
+    if system_prompt.strip():
+        args += ["--system-prompt", system_prompt]
+    if model:
+        args += ["--model", model]
+
+    return _run_claude_structured(args, timeout=timeout)
 
 
 def _build_sandbox_profile(allowed_dirs: list[str]) -> str:

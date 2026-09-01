@@ -93,6 +93,8 @@ from core import (
 )
 from core.intent_matching import has_domain_fuzzy, levenshtein_distance, normalize_umlauts
 from core.multistep_planner import plan_multistep
+from core.capabilities import CapabilityContext, register_capability, get_capability
+from core import intent_router
 from memory import Memory
 from model_manager import ModelManager
 from music_client import (
@@ -4072,96 +4074,34 @@ def handle_pending_action_flow(
     text: str,
     photo_worker: PhotoBackgroundWorker | None = None,
     mail_worker: MailBackgroundWorker | None = None,
+    router_decision: str | None = None,
 ) -> str | None:
+    """Duenner Einstiegspunkt: die eigentliche Ja/Nein-Erkennung kommt jetzt IMMER vom
+    Intent-Router (core/intent_router.py, "confirm"/"cancel"), der das ganze Gespraech + den
+    offenen Vorschlag selbst versteht - die frueher hier hartkodierten Wortlisten
+    (confirm_terms/cancel_terms/explicit_new_command/pending_action_matches_text) wurden
+    entfernt, siehe Plan "Jarvis-Intent-Router 2.0" (2026-09-02). router_decision=None (kein
+    offener Vorschlag oder Router hat sich fuer etwas anderes entschieden) gibt schlicht None
+    zurueck. Die eigentliche Ausfuehrung je Pending-Typ passiert in _resolve_pending_action()
+    unveraendert wie zuvor (TTL-Pruefung, ACTION_ENGINE.resolve(), Spezialfaelle
+    mail_calendar/cleanup)."""
+    if router_decision not in ("confirm", "cancel"):
+        return None
     settings = memory.get("settings") or {}
-    normalized = normalize_text(text)
-    confirm_terms = {
-        "ja",
-        "ja bitte",
-        "ok",
-        "okay",
-        "mach das",
-        "mach bitte",
-        "bitte machen",
-        "bestätige",
-        "bestaetige",
-        "ich bestätige",
-        "ich bestaetige",
-        "in den papierkorb",
-        "löschen",
-        "loeschen",
-        "ruf an",
-        "anrufen",
-        "verschieben",
-        "ja verschieben",
-        "kopieren",
-        "ja kopieren",
-    }
-    cancel_terms = {
-        "nein",
-        "nein danke",
-        "abbrechen",
-        "vergiss es",
-        "stopp",
-        "stop",
-        "nicht machen",
-        "nicht löschen",
-        "nicht loeschen",
-        "nicht anrufen",
-        "nicht verschieben",
-        "nicht kopieren",
-    }
-    is_confirm = (
-        normalized in confirm_terms
-        or normalized.startswith("ja ")
-        or any(term in normalized for term in ("mach das", "ich bestätige", "ich bestaetige"))
-    )
-    is_cancel = (
-        normalized in cancel_terms
-        or any(term in normalized for term in cancel_terms if len(term) > 4)
-        # "das bestätige ich nicht" o.ä. - live von Leon entdeckter Bug: eine
-        # Ablehnung, die das Wort "bestätig(e/en)" selbst enthält, wurde bisher
-        # von keinem der obigen Muster erfasst (kein exaktes cancel_terms-Match,
-        # "nicht" alleine steht nicht in cancel_terms). Siehe
-        # plans/2026-08-13-jarvis-kalender-vorschlaege-per-chat-bestaetigen.md.
-        or (("bestätig" in normalized or "bestaetig" in normalized) and "nicht" in normalized)
-    )
-    if normalized.startswith(QUESTION_SHAPE_PREFIXES):
-        return None
-    explicit_new_command = any(
-        term in normalized
-        for term in (
-            "erstelle",
-            "erstell",
-            "schreib",
-            "schreibe",
-            "setz",
-            "setze",
-            "erinnere mich",
-            "fasse",
-            "prüfe",
-            "pruefe",
-            "suche",
-            "such",
-            "verschiebe",
-            "kopiere",
-            "öffne",
-            "oeffne",
-            "spiel",
-            "spiele",
-            "ruf",
-            "rufe",
-        )
-    )
+    is_confirm = router_decision == "confirm"
+    is_cancel = router_decision == "cancel"
+    return _resolve_pending_action(memory, text, settings, is_confirm, is_cancel, photo_worker=photo_worker, mail_worker=mail_worker)
 
-    pending_match = pending_action_matches_text(settings, normalized)
 
-    if explicit_new_command and not is_confirm and not is_cancel and not pending_match:
-        return None
-
-    if not is_confirm and not is_cancel and not pending_match:
-        return None
-
+def _resolve_pending_action(
+    memory: Memory,
+    text: str,
+    settings: dict[str, Any],
+    is_confirm: bool,
+    is_cancel: bool,
+    photo_worker: PhotoBackgroundWorker | None = None,
+    mail_worker: MailBackgroundWorker | None = None,
+) -> str | None:
     pending_permission = settings.get("pending_permission")
     if isinstance(pending_permission, dict):
         permission = str(pending_permission.get("permission") or "").strip()
@@ -8564,6 +8504,148 @@ def _routing_history(memory: Memory, config: dict[str, Any], transient_history: 
         return []
 
 
+# --- Capability-Wrapper fuer den Intent-Router (core/intent_router.py) ----------------
+#
+# Jeder Wrapper repliziert EXAKT die Berechtigungspruefung + den Handler-Aufruf, die frueher
+# fest an ihrer Position in der answer_message()-Kaskade standen (siehe Git-Historie vor
+# 2026-09-02 / Plan "Jarvis-Intent-Router 2.0") - nur dass jetzt der Router entscheidet, OB
+# ueberhaupt einer davon aufgerufen wird, statt eine feste Reihenfolge aus has_domain()-Checks
+# abzuarbeiten. Die eigentliche Fachlogik (Text-/Datumsverarbeitung, ACTION_ENGINE-
+# Bestaetigungen) bleibt vollstaendig in den handle_X_command()-Funktionen selbst.
+
+def _cap_notes(ctx: CapabilityContext) -> str | None:
+    permission = ensure_privacy_domain_permission(ctx.memory, "notes", "Jarvis würde eine Notiz über Apple Notes erstellen oder ändern.")
+    if permission is not None:
+        return permission
+    return handle_notes_command(ctx.memory, ctx.text)
+
+
+def _cap_tasks(ctx: CapabilityContext) -> str | None:
+    return handle_tasks_command(ctx.memory, ctx.text)
+
+
+def _cap_calendar(ctx: CapabilityContext) -> str | None:
+    permission = ensure_privacy_domain_permission(ctx.memory, "calendar", "Jarvis würde Kalenderdaten verwenden.")
+    if permission is None and "erinner" in normalize_text(ctx.text):
+        permission = ensure_privacy_domain_permission(ctx.memory, "reminders", "Jarvis würde eine Erinnerung verwenden.")
+    if permission is not None:
+        return permission
+    return handle_calendar_command(ctx.text, memory=ctx.memory)
+
+
+def _cap_files(ctx: CapabilityContext) -> str | None:
+    permission = ensure_privacy_domain_permission(ctx.memory, "files", "Jarvis würde Ihren Schreibtisch oder Dateien lokal lesen oder ändern.")
+    if permission is not None:
+        return permission
+    for file_handler in (handle_desktop_command, handle_file_command):
+        answer = file_handler(ctx.text, memory=ctx.memory)
+        if answer is not None:
+            return answer
+    return None
+
+
+def _cap_photos(ctx: CapabilityContext) -> str | None:
+    normalized = normalize_text(ctx.text)
+    permission = ensure_privacy_domain_permission(ctx.memory, "photos", "Jarvis würde Ihre Fotos-App oder den lokalen Fotoindex verwenden.")
+    if permission is None and any(term in normalized for term in ("openai", "vision", "analysiere", "analysieren", "was siehst")):
+        permission = ensure_cloud_llm_permission(ctx.memory, ctx.text)
+    if permission is not None:
+        return permission
+    if ctx.workers is not None and ctx.workers.photo_worker is None and has_permission("photos"):
+        ctx.workers.photo_worker = PhotoBackgroundWorker(ctx.config)
+        ctx.workers.photo_worker.start()
+    photo_worker = ctx.workers.photo_worker if ctx.workers is not None else None
+    return handle_photo_command(ctx.text, photo_worker, memory=ctx.memory)
+
+
+def _cap_screen(ctx: CapabilityContext) -> str | None:
+    permission = ensure_privacy_domain_permission(ctx.memory, "screen", "Jarvis würde einen einzelnen Screenshot deines aktiven Fensters aufnehmen und lokal analysieren.")
+    if permission is not None:
+        return permission
+    if not has_permission("screen"):
+        return None
+    return handle_screen_command(ctx.text, memory=ctx.memory)
+
+
+def _cap_camera(ctx: CapabilityContext) -> str | None:
+    permission = ensure_privacy_domain_permission(ctx.memory, "camera", "Jarvis würde ein einzelnes Kamerabild aufnehmen, lokal analysieren und danach sofort löschen.")
+    if permission is not None:
+        return permission
+    if not has_permission("camera"):
+        return None
+    return handle_camera_command(ctx.text, ctx.llm)
+
+
+def _cap_mail_document_export(ctx: CapabilityContext) -> str | None:
+    permission = ensure_privacy_domain_permission(ctx.memory, "mail", "Jarvis würde Mail-Übersichten lesen und passende Anhänge oder Notizen auf den Schreibtisch kopieren.")
+    if permission is not None:
+        return permission
+    return handle_mail_document_export_command(ctx.text, memory=ctx.memory)
+
+
+def _cap_background_mail(ctx: CapabilityContext) -> str | None:
+    if ctx.workers is not None and ctx.workers.mail_worker is None and has_permission("mail"):
+        ctx.workers.mail_worker = MailBackgroundWorker(ctx.config, ctx.llm)
+        ctx.workers.mail_worker.start()
+    mail_worker = ctx.workers.mail_worker if ctx.workers is not None else None
+    return handle_background_mail_command(ctx.text, mail_worker)
+
+
+def _cap_mail(ctx: CapabilityContext) -> str | None:
+    permission = ensure_privacy_domain_permission(ctx.memory, "mail", "Jarvis würde Apple Mail lokal lesen oder bearbeiten.")
+    if permission is not None:
+        return permission
+    return handle_mail_command(ctx.llm, ctx.text, memory=ctx.memory)
+
+
+def _cap_contacts(ctx: CapabilityContext) -> str | None:
+    permission = ensure_privacy_domain_permission(ctx.memory, "contacts", "Jarvis würde Kontakte lesen oder einen Anruf vorbereiten.")
+    if permission is not None:
+        return permission
+    return handle_contact_command(ctx.text, memory=ctx.memory)
+
+
+def _cap_food(ctx: CapabilityContext) -> str | None:
+    permission = ensure_privacy_domain_permission(ctx.memory, "food", "Jarvis würde Lieferando im Browser öffnen - bestellt oder bezahlt nichts selbst.")
+    if permission is not None:
+        return permission
+    return handle_food_command(ctx.text, memory=ctx.memory)
+
+
+def _cap_reservation(ctx: CapabilityContext) -> str | None:
+    permission = ensure_privacy_domain_permission(ctx.memory, "reservation", "Jarvis würde eine Tischreservierung bei TheFork vorbereiten - reserviert selbst nichts endgültig.")
+    if permission is not None:
+        return permission
+    return handle_reservation_command(ctx.text, memory=ctx.memory)
+
+
+def _cap_music(ctx: CapabilityContext) -> str | None:
+    permission = ensure_privacy_domain_permission(ctx.memory, "music", "Jarvis würde Apple Music oder die Musik-Wiedergabe steuern.")
+    if permission is not None:
+        return permission
+    return handle_music_command(ctx.text)
+
+
+def _register_all_capabilities() -> None:
+    register_capability("notes", "Notizen in Apple Notes erstellen, suchen oder lesen.", _cap_notes, mutates=True)
+    register_capability("tasks", "Jarvis-eigene Aufgabenliste lesen, Aufgaben anlegen/ändern/erledigen.", _cap_tasks, mutates=True)
+    register_capability("calendar", "Kalendertermine/Erinnerungen ansehen, anlegen oder löschen.", _cap_calendar, mutates=True)
+    register_capability("files", "Dateien/Ordner auf dem Schreibtisch oder in Dokumenten suchen, verschieben oder öffnen.", _cap_files, mutates=True)
+    register_capability("photos", "Fotos-App/lokalen Fotoindex durchsuchen oder Fotos lokal analysieren.", _cap_photos)
+    register_capability("screen", "Einen Screenshot des aktiven Fensters aufnehmen und lokal beschreiben.", _cap_screen)
+    register_capability("camera", "Ein einzelnes Kamerabild aufnehmen und lokal beschreiben (z.B. 'wie sehe ich aus').", _cap_camera)
+    register_capability("mail_document_export", "Anhänge/Inhalte aus Mails auf den Schreibtisch kopieren.", _cap_mail_document_export, mutates=True)
+    register_capability("background_mail", "Status des Mail-Hintergrund-Scans abfragen ('Mail-Update', neue Mails seit dem letzten Scan).", _cap_background_mail)
+    register_capability("mail", "Apple Mail lesen, zusammenfassen, durchsuchen, Mails löschen.", _cap_mail, mutates=True)
+    register_capability("contacts", "Kontakte suchen oder einen Anruf vorbereiten.", _cap_contacts, mutates=True)
+    register_capability("food", "Lieferando im Browser öffnen (bestellt/bezahlt nichts selbst).", _cap_food, mutates=True)
+    register_capability("reservation", "Tischreservierung bei TheFork vorbereiten (reserviert nichts endgültig).", _cap_reservation, mutates=True)
+    register_capability("music", "Apple Music/Musikwiedergabe steuern (abspielen, pausieren, überspringen, Status).", _cap_music, mutates=True)
+
+
+_register_all_capabilities()
+
+
 def answer_message(
     question: str,
     memory: Memory,
@@ -8666,29 +8748,14 @@ def answer_message(
         ("handle_memory_command", (memory, question), {}, "no_auto_memory"),
         ("handle_pending_note_flow", (memory, question), {}, "normal"),
         ("handle_pending_domain_clarification_flow", (memory, question), {"photo_worker": workers.photo_worker}, "normal"),
-        ("handle_pending_action_flow", (memory, question), {"photo_worker": workers.photo_worker, "mail_worker": workers.mail_worker}, "normal"),
     ]
-    if has_pending_action(memory):
-        pending_action_handler = direct_handlers.pop()
-        local_command_index = next(i for i, entry in enumerate(direct_handlers) if entry[0] == "handle_local_command")
-        direct_handlers.insert(local_command_index, pending_action_handler)
 
     module = sys.modules[__name__]
     for name, args, kwargs, record_mode in direct_handlers:
         handler = getattr(module, name)
-        declined_mail_permission = False
-        if name == "handle_pending_action_flow":
-            settings_before = memory.get("settings") or {}
-            pending_permission_before = settings_before.get("pending_permission")
-            declined_mail_permission = (
-                isinstance(pending_permission_before, dict)
-                and pending_permission_before.get("permission") == "mail"
-            )
         answer = handler(*args, **kwargs)
         if answer is not None:
             mail_followup = pending_mail_followup
-            if declined_mail_permission and not has_permission("mail"):
-                mail_followup = False
             if record_mode == "normal":
                 record_exchange(memory, question, answer)
             elif record_mode == "no_auto_memory":
@@ -8722,160 +8789,59 @@ def answer_message(
     if has_permission("usage_patterns"):
         record_pattern_event_if_matched(question)
 
-    notes_permission = ensure_privacy_domain_permission(memory, "notes", "Jarvis würde eine Notiz über Apple Notes erstellen oder ändern.") if has_domain(question, "notes") else None
-    if notes_permission is not None:
-        return _result(notes_permission)
-    notes_answer = handle_notes_command(memory, question)
-    if notes_answer is not None:
-        record_exchange(memory, question, notes_answer)
-        return _result(notes_answer)
-
-    # Aufgaben (task_manager.py) liegen rein in Jarvis' eigenem Speicher, keine
-    # macOS-Berechtigung noetig - anders als Notizen/Kalender/Mail also kein
-    # ensure_privacy_domain_permission()-Gate davor.
-    tasks_answer = handle_tasks_command(memory, question)
-    if tasks_answer is not None:
-        record_exchange(memory, question, tasks_answer)
-        return _result(tasks_answer)
-
-    calendar_permission = None
-    if has_domain(question, "calendar") or looks_like_calendar_query(question):
-        calendar_permission = ensure_privacy_domain_permission(memory, "calendar", "Jarvis würde Kalenderdaten verwenden.")
-        if calendar_permission is None and "erinner" in normalize_text(question):
-            calendar_permission = ensure_privacy_domain_permission(memory, "reminders", "Jarvis würde eine Erinnerung verwenden.")
-    if calendar_permission is not None:
-        return _result(calendar_permission)
-    calendar_answer = handle_calendar_command(question, memory=memory)
-    if calendar_answer is not None:
-        record_exchange(memory, question, calendar_answer)
-        return _result(calendar_answer)
-
-    normalized_question = normalize_text(question)
-    file_permission = ensure_privacy_domain_permission(memory, "files", "Jarvis würde Ihren Schreibtisch oder Dateien lokal lesen oder ändern.") if has_domain(question, "files") or "desktop" in normalized_question or "schreibtisch" in normalized_question else None
-    if file_permission is not None:
-        return _result(file_permission)
-    for file_handler in (handle_desktop_command, handle_file_command):
-        answer = file_handler(question, memory=memory)
-        if answer is not None:
-            record_exchange(memory, question, answer)
-            return _result(answer, mail_followup=False)
-
-    photo_permission = ensure_privacy_domain_permission(memory, "photos", "Jarvis würde Ihre Fotos-App oder den lokalen Fotoindex verwenden.") if has_domain(question, "photos") else None
-    if photo_permission is None and has_domain(question, "photos") and any(term in normalized_question for term in ("openai", "vision", "analysiere", "analysieren", "was siehst")):
-        photo_permission = ensure_cloud_llm_permission(memory, question)
-    if photo_permission is not None:
-        return _result(photo_permission)
-    if workers.photo_worker is None and has_domain(question, "photos") and has_permission("photos"):
-        workers.photo_worker = PhotoBackgroundWorker(config)
-        workers.photo_worker.start()
-    photo_answer = handle_photo_command(question, workers.photo_worker, memory=memory)
-    if photo_answer is not None:
-        record_exchange(memory, question, photo_answer)
-        return _result(photo_answer, mail_followup=False)
-
-    screen_permission = ensure_privacy_domain_permission(memory, "screen", "Jarvis würde einen einzelnen Screenshot deines aktiven Fensters aufnehmen und lokal analysieren.") if has_domain(question, "screen") else None
-    if screen_permission is not None:
-        return _result(screen_permission)
-    screen_answer = handle_screen_command(question, memory=memory) if has_permission("screen") else None
-    if screen_answer is not None:
-        record_exchange(memory, question, screen_answer)
-        return _result(screen_answer, mail_followup=False)
-
-    camera_permission = ensure_privacy_domain_permission(memory, "camera", "Jarvis würde ein einzelnes Kamerabild aufnehmen, lokal analysieren und danach sofort löschen.") if has_domain(question, "camera") else None
-    if camera_permission is not None:
-        return _result(camera_permission)
-    camera_answer = handle_camera_command(question, llm) if has_permission("camera") else None
-    if camera_answer is not None:
-        record_exchange(memory, question, camera_answer)
-        return _result(camera_answer, mail_followup=False)
-
-    mail_export_permission = ensure_privacy_domain_permission(memory, "mail", "Jarvis würde Mail-Übersichten lesen und passende Anhänge oder Notizen auf den Schreibtisch kopieren.") if has_domain(question, "mail") else None
-    if mail_export_permission is not None:
-        return _result(mail_export_permission)
-    mail_document_export_answer = handle_mail_document_export_command(question, memory=memory)
-    if mail_document_export_answer is not None:
-        record_exchange(memory, question, mail_document_export_answer)
-        return _result(mail_document_export_answer, mail_followup=False)
-
-    if workers.mail_worker is None and has_domain(question, "mail") and has_permission("mail"):
-        workers.mail_worker = MailBackgroundWorker(config, llm)
-        workers.mail_worker.start()
-    background_mail_answer = handle_background_mail_command(question, workers.mail_worker)
-    if background_mail_answer is not None:
-        record_exchange(memory, question, background_mail_answer)
-        return _result(background_mail_answer, mail_followup=True)
-
-    mail_followup_intent = pending_mail_followup and (
-        is_mail_time_followup(question) or is_mail_status_followup(question)
+    # Intent-Router 2.0 (Plan "Jarvis-Intent-Router 2.0", 2026-09-02): ersetzt die vorherige
+    # ~30-stufige has_domain()-Kaskade (Kalender/Dateien/Fotos/Screen/Kamera/Mail-Export/
+    # Hintergrund-Mail/Mail/Kontakte/Essen/Reservierung/Musik) + die zweistufige
+    # Stichwort-dann-LLM-Klassifikation durch EINE strukturierte Modell-Entscheidung, die
+    # das ganze Gespraech UND einen eventuell offenen Bestaetigungs-Vorschlag sieht - siehe
+    # core/intent_router.py. Grund: die alte Kaskade wurde fuer die kleinen lokalen Modelle
+    # gebaut (die selbst nicht zuverlaessig genug verstanden, was gemeint ist) und stand
+    # jetzt, wo Claude Code verfuegbar ist, dessen eigenem Verstaendnis nur noch im Weg -
+    # Fehlklassifikationen wie "dabei" -> "datei" oder "Nutzer Cloud Code" -> Dateisuche
+    # waren Symptome genau dieses Konstrukts.
+    router_decision = intent_router.decide(
+        llm,
+        memory=memory,
+        question=question,
+        messages=_routing_history(memory, config, transient_history),
+        assistant_name=str(config.get("assistant_name", "Jarvis")),
+        creator_name=configured_user_name(),
     )
-    mail_permission = ensure_privacy_domain_permission(memory, "mail", "Jarvis würde Apple Mail lokal lesen oder bearbeiten.") if has_domain(question, "mail") or mail_followup_intent else None
-    if mail_permission is not None:
-        return _result(mail_permission)
-    mail_settings_before = memory.get("settings") or {}
-    had_pending_mail_delete = isinstance(mail_settings_before.get("pending_mail_delete"), dict)
-    mail_answer = handle_mail_command(llm, question, force=mail_followup_intent, memory=memory)
-    if mail_answer is not None:
-        record_exchange(memory, question, mail_answer)
-        return _result(mail_answer, mail_followup=False if had_pending_mail_delete else True)
 
-    contact_permission = ensure_privacy_domain_permission(memory, "contacts", "Jarvis würde Kontakte lesen oder einen Anruf vorbereiten.") if has_domain(question, "contacts") else None
-    if contact_permission is not None:
-        return _result(contact_permission)
-    contact_answer = handle_contact_command(question, memory=memory)
-    if contact_answer is not None:
-        record_exchange(memory, question, contact_answer)
-        return _result(contact_answer, mail_followup=False)
+    if router_decision.response_type in ("confirm_pending", "cancel_pending"):
+        pending_answer = handle_pending_action_flow(
+            memory,
+            question,
+            photo_worker=workers.photo_worker,
+            mail_worker=workers.mail_worker,
+            router_decision="confirm" if router_decision.response_type == "confirm_pending" else "cancel",
+        )
+        if pending_answer is not None:
+            record_exchange(memory, question, pending_answer)
+            return _result(pending_answer)
+        # Kein tatsaechlich aufloesbarer Vorschlag gefunden (z.B. TTL abgelaufen und
+        # ohnehin schon still verworfen) - normal weiter in den Chat-Zweig unten fallen,
+        # statt eine Nicht-Antwort zurueckzugeben.
 
-    food_permission = ensure_privacy_domain_permission(memory, "food", "Jarvis würde Lieferando im Browser öffnen - bestellt oder bezahlt nichts selbst.") if has_domain(question, "food") else None
-    if food_permission is not None:
-        return _result(food_permission)
-    food_answer = handle_food_command(question, memory=memory)
-    if food_answer is not None:
-        record_exchange(memory, question, food_answer)
-        return _result(food_answer, mail_followup=False)
-
-    # Auch bei einer laufenden Mehrschritt-Rueckfrage (pending_reservation_details,
-    # siehe handle_reservation_command) muss die Berechtigung erneut geprueft
-    # werden - has_domain(question, "reservation") matcht eine kurze Folgeantwort
-    # wie "19 Uhr" nicht, ohne diesen Zusatz-Check koennte ein zwischenzeitlicher
-    # Berechtigungsentzug (Datenschutz-Dashboard/Sprachbefehl) waehrend eines
-    # laufenden Dialogs uebergangen werden (Codex-Review 2026-08-23).
-    reservation_in_progress = bool((memory.get("settings") or {}).get("pending_reservation_details"))
-    reservation_permission = (
-        ensure_privacy_domain_permission(memory, "reservation", "Jarvis würde eine Tischreservierung bei TheFork vorbereiten - reserviert selbst nichts endgültig.")
-        if has_reservation_domain(question) or reservation_in_progress
-        else None
-    )
-    if reservation_permission is not None:
-        return _result(reservation_permission)
-    reservation_answer = handle_reservation_command(question, memory=memory)
-    if reservation_answer is not None:
-        record_exchange(memory, question, reservation_answer)
-        return _result(reservation_answer, mail_followup=False)
-
-    music_permission = ensure_privacy_domain_permission(memory, "music", "Jarvis würde Apple Music oder die Musik-Wiedergabe steuern.") if has_domain(question, "music") else None
-    if music_permission is not None:
-        return _result(music_permission)
-    music_answer = handle_music_command(question)
-    if music_answer is not None:
-        record_exchange(memory, question, music_answer)
-        return _result(music_answer, mail_followup=False)
-
-    # Stufe 2 der Absichtserkennung (siehe plans/2026-08-08-jarvis-intelligenz-
-    # verbessern.md, erweitert um plans/2026-08-16-jarvis-stufe2-klassifikation-
-    # direkt-beantworten.md): keiner der obigen Stichwort-Treffer (auch nicht
-    # fuzzy) hat gegriffen. Findet die Modell-Klassifikation GENAU EINE plausible
-    # Faehigkeit, antwortet Jarvis jetzt direkt darueber (statt nur nachzufragen),
-    # sofern der zustaendige Handler daraus etwas Konkretes machen kann - sonst,
-    # und bei zwei plausiblen Faehigkeiten (echte Mehrdeutigkeit), weiterhin eine
-    # Rueckfrage. Findet die Klassifikation gar nichts, faellt der Code normal
-    # weiter in den Chat-Zweig unten.
-    domain_clarification = maybe_ask_domain_clarification(
-        llm, memory, question, photo_worker=workers.photo_worker, config=config
-    )
-    if domain_clarification is not None:
-        record_exchange(memory, question, domain_clarification)
-        return _result(domain_clarification)
+    elif router_decision.response_type == "capability_call" and router_decision.capability:
+        capability = get_capability(router_decision.capability)
+        if capability is not None:
+            ctx = CapabilityContext(
+                text=question,
+                memory=memory,
+                llm=llm,
+                config=config,
+                workers=workers,
+                model_manager=workers.model_manager,
+            )
+            capability_answer = capability.handler(ctx)
+            if capability_answer is not None:
+                mail_followup = capability.name in ("mail", "background_mail")
+                record_exchange(memory, question, capability_answer)
+                return _result(capability_answer, mail_followup=mail_followup)
+        # Capability nicht gefunden oder ihr Handler kam trotz Router-Entscheidung zu
+        # keiner konkreten Antwort (z.B. fehlende Berechtigung im Detail-Handler) -
+        # ebenfalls normal weiter in den Chat-Zweig fallen statt zu scheitern.
 
     web_context = None
     if (

@@ -71,9 +71,10 @@ def _correction_time_distinct_from(past_time: str) -> str:
 
 
 class _FakeLLM:
-    """Minimaler LLM-Stub fuer answer_message() - wird in diesem Testfall nie
-    tatsaechlich befragt, weil handle_reservation_command() vorher greift oder
-    der Berechtigungs-Check die Kette abbricht."""
+    """Minimaler LLM-Stub fuer answer_message() - der Intent-Router
+    (core/intent_router.py) wird hier auf "reservation" fest verdrahtet, da diese
+    Tests gezielt handle_reservation_command()/dessen Berechtigungs-Klammer pruefen,
+    nicht die Router-Entscheidung selbst."""
 
     def plan(self, messages, user_text=None, force_local=False):
         return ModelRoute(
@@ -83,6 +84,9 @@ class _FakeLLM:
 
     def ask(self, messages, max_output_tokens=None, user_text=None, route=None, force_local=False):
         return "Chat-Antwort"
+
+    def ask_structured(self, messages, json_schema, route=None, force_local=False):
+        return {"response_type": "capability_call", "capability": "reservation"}
 
 
 def test_revoked_permission_blocks_pending_reservation_followup(memory, tmp_path, monkeypatch):
@@ -130,7 +134,7 @@ def test_revoked_permission_blocks_pending_confirmation_at_execute_time(memory, 
     PermissionManager(base_path=tmp_path).revoke("reservation", source="test_setup")
 
     with patch("subprocess.run") as run:
-        result = jarvis.handle_pending_action_flow(memory, "ja")
+        result = jarvis.handle_pending_action_flow(memory, "ja", router_decision="confirm")
 
     run.assert_not_called()  # darf TheFork nicht mehr oeffnen, sobald die Berechtigung weg ist
     assert "entzogen" in result.lower()
@@ -700,7 +704,7 @@ def test_stale_confirmation_expires_instead_of_firing(memory):
     memory.set("settings", settings)
 
     with patch("subprocess.run") as run:
-        result = jarvis.handle_pending_action_flow(memory, "ja")
+        result = jarvis.handle_pending_action_flow(memory, "ja", router_decision="confirm")
 
     run.assert_not_called()  # eine abgelaufene Anfrage darf niemals noch den Browser oeffnen
     assert "abgelaufen" in result.lower()

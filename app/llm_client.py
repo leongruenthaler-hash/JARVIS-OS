@@ -11,7 +11,7 @@ from secure_storage import SecureStorageError, get_openai_api_key
 from model_router import ModelRoute, ModelRouter
 from model_manager import ModelManager, ollama_hint_for_model, ollama_base_url
 from jarvis_personality import normalize_jarvis_messages
-from claude_code_client import ask_claude_code, ClaudeCodeError
+from claude_code_client import ask_claude_code, ask_claude_code_structured, ClaudeCodeError
 
 # Modelle, die Ollamas "thinking"-Feature unterstuetzen (per "ollama show <model>"
 # verifiziert, 2026-08-19). "think": True bei einem nicht-faehigen Modell
@@ -80,6 +80,58 @@ class LLMClient:
             return self._ask_ollama(messages, route=route, raw_system_prompt=raw_system_prompt)
         raise ValueError(f"Unbekannter KI-Anbieter: {effective_provider}")
 
+    def ask_structured(
+        self,
+        messages: list[dict[str, str]],
+        json_schema: dict,
+        route: ModelRoute | None = None,
+        force_local: bool = False,
+    ) -> dict:
+        """Wie ask(), aber erzwingt schema-validierte JSON-Ausgabe statt freien Text -
+        Grundlage des Intent-Routers (core/intent_router.py). Claude Code nutzt dafuer
+        --json-schema (claude_code_client.py::ask_claude_code_structured), Ollama das
+        native "format"-Feld von /api/chat. Der Nachrichtenverlauf wird wie bei ask()
+        ueber _prepare_messages()/normalize_jarvis_messages() vorbereitet, damit
+        System-Prompt/Persona identisch aufgebaut werden."""
+        self._refresh_model_state()
+        route = route or self.plan(messages)
+        effective_provider = "ollama" if force_local else self.provider
+        prepared = self._prepare_messages(messages, route=route)
+        system_content = ""
+        turns: list[str] = []
+        for message in prepared:
+            role = str(message.get("role") or "")
+            content = str(message.get("content") or "").strip()
+            if not content:
+                continue
+            if role == "system":
+                system_content = content
+            elif role == "assistant":
+                turns.append(f"Jarvis: {content}")
+            else:
+                turns.append(f"Nutzer: {content}")
+        prompt = "\n\n".join(turns) if turns else "Antworte kurz und hilfreich."
+
+        if effective_provider == "claude_code":
+            model = os.getenv("CLAUDE_CODE_MODEL", route.model or self.model_manager.active_model)
+            timeout = float(self.config.get("claude_code_timeout", 90))
+            try:
+                return ask_claude_code_structured(prompt, json_schema=json_schema, system_prompt=system_content, model=model, timeout=timeout)
+            except ClaudeCodeError as exc:
+                raise RuntimeError(str(exc)) from exc
+
+        # Ollama (auch fuer force_local/"privater Modus") und Fallback fuer alles
+        # andere (OpenAI hat noch keinen strukturierten Pfad - low priority laut Plan,
+        # faellt hier auf Ollama-Aufruf mit demselben Schema zurueck, statt zu scheitern).
+        raw = self._ask_ollama(messages, route=route, response_schema=json_schema)
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"Ollama lieferte keine valide JSON-Antwort fuer den Router: {raw[:200]}") from exc
+        if not isinstance(parsed, dict):
+            raise RuntimeError("Ollama lieferte kein JSON-Objekt fuer den Router.")
+        return parsed
+
     def ask_stream(
         self,
         messages: list[dict[str, str]],
@@ -131,6 +183,7 @@ class LLMClient:
         stream: bool = False,
         on_chunk: Any | None = None,
         raw_system_prompt: bool = False,
+        response_schema: dict | None = None,
     ) -> str:
         route = route or self.plan(messages)
         model = os.getenv("OLLAMA_MODEL", route.model or self.model_manager.active_model)
@@ -156,6 +209,13 @@ class LLMClient:
                 "temperature": float(route.temperature),
             },
         }
+        if response_schema is not None:
+            # Ollamas /api/chat akzeptiert ein JSON-Schema im "format"-Feld und
+            # erzwingt damit schema-konforme Ausgabe - Grundlage des Intent-Routers
+            # (core/intent_router.py) fuer den lokalen Provider, live verifiziert
+            # 2026-09-02 gegen phi4-mini (Mechanismus funktioniert, inhaltliche
+            # Verlaesslichkeit haengt vom Modell ab).
+            payload["format"] = response_schema
 
         request = urllib.request.Request(
             f"{ollama_base_url()}/api/chat",

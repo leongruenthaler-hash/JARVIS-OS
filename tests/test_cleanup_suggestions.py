@@ -184,7 +184,7 @@ def test_confirmation_moves_to_trash(monkeypatch):
     memory.get.return_value = settings
 
     with patch("jarvis.move_to_trash", return_value=(["x.dmg"], [])) as fake_trash:
-        answer = jarvis.handle_pending_action_flow(memory, "ja bitte")
+        answer = jarvis.handle_pending_action_flow(memory, "ja bitte", router_decision="confirm")
 
     fake_trash.assert_called_once()
     assert "Papierkorb" in answer
@@ -198,7 +198,7 @@ def test_cancellation_does_not_touch_files(monkeypatch):
     memory.get.return_value = settings
 
     with patch("jarvis.move_to_trash") as fake_trash:
-        answer = jarvis.handle_pending_action_flow(memory, "nein")
+        answer = jarvis.handle_pending_action_flow(memory, "nein", router_decision="cancel")
 
     fake_trash.assert_not_called()
     assert "nicht" in answer
@@ -210,7 +210,7 @@ def test_expired_cleanup_marker_discarded():
     memory.get.return_value = settings
 
     with patch("jarvis.move_to_trash") as fake_trash:
-        answer = jarvis.handle_pending_action_flow(memory, "ja")
+        answer = jarvis.handle_pending_action_flow(memory, "ja", router_decision="confirm")
 
     fake_trash.assert_not_called()
     assert "nicht mehr aktuell" in answer

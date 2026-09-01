@@ -224,7 +224,7 @@ def test_continue_chain_after_action_engine_confirmation(monkeypatch, memory):
     }
     memory.set("settings", settings)
 
-    answer = jarvis.handle_pending_action_flow(memory, "ja", photo_worker=None)
+    answer = jarvis.handle_pending_action_flow(memory, "ja", photo_worker=None, router_decision="confirm")
 
     assert "Termin erstellt." in answer
     assert "Mails gelöscht." in answer
@@ -244,7 +244,7 @@ def test_continue_chain_abort_on_cancel_gives_suggestion(memory):
     }
     memory.set("settings", settings)
 
-    answer = jarvis.handle_pending_action_flow(memory, "nein", photo_worker=None)
+    answer = jarvis.handle_pending_action_flow(memory, "nein", photo_worker=None, router_decision="cancel")
 
     assert "Termin erstellt." in answer
     assert "Notiz" in answer or "notes" in answer.lower()
@@ -280,7 +280,7 @@ def test_continue_chain_after_permission_granted_retries_triggering_step(monkeyp
     }
     memory.set("settings", settings)
 
-    answer = jarvis.handle_pending_action_flow(memory, "ja", photo_worker=None)
+    answer = jarvis.handle_pending_action_flow(memory, "ja", photo_worker=None, router_decision="confirm")
 
     assert "Notiz erledigt." in answer
     assert "Termin erinnert." in answer

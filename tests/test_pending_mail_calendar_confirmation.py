@@ -70,7 +70,7 @@ def test_negated_confirmation_recognized_as_cancel():
     mail_worker.resolve_pending_calendar_actions.return_value = []
 
     answer = jarvis.handle_pending_action_flow(
-        memory, "das bestätige ich nicht", mail_worker=mail_worker
+        memory, "das bestätige ich nicht", mail_worker=mail_worker, router_decision="cancel"
     )
 
     assert answer is not None
@@ -89,7 +89,7 @@ def test_explicit_confirmation_creates_events():
     mail_worker = MagicMock()
     mail_worker.resolve_pending_calendar_actions.return_value = [{"status": "created"}]
 
-    answer = jarvis.handle_pending_action_flow(memory, "ja bitte", mail_worker=mail_worker)
+    answer = jarvis.handle_pending_action_flow(memory, "ja bitte", mail_worker=mail_worker, router_decision="confirm")
 
     assert answer is not None
     assert "1" in answer
@@ -110,7 +110,7 @@ def test_confirmation_of_already_resolved_actions_reports_success_not_failure():
         {"status": "created", "already_done": True},
     ]
 
-    answer = jarvis.handle_pending_action_flow(memory, "ja", mail_worker=mail_worker)
+    answer = jarvis.handle_pending_action_flow(memory, "ja", mail_worker=mail_worker, router_decision="confirm")
 
     assert answer is not None
     assert "bereits erledigt" in answer
@@ -124,7 +124,7 @@ def test_expired_marker_is_discarded_silently():
     memory.get.return_value = settings
 
     mail_worker = MagicMock()
-    answer = jarvis.handle_pending_action_flow(memory, "ja", mail_worker=mail_worker)
+    answer = jarvis.handle_pending_action_flow(memory, "ja", mail_worker=mail_worker, router_decision="confirm")
 
     mail_worker.resolve_pending_calendar_actions.assert_not_called()
     assert answer is not None
@@ -134,14 +134,14 @@ def test_expired_marker_is_discarded_silently():
 def test_no_pending_marker_falls_through():
     memory = MagicMock()
     memory.get.return_value = {}
-    answer = jarvis.handle_pending_action_flow(memory, "das bestätige ich nicht")
+    answer = jarvis.handle_pending_action_flow(memory, "das bestätige ich nicht", router_decision="cancel")
     assert answer is None
 
 
 def test_ambiguous_yes_without_marker_still_returns_none():
     memory = MagicMock()
     memory.get.return_value = {}
-    answer = jarvis.handle_pending_action_flow(memory, "ja")
+    answer = jarvis.handle_pending_action_flow(memory, "ja", router_decision="confirm")
     assert answer is None
 
 

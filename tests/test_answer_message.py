@@ -30,10 +30,15 @@ def _route(provider="ollama", model="phi4-mini", compact=False):
 
 
 class _FakeLLM:
-    def __init__(self, answer="Chat-Antwort", route=None):
+    def __init__(self, answer="Chat-Antwort", route=None, router_decision=None):
         self._answer = answer
         self._route = route or _route()
         self.ask_calls = []
+        # Default: der Intent-Router (core/intent_router.py) entscheidet "chat" - die
+        # meisten bestehenden Tests wollen den alten "faellt durch bis zur normalen
+        # Chat-Antwort"-Pfad pruefen, nicht Capability-Routing. Tests, die gezielt eine
+        # Capability/Bestaetigung testen wollen, uebergeben ein eigenes Dict.
+        self._router_decision = router_decision or {"response_type": "chat", "chat_reply": answer}
 
     def plan(self, messages, user_text=None, force_local=False):
         return self._route
@@ -41,6 +46,9 @@ class _FakeLLM:
     def ask(self, messages, max_output_tokens=None, user_text=None, route=None, force_local=False):
         self.ask_calls.append({"messages": messages, "user_text": user_text, "force_local": force_local})
         return self._answer
+
+    def ask_structured(self, messages, json_schema, route=None, force_local=False):
+        return self._router_decision
 
     def ask_stream(self, messages, max_output_tokens=None, user_text=None, route=None, on_chunk=None, force_local=False):
         if callable(on_chunk):
@@ -98,22 +106,25 @@ def test_first_matching_direct_handler_wins_and_stops_dispatch(memory, workers):
     assert result.text == "System-Antwort"
 
 
-def test_notes_handler_wins_over_calendar_when_only_notes_matches(memory, workers):
-    with patch.object(jarvis, "has_domain", side_effect=lambda q, d: d == "notes"), \
-         patch.object(jarvis, "handle_notes_command", return_value="Notiz erstellt") as fake_notes, \
+def test_router_capability_call_invokes_the_chosen_capability(memory, workers):
+    # Seit dem Intent-Router-Umbau (2026-09-02) entscheidet das Modell strukturiert,
+    # WELCHE Capability zustaendig ist, statt einer festen has_domain()-Kaskade - siehe
+    # core/intent_router.py.
+    llm = _FakeLLM(router_decision={"response_type": "capability_call", "capability": "notes"})
+    with patch.object(jarvis, "handle_notes_command", return_value="Notiz erstellt") as fake_notes, \
          patch.object(jarvis, "handle_calendar_command") as fake_calendar:
-        result = jarvis.answer_message("Notiz: Milch kaufen", memory, _FakeLLM(), {}, workers=workers)
+        result = jarvis.answer_message("Notiz: Milch kaufen", memory, llm, {}, workers=workers)
 
     fake_notes.assert_called_once()
     fake_calendar.assert_not_called()
     assert result.text == "Notiz erstellt"
 
 
-def test_domain_permission_denial_returns_prompt_without_calling_handler(memory, workers):
-    with patch.object(jarvis, "has_domain", side_effect=lambda q, d: d == "notes"), \
-         patch.object(jarvis, "ensure_privacy_domain_permission", return_value="Erlaubst du Notizen?") as fake_ensure, \
+def test_router_capability_call_permission_denial_returns_prompt_without_calling_handler(memory, workers):
+    llm = _FakeLLM(router_decision={"response_type": "capability_call", "capability": "notes"})
+    with patch.object(jarvis, "ensure_privacy_domain_permission", return_value="Erlaubst du Notizen?") as fake_ensure, \
          patch.object(jarvis, "handle_notes_command") as fake_notes:
-        result = jarvis.answer_message("Notiz: Milch kaufen", memory, _FakeLLM(), {}, workers=workers)
+        result = jarvis.answer_message("Notiz: Milch kaufen", memory, llm, {}, workers=workers)
 
     fake_ensure.assert_called()
     fake_notes.assert_not_called()
@@ -173,16 +184,7 @@ def test_music_command_resets_pending_mail_followup(memory, workers):
     assert result.pending_mail_followup is False
 
 
-# --- Stufe 2 + finaler Chat-Fallback --------------------------------------------
-
-
-def test_domain_clarification_used_when_nothing_else_matches(memory, workers):
-    with patch.object(jarvis, "has_domain", return_value=False), \
-         patch.object(jarvis, "looks_like_calendar_query", return_value=False), \
-         patch.object(jarvis, "maybe_ask_domain_clarification", return_value="Meintest du deine Mails?"):
-        result = jarvis.answer_message("irgendwas unklares", memory, _FakeLLM(), {}, workers=workers)
-
-    assert result.text == "Meintest du deine Mails?"
+# --- Router-Fallback + finaler Chat --------------------------------------------
 
 
 def test_falls_through_to_chat_when_nothing_matches(memory, workers):

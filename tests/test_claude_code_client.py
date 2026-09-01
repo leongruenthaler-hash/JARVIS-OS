@@ -120,3 +120,50 @@ def test_ask_claude_code_raises_on_timeout():
          patch.object(subprocess, "run", side_effect=subprocess.TimeoutExpired(cmd="claude", timeout=90)):
         with pytest.raises(cc.ClaudeCodeError, match="90"):
             cc.ask_claude_code("Hallo?", timeout=90)
+
+
+# --- ask_claude_code_structured(): Grundlage des Intent-Routers (core/intent_router.py) --
+
+
+def test_ask_claude_code_structured_passes_json_schema_flag():
+    schema = {"type": "object", "properties": {"response_type": {"type": "string"}}}
+    fake_result = MagicMock(returncode=0, stdout=json.dumps({"is_error": False, "structured_output": {"response_type": "chat"}}), stderr="")
+    with patch.object(cc, "find_claude_binary", return_value="/usr/local/bin/claude"), \
+         patch.object(subprocess, "run", return_value=fake_result) as fake_run:
+        result = cc.ask_claude_code_structured("Nutzer: hallo", json_schema=schema)
+
+    assert result == {"response_type": "chat"}
+    args = fake_run.call_args[0][0]
+    assert "--json-schema" in args
+    assert json.loads(args[args.index("--json-schema") + 1]) == schema
+    # Der strukturierte Pfad darf, genau wie der normale, NIE Werkzeuge freigeben.
+    assert args[args.index("--tools") + 1] == ""
+
+
+def test_ask_claude_code_structured_falls_back_to_result_field_json_string():
+    """Manche CLI-Versionen liefern das Schema-Objekt evtl. nur im "result"-Textfeld
+    statt im separaten "structured_output"-Feld - lieber selbst parsen als zu scheitern."""
+    fake_result = MagicMock(
+        returncode=0,
+        stdout=json.dumps({"is_error": False, "result": json.dumps({"response_type": "capability_call", "capability": "mail"})}),
+        stderr="",
+    )
+    with patch.object(cc, "find_claude_binary", return_value="/usr/local/bin/claude"), \
+         patch.object(subprocess, "run", return_value=fake_result):
+        result = cc.ask_claude_code_structured("Nutzer: mails?", json_schema={"type": "object"})
+
+    assert result == {"response_type": "capability_call", "capability": "mail"}
+
+
+def test_ask_claude_code_structured_raises_when_neither_field_has_a_dict():
+    fake_result = MagicMock(returncode=0, stdout=json.dumps({"is_error": False, "result": "kein JSON"}), stderr="")
+    with patch.object(cc, "find_claude_binary", return_value="/usr/local/bin/claude"), \
+         patch.object(subprocess, "run", return_value=fake_result):
+        with pytest.raises(cc.ClaudeCodeError):
+            cc.ask_claude_code_structured("Nutzer: hallo", json_schema={"type": "object"})
+
+
+def test_ask_claude_code_structured_raises_when_binary_missing():
+    with patch.object(cc, "find_claude_binary", return_value=None):
+        with pytest.raises(cc.ClaudeCodeError):
+            cc.ask_claude_code_structured("Nutzer: hallo", json_schema={"type": "object"})
