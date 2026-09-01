@@ -10,7 +10,7 @@ from typing import Any
 
 from data_dir import data_root
 from llm_client import LLMClient
-from mail_calendar_actions import create_calendar_actions_from_messages
+from mail_calendar_actions import create_calendar_actions_from_messages, execute_planned_calendar_action
 from mail_client import MailAccessError, MailMessage, list_inbox_messages
 from permission_manager import PermissionManager
 
@@ -29,6 +29,11 @@ class MailBackgroundWorker:
         self.auto_calendar_process_existing = bool(
             config.get("auto_calendar_process_existing_on_overnight", False)
         )
+        # Nutzerwunsch 2026-09-02: aus Mails erkannte Termine/Erinnerungen direkt
+        # eintragen statt erst per Chat/proaktivem Hinweis zu bestaetigen - falsch
+        # erkannte Vorschlaege korrigiert/loescht Leon lieber selbst im Kalender,
+        # als jedes Mal eine Rueckfrage zu beantworten.
+        self.auto_calendar_auto_approve = bool(config.get("auto_calendar_from_mail_auto_approve", False))
         self.account_name = config.get("mail_inbox_account")
         self.mailbox_name = config.get("mail_inbox_mailbox")
         self.base_path = base_path or data_root() / "memory"
@@ -222,7 +227,15 @@ class MailBackgroundWorker:
         all_known_ids = list(dict.fromkeys([*current_ids, *list(known_ids)]))[:known_limit]
 
         pending_actions = list(previous_cache.get("pending_calendar_actions", []))
-        pending_actions.extend(proposed_actions)
+        resolved_actions = list(previous_cache.get("resolved_calendar_actions", []))
+        auto_created_actions: list[dict[str, Any]] = []
+        if self.auto_calendar_auto_approve:
+            for action in proposed_actions:
+                result = execute_planned_calendar_action(action, self.config)
+                resolved_actions.append(result)
+                auto_created_actions.append(result)
+        else:
+            pending_actions.extend(proposed_actions)
 
         cache = {
             **previous_cache,
@@ -232,16 +245,24 @@ class MailBackgroundWorker:
             "known_message_ids": all_known_ids,
             "seen_calendar_action_keys": all_action_keys,
             "pending_calendar_actions": pending_actions[-50:],
+            "resolved_calendar_actions": resolved_actions[-50:],
             "messages": [self._message_to_dict(message) for message in messages[:20]],
             "new_messages": [self._message_to_dict(message) for message in new_messages[:10]],
             "summary": self._build_summary(messages, new_messages, proposed_actions),
         }
         self._save_cache(cache)
-        print(
-            f"Hintergrund-Mailcheck fertig: {len(messages)} gelesen, "
-            f"{len(new_messages)} neu, {len(proposed_actions)} neue Kalender-/Erinnerungs-Vorschläge "
-            "(noch nicht bestätigt)."
-        )
+        if self.auto_calendar_auto_approve:
+            created_count = sum(1 for action in auto_created_actions if action.get("status") == "created")
+            print(
+                f"Hintergrund-Mailcheck fertig: {len(messages)} gelesen, "
+                f"{len(new_messages)} neu, {created_count} Kalender-/Erinnerungs-Eintraege automatisch angelegt."
+            )
+        else:
+            print(
+                f"Hintergrund-Mailcheck fertig: {len(messages)} gelesen, "
+                f"{len(new_messages)} neu, {len(proposed_actions)} neue Kalender-/Erinnerungs-Vorschläge "
+                "(noch nicht bestätigt)."
+            )
 
     def pending_calendar_actions(self) -> list[dict[str, str]]:
         return list(self._load_cache().get("pending_calendar_actions", []))

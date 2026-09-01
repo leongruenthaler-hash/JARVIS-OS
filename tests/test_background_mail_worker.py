@@ -118,6 +118,49 @@ def test_scan_creates_pending_calendar_action_without_writing_calendar(worker):
     assert pending[0]["status"] == "proposed"
 
 
+# --- Nutzerwunsch 2026-09-02: auto_calendar_from_mail_auto_approve traegt direkt ein --
+
+
+def test_auto_approve_creates_calendar_entries_without_pending_confirmation(tmp_path):
+    config = {
+        "background_mail_enabled": True,
+        "background_mail_morning_time": "07:00",
+        "background_mail_max_messages": 20,
+        "auto_calendar_from_mail_enabled": True,
+        "auto_calendar_from_mail_auto_approve": True,
+    }
+    w = MailBackgroundWorker(config, _FakeLLM(), base_path=tmp_path)
+    w.permissions.grant("mail")
+
+    with patch("background_tasks.list_inbox_messages", return_value=[_msg("m1")]):
+        w._scan(reason="manual", max_messages=20)  # baseline
+
+    new_message = _msg("m2", sender="shop@example.de", subject="Rechnung", preview="Zahlbar bis zum 15.03.2027, Betrag 49,90 Euro.")
+    with patch("background_tasks.list_inbox_messages", return_value=[_msg("m1"), new_message]), \
+         patch("mail_calendar_actions.create_reminder") as fake_reminder:
+        w._scan(reason="manual", max_messages=20)
+
+    fake_reminder.assert_called_once()
+    assert w.pending_calendar_actions() == []
+    cache = w._load_cache()
+    resolved = cache.get("resolved_calendar_actions", [])
+    assert len(resolved) == 1
+    assert resolved[0]["status"] == "created"
+
+
+def test_auto_approve_off_by_default_still_proposes(tmp_path):
+    """Nichts aendert sich fuer bestehende Konfigurationen ohne den neuen Schluessel -
+    Standardverhalten bleibt propose-then-confirm."""
+    config = {
+        "background_mail_enabled": True,
+        "background_mail_max_messages": 20,
+        "auto_calendar_from_mail_enabled": True,
+    }
+    w = MailBackgroundWorker(config, _FakeLLM(), base_path=tmp_path)
+    w.permissions.grant("mail")
+    assert w.auto_calendar_auto_approve is False
+
+
 def test_resolve_pending_calendar_action_approve_creates_reminder(worker):
     with patch("background_tasks.list_inbox_messages", return_value=[_msg("m1")]):
         worker._scan(reason="manual", max_messages=20)
