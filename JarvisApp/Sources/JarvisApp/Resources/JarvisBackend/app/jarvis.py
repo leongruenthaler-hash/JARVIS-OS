@@ -2282,7 +2282,17 @@ def handle_model_command(
             return api_permission
         return manager.use_openai()
 
-    if "nutze claude" in normalized or "claude code aktiv" in normalized or "claude aktiv" in normalized:
+    # "cloud code" zusaetzlich als Ausloeser: Spracherkennung verwechselt "Claude"
+    # live reproduzierbar mit "Cloud" (z.B. "Nutzer Cloud Code" statt "nutze Claude
+    # Code") - ohne diese Toleranz fiel der Befehl bisher durch bis zu einem
+    # Datei-Suche-Handler, der "cloud" als Suchbegriff missverstand (Bugreport
+    # 2026-09-02).
+    if (
+        "nutze claude" in normalized
+        or "claude code aktiv" in normalized
+        or "claude aktiv" in normalized
+        or "cloud code" in normalized
+    ):
         permission_answer = ensure_permission(memory, "cloud_llm", "Jarvis würde Claude Code als Cloud-KI aktivieren.") if memory is not None else None
         if permission_answer is not None:
             return permission_answer

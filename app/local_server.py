@@ -2250,7 +2250,12 @@ class JarvisLocalServer:
             return self.models.work_locally()
         if "nutze openai" in normalized or "openai aktiv" in normalized:
             return self.models.use_openai()
-        if "nutze claude" in normalized or "claude code aktiv" in normalized or "claude aktiv" in normalized:
+        if (
+            "nutze claude" in normalized
+            or "claude code aktiv" in normalized
+            or "claude aktiv" in normalized
+            or "cloud code" in normalized
+        ):
             return self.models.use_claude_code()
         return None
 
