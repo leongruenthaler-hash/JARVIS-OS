@@ -2245,7 +2245,7 @@ def handle_model_command(
     model_manager: ModelManager | None = None,
 ) -> str | None:
     normalized = normalize_text(text)
-    if not any(term in normalized for term in ("modell", "gemma", "qwen", "openai", "lokal", "cloud")):
+    if not any(term in normalized for term in ("modell", "gemma", "qwen", "openai", "lokal", "cloud", "claude")):
         return None
 
     # `model_manager` laesst den Aufrufer eine bereits vorhandene, langlebige
@@ -2281,6 +2281,12 @@ def handle_model_command(
         if api_permission is not None:
             return api_permission
         return manager.use_openai()
+
+    if "nutze claude" in normalized or "claude code aktiv" in normalized or "claude aktiv" in normalized:
+        permission_answer = ensure_permission(memory, "cloud_llm", "Jarvis würde Claude Code als Cloud-KI aktivieren.") if memory is not None else None
+        if permission_answer is not None:
+            return permission_answer
+        return manager.use_claude_code()
 
     return None
 

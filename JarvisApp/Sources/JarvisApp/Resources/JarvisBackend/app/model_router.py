@@ -58,6 +58,19 @@ class ModelRouter:
                 mode="quality",
             )
 
+        if active_provider == "claude_code" and not force_local:
+            return ModelRoute(
+                provider="claude_code",
+                model=str(self.config.get("claude_code_model", "sonnet")),
+                max_output_tokens=int(self.config.get("claude_code_max_output_tokens", 500)),
+                num_ctx=int(self.config.get("ollama_num_ctx", 1024)),
+                temperature=float(self.config.get("openai_temperature", 0.3)),
+                recent_context_limit=4,
+                compact_prompt=False,
+                stream=False,
+                mode="quality",
+            )
+
         simple = self._is_simple(text)
         complex_task = self._is_complex(text)
         pinned = self._pinned_local_model(installed_models=installed_models)

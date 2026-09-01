@@ -2250,6 +2250,8 @@ class JarvisLocalServer:
             return self.models.work_locally()
         if "nutze openai" in normalized or "openai aktiv" in normalized:
             return self.models.use_openai()
+        if "nutze claude" in normalized or "claude code aktiv" in normalized or "claude aktiv" in normalized:
+            return self.models.use_claude_code()
         return None
 
     def _handle_local_photo_vision_command(self, text: str) -> str | None:
@@ -2301,6 +2303,7 @@ class JarvisLocalServer:
             "installed_models": status.installed_models,
             "missing_models": status.missing_models,
             "openai_key_present": status.openai_key_present,
+            "claude_code_available": status.claude_code_available,
         }
 
     def set_model(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -2308,6 +2311,8 @@ class JarvisLocalServer:
         model = str(payload.get("model") or "").lower()
         if provider == "openai":
             message = self.models.use_openai()
+        elif provider == "claude_code":
+            message = self.models.use_claude_code()
         elif model:
             message = self.models.use_local_model(model)
         else:

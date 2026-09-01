@@ -16,6 +16,7 @@ from typing import Any
 from data_dir import data_root
 from secure_storage import get_openai_api_key, SecureStorageError
 from settings import load_config
+from claude_code_client import is_claude_code_available
 
 
 DEFAULT_LOCAL_MODEL = "phi4-mini"
@@ -73,6 +74,7 @@ class ModelStatus:
     installed_models: list[str]
     missing_models: list[str]
     openai_key_present: bool
+    claude_code_available: bool
 
 
 class ModelManager:
@@ -104,7 +106,7 @@ class ModelManager:
             if key not in data:
                 data[key] = value
                 changed = True
-        if data.get("provider") not in {"ollama", "openai"}:
+        if data.get("provider") not in {"ollama", "openai", "claude_code"}:
             data["provider"] = "ollama"
             changed = True
         normalized_model = normalize_model_name(str(data.get("local_model") or DEFAULT_LOCAL_MODEL))
@@ -115,13 +117,15 @@ class ModelManager:
             has_key = bool(get_openai_api_key())
         except SecureStorageError:
             has_key = False
-        if not bool(data.get("openai_enabled")) or not has_key:
-            if data.get("provider") != "ollama":
-                data["provider"] = "ollama"
-                changed = True
-            if data.get("openai_enabled") is not False:
-                data["openai_enabled"] = False
-                changed = True
+        if data.get("provider") == "openai" and (not bool(data.get("openai_enabled")) or not has_key):
+            data["provider"] = "ollama"
+            changed = True
+        if not has_key and data.get("openai_enabled") is not False:
+            data["openai_enabled"] = False
+            changed = True
+        if data.get("provider") == "claude_code" and not is_claude_code_available():
+            data["provider"] = "ollama"
+            changed = True
         if changed:
             self._save(data)
         return data
@@ -153,14 +157,20 @@ class ModelManager:
             has_key = bool(get_openai_api_key())
         except SecureStorageError:
             has_key = False
-        if self.data.get("provider") == "openai" and self.data.get("openai_enabled") and has_key:
+        configured = self.data.get("provider")
+        if configured == "openai" and self.data.get("openai_enabled") and has_key:
             return "openai"
+        if configured == "claude_code" and is_claude_code_available():
+            return "claude_code"
         return "ollama"
 
     @property
     def active_model(self) -> str:
-        if self.provider == "openai":
+        provider = self.provider
+        if provider == "openai":
             return str(self.config.get("openai_model", "gpt-5.4-nano"))
+        if provider == "claude_code":
+            return str(self.config.get("claude_code_model", "sonnet"))
         return normalize_model_name(str(self.data.get("local_model") or DEFAULT_LOCAL_MODEL))
 
     def use_standard_model(self) -> str:
@@ -189,11 +199,24 @@ class ModelManager:
         self._save()
         return "OpenAI ist aktiviert. Ich nutze Cloud-KI nur nach deiner Zustimmung fuer Cloud-KI und externe APIs."
 
+    def use_claude_code(self) -> str:
+        if not is_claude_code_available():
+            self.data["provider"] = "ollama"
+            self._save()
+            return (
+                "Claude Code ist nicht verfuegbar. Installiere die 'claude'-CLI und melde dich "
+                "einmalig per 'claude login' an."
+            )
+        self.data["provider"] = "claude_code"
+        self.data["openai_enabled"] = False
+        self._save()
+        return f"Claude Code ist aktiviert. Ich nutze jetzt {self.active_model} ueber dein Abo."
+
     def work_locally(self) -> str:
         self.data["provider"] = "ollama"
         self.data["openai_enabled"] = False
         self._save()
-        return f"Lokaler Modus aktiv. OpenAI ist deaktiviert. Ich nutze {self.data.get('local_model', DEFAULT_LOCAL_MODEL)}."
+        return f"Lokaler Modus aktiv. Cloud-Anbieter sind deaktiviert. Ich nutze {self.data.get('local_model', DEFAULT_LOCAL_MODEL)}."
 
     def status(self) -> ModelStatus:
         running = is_ollama_running()
@@ -203,12 +226,18 @@ class ModelManager:
             has_key = bool(get_openai_api_key())
         except SecureStorageError:
             has_key = False
-        if self.data.get("provider") == "openai" and self.data.get("openai_enabled") and has_key:
+        claude_code_available = is_claude_code_available()
+        configured = self.data.get("provider")
+        if configured == "openai" and self.data.get("openai_enabled") and has_key:
             provider = "openai"
+        elif configured == "claude_code" and claude_code_available:
+            provider = "claude_code"
         else:
             provider = "ollama"
         if provider == "openai":
             active_model = str(self.config.get("openai_model", "gpt-5.4-nano"))
+        elif provider == "claude_code":
+            active_model = str(self.config.get("claude_code_model", "sonnet"))
         else:
             active_model = normalize_model_name(str(self.data.get("local_model") or DEFAULT_LOCAL_MODEL))
         return ModelStatus(
@@ -220,11 +249,14 @@ class ModelManager:
             installed_models=installed,
             missing_models=missing,
             openai_key_present=has_key,
+            claude_code_available=claude_code_available,
         )
 
     def status_text(self) -> str:
         status = self.status()
         mode = str(self.config.get("model_mode", "performance")).strip().lower()
+        if status.provider == "claude_code":
+            return f"Ich nutze aktuell Claude Code mit {status.active_model} ueber dein Abo. Modus: {mode}. Lokaler Standard bleibt {self.data.get('local_model', DEFAULT_LOCAL_MODEL)}."
         if status.provider == "openai":
             return f"Ich nutze aktuell OpenAI mit {status.active_model}. Modus: {mode}. Lokaler Standard bleibt {self.data.get('local_model', DEFAULT_LOCAL_MODEL)}."
         hints = []

@@ -1,0 +1,98 @@
+"""Tests fuer app/claude_code_client.py: duenner subprocess-Wrapper um die
+'claude'-CLI, damit Jarvis Claude ueber das bestehende Abo statt ueber die
+separat abgerechnete API nutzen kann (Nutzerwunsch 2026-09-01)."""
+
+import json
+import subprocess
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+import claude_code_client as cc
+
+
+@pytest.fixture(autouse=True)
+def _reset_availability_cache():
+    cc._AVAILABILITY_CACHE = (0.0, False)
+    yield
+    cc._AVAILABILITY_CACHE = (0.0, False)
+
+
+def test_is_claude_code_available_reflects_binary_presence():
+    with patch.object(cc, "find_claude_binary", return_value="/usr/local/bin/claude"):
+        assert cc.is_claude_code_available(force=True) is True
+    with patch.object(cc, "find_claude_binary", return_value=None):
+        assert cc.is_claude_code_available(force=True) is False
+
+
+def test_ask_claude_code_raises_when_binary_missing():
+    with patch.object(cc, "find_claude_binary", return_value=None):
+        with pytest.raises(cc.ClaudeCodeError):
+            cc.ask_claude_code("Hallo?")
+
+
+def test_ask_claude_code_raises_on_empty_prompt():
+    with patch.object(cc, "find_claude_binary", return_value="/usr/local/bin/claude"):
+        with pytest.raises(cc.ClaudeCodeError):
+            cc.ask_claude_code("   ")
+
+
+def test_ask_claude_code_parses_result_field_from_json_output():
+    fake_result = MagicMock(returncode=0, stdout=json.dumps({"is_error": False, "result": "Alles bestens, Sir."}), stderr="")
+    with patch.object(cc, "find_claude_binary", return_value="/usr/local/bin/claude"), \
+         patch.object(subprocess, "run", return_value=fake_result) as fake_run:
+        answer = cc.ask_claude_code("Wie geht's?", system_prompt="Du bist Jarvis.", model="sonnet")
+
+    assert answer == "Alles bestens, Sir."
+    args = fake_run.call_args[0][0]
+    assert args[0] == "/usr/local/bin/claude"
+    assert "-p" in args
+    assert "Wie geht's?" in args
+    assert "--tools" in args
+    # Leerer String direkt nach --tools deaktiviert ALLE Werkzeuge - Jarvis'
+    # Cloud-Anfragen duerfen nie Datei-/Bash-Zugriff bekommen.
+    assert args[args.index("--tools") + 1] == ""
+    assert "--system-prompt" in args
+    assert "Du bist Jarvis." in args
+    assert "--model" in args
+    assert "sonnet" in args
+
+
+def test_ask_claude_code_raises_on_nonzero_exit():
+    fake_result = MagicMock(returncode=1, stdout="", stderr="OAuth session expired")
+    with patch.object(cc, "find_claude_binary", return_value="/usr/local/bin/claude"), \
+         patch.object(subprocess, "run", return_value=fake_result):
+        with pytest.raises(cc.ClaudeCodeError, match="OAuth session expired"):
+            cc.ask_claude_code("Hallo?")
+
+
+def test_ask_claude_code_raises_when_json_result_field_missing():
+    fake_result = MagicMock(returncode=0, stdout=json.dumps({"is_error": False}), stderr="")
+    with patch.object(cc, "find_claude_binary", return_value="/usr/local/bin/claude"), \
+         patch.object(subprocess, "run", return_value=fake_result):
+        with pytest.raises(cc.ClaudeCodeError):
+            cc.ask_claude_code("Hallo?")
+
+
+def test_ask_claude_code_raises_on_is_error_flag():
+    fake_result = MagicMock(returncode=0, stdout=json.dumps({"is_error": True, "result": "kaputt"}), stderr="")
+    with patch.object(cc, "find_claude_binary", return_value="/usr/local/bin/claude"), \
+         patch.object(subprocess, "run", return_value=fake_result):
+        with pytest.raises(cc.ClaudeCodeError):
+            cc.ask_claude_code("Hallo?")
+
+
+def test_ask_claude_code_falls_back_to_raw_text_on_bad_json():
+    fake_result = MagicMock(returncode=0, stdout="Ich bin die rohe Antwort.", stderr="")
+    with patch.object(cc, "find_claude_binary", return_value="/usr/local/bin/claude"), \
+         patch.object(subprocess, "run", return_value=fake_result):
+        answer = cc.ask_claude_code("Hallo?")
+
+    assert answer == "Ich bin die rohe Antwort."
+
+
+def test_ask_claude_code_raises_on_timeout():
+    with patch.object(cc, "find_claude_binary", return_value="/usr/local/bin/claude"), \
+         patch.object(subprocess, "run", side_effect=subprocess.TimeoutExpired(cmd="claude", timeout=90)):
+        with pytest.raises(cc.ClaudeCodeError, match="90"):
+            cc.ask_claude_code("Hallo?", timeout=90)

@@ -11,6 +11,7 @@ from secure_storage import SecureStorageError, get_openai_api_key
 from model_router import ModelRoute, ModelRouter
 from model_manager import ModelManager, ollama_hint_for_model, ollama_base_url
 from jarvis_personality import normalize_jarvis_messages
+from claude_code_client import ask_claude_code, ClaudeCodeError
 
 # Modelle, die Ollamas "thinking"-Feature unterstuetzen (per "ollama show <model>"
 # verifiziert, 2026-08-19). "think": True bei einem nicht-faehigen Modell
@@ -73,6 +74,8 @@ class LLMClient:
         effective_provider = "ollama" if force_local else self.provider
         if effective_provider == "openai":
             return self._ask_openai(messages, max_output_tokens=max_output_tokens, route=route)
+        if effective_provider == "claude_code":
+            return self._ask_claude_code(messages, route=route)
         if effective_provider == "ollama":
             return self._ask_ollama(messages, route=route, raw_system_prompt=raw_system_prompt)
         raise ValueError(f"Unbekannter KI-Anbieter: {effective_provider}")
@@ -329,6 +332,42 @@ class LLMClient:
             return text
 
         return "Ich habe gerade keine gute Antwort bekommen. Versuch's bitte noch einmal."
+
+    def _ask_claude_code(
+        self,
+        messages: list[dict[str, str]],
+        route: ModelRoute | None = None,
+    ) -> str:
+        """Nutzt die lokal installierte 'claude'-CLI (Claude Code) als Provider, damit
+        Antworten ueber das bestehende Claude-Abo laufen statt ueber die separat
+        abgerechnete API. Die CLI nimmt nur einen einzelnen Prompt-String entgegen,
+        deshalb werden die vorbereiteten Nachrichten hier zu System-Prompt +
+        Verlauf-Text zusammengefasst statt als Rollen-Liste uebergeben."""
+        route = route or self.plan(messages)
+        prepared = self._prepare_messages(messages, route=route)
+
+        system_content = ""
+        turns: list[str] = []
+        for message in prepared:
+            role = str(message.get("role") or "")
+            content = str(message.get("content") or "").strip()
+            if not content:
+                continue
+            if role == "system":
+                system_content = content
+            elif role == "assistant":
+                turns.append(f"Jarvis: {content}")
+            else:
+                turns.append(f"Nutzer: {content}")
+
+        prompt = "\n\n".join(turns) if turns else "Antworte kurz und hilfreich."
+        model = os.getenv("CLAUDE_CODE_MODEL", route.model or self.model_manager.active_model)
+        timeout = float(self.config.get("claude_code_timeout", 90))
+
+        try:
+            return ask_claude_code(prompt, system_prompt=system_content, model=model, timeout=timeout)
+        except ClaudeCodeError as exc:
+            raise RuntimeError(str(exc)) from exc
 
     def _read_ollama_stream(self, response: Any, on_chunk: Any | None = None) -> str:
         complete = []
