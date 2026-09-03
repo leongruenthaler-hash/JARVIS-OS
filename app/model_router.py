@@ -79,7 +79,7 @@ class ModelRouter:
             # Claude Code zustaendig (siehe core/intent_router.py, app/jarvis.py).
             return ModelRoute(
                 provider="gemini",
-                model=str(self.config.get("gemini_model", "gemini-2.5-flash")),
+                model=str(self.config.get("gemini_model", "gemini-3.6-flash")),
                 max_output_tokens=int(self.config.get("gemini_max_output_tokens", 400)),
                 num_ctx=int(self.config.get("ollama_num_ctx", 1024)),
                 temperature=float(self.config.get("gemini_temperature", 0.3)),

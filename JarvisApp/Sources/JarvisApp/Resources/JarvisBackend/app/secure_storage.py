@@ -84,14 +84,14 @@ def delete_secret(name: str) -> bool:
     return existed
 
 
-_OPENAI_KEY_CACHE: tuple[float, str | None] = (0.0, None)
+_OPENAI_KEY_CACHE: tuple[float, str | None] = (float("-inf"), None)
 _OPENAI_KEY_CACHE_TTL_SECONDS = 5.0
 
 
 def set_openai_api_key(value: str) -> None:
     global _OPENAI_KEY_CACHE
     set_secret(OPENAI_KEY_NAME, value)
-    _OPENAI_KEY_CACHE = (0.0, None)
+    _OPENAI_KEY_CACHE = (float("-inf"), None)
 
 
 def get_openai_api_key() -> str | None:
@@ -100,7 +100,19 @@ def get_openai_api_key() -> str | None:
     see llm_client.py's _refresh_model_state), and each call is a real Keychain/`security`
     CLI round-trip. The key only ever changes via set/delete above (both invalidate this
     cache immediately), so a few seconds of staleness is safe and removes that latency
-    from the hot chat path."""
+    from the hot chat path.
+
+    Cache sentinel MUST be float("-inf"), not 0.0 (live bug 2026-09-03): time.monotonic()'s
+    reference point is platform-defined, NOT guaranteed to be far in the past - on this
+    machine's bundled Python it starts near 0 at interpreter launch. With a 0.0 sentinel,
+    the very first-ever call in a fresh process (within the first
+    _OPENAI_KEY_CACHE_TTL_SECONDS of process start) satisfied "cache still fresh" against
+    the untouched default and returned None without ever checking the Keychain - a freshly
+    stored key then looked identical to "no key configured" until that first, wrong
+    negative result aged out of any caller's own cache (see gemini_client.py's
+    is_gemini_available(), whose 30s cache let this negative result linger long past the
+    5s window here). float("-inf") makes the first real call always look infinitely stale,
+    regardless of where this platform's monotonic clock starts counting from."""
     global _OPENAI_KEY_CACHE
     cached_at, cached_value = _OPENAI_KEY_CACHE
     if time.monotonic() - cached_at < _OPENAI_KEY_CACHE_TTL_SECONDS:
@@ -119,7 +131,7 @@ def get_openai_api_key() -> str | None:
 
 def delete_openai_api_key() -> bool:
     global _OPENAI_KEY_CACHE
-    _OPENAI_KEY_CACHE = (0.0, None)
+    _OPENAI_KEY_CACHE = (float("-inf"), None)
     return delete_secret(OPENAI_KEY_NAME)
 
 
@@ -129,14 +141,14 @@ def prompt_and_store_openai_key() -> str:
     return "OpenAI API-Key wurde sicher in der macOS Keychain gespeichert."
 
 
-_GEMINI_KEY_CACHE: tuple[float, str | None] = (0.0, None)
+_GEMINI_KEY_CACHE: tuple[float, str | None] = (float("-inf"), None)
 _GEMINI_KEY_CACHE_TTL_SECONDS = 5.0
 
 
 def set_gemini_api_key(value: str) -> None:
     global _GEMINI_KEY_CACHE
     set_secret(GEMINI_KEY_NAME, value)
-    _GEMINI_KEY_CACHE = (0.0, None)
+    _GEMINI_KEY_CACHE = (float("-inf"), None)
 
 
 def get_gemini_api_key() -> str | None:
@@ -158,7 +170,7 @@ def get_gemini_api_key() -> str | None:
 
 def delete_gemini_api_key() -> bool:
     global _GEMINI_KEY_CACHE
-    _GEMINI_KEY_CACHE = (0.0, None)
+    _GEMINI_KEY_CACHE = (float("-inf"), None)
     return delete_secret(GEMINI_KEY_NAME)
 
 

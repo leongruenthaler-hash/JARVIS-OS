@@ -62,6 +62,7 @@ from files_client import (
 )
 from llm_client import LLMClient
 from claude_code_client import ask_claude_code_research, is_claude_code_available, ClaudeCodeError
+from gemini_client import is_gemini_available
 from mail_client import (
     MailAccessError,
     export_categorized_mail_documents,
@@ -8932,6 +8933,17 @@ def answer_message(
     # Code liefen. `route` NICHT weiterreichen: es wurde weiter oben fuer den zuvor
     # aktiven Provider berechnet (Modellname/Token-Budget passen sonst nicht zu Gemini) -
     # llm.ask()/ask_stream() bauen sich mit force_provider selbst eine passende Route.
+    # `route` (von _result() als provider/model fuer die API-Antwort ausgelesen, siehe
+    # oben) muss hier dieselbe Verfuegbarkeitspruefung nachvollziehen, sonst zeigt das
+    # "source"-Feld weiterhin faelschlich den globalen Standard-Provider (z.B.
+    # claude_code), obwohl die Antwort tatsaechlich von Gemini kam - live entdeckter
+    # Bug 2026-09-03: force_provider="gemini" aendert nur, WER antwortet, nicht was
+    # _result() dafuer berichtet.
+    if force_local:
+        pass
+    elif is_gemini_available():
+        route.provider = "gemini"
+        route.model = str(config.get("gemini_model", "gemini-3.6-flash"))
     if callable(on_llm_chunk):
         answer = llm.ask_stream(
             messages,

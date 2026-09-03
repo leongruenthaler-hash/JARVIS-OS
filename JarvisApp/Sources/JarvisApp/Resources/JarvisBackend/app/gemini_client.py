@@ -10,6 +10,7 @@ urllib (kein neues Python-Paket noetig, gleiches Muster wie llm_client.py::_ask_
 from __future__ import annotations
 
 import json
+import socket
 import time
 import urllib.error
 import urllib.request
@@ -17,7 +18,7 @@ import urllib.request
 from secure_storage import SecureStorageError, get_gemini_api_key
 
 API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3.6-flash"
 
 _AVAILABILITY_CACHE: tuple[float, bool] = (0.0, False)
 _AVAILABILITY_CACHE_SECONDS = 30.0
@@ -93,10 +94,16 @@ def _call_gemini(
         except Exception:
             pass
         raise GeminiError(f"Gemini-Anfrage fehlgeschlagen ({exc.code}): {detail[:300] or exc.reason}") from exc
+    except (socket.timeout, TimeoutError) as exc:
+        # Vor Python 3.10 ist socket.timeout eine EIGENE Klasse (Unterklasse von OSError,
+        # NICHT von TimeoutError) - ein reiner Lese-Timeout von urlopen() wirft auf dieser
+        # Python-3.9-Umgebung socket.timeout, nicht TimeoutError. Live-Bug 2026-09-03: mit
+        # nur "except TimeoutError" blieb der Timeout hier ungefangen, propagierte roh bis
+        # nach local_server.py durch (dort als generische "Technisch war es: timeout"-
+        # Meldung sichtbar) statt als sauberer, force_provider-Fallback-faehiger GeminiError.
+        raise GeminiError(f"Gemini hat innerhalb von {timeout:.0f}s nicht geantwortet.") from exc
     except urllib.error.URLError as exc:
         raise GeminiError(f"Gemini war nicht erreichbar: {exc.reason}") from exc
-    except TimeoutError as exc:
-        raise GeminiError(f"Gemini hat innerhalb von {timeout:.0f}s nicht geantwortet.") from exc
 
     return data
 

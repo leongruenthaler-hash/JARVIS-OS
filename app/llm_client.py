@@ -114,15 +114,50 @@ class LLMClient:
         # antwortete.
         if max_output_tokens is not None:
             route.max_output_tokens = int(max_output_tokens)
-        if effective_provider == "openai":
+        try:
+            return self._dispatch(effective_provider, messages, route, max_output_tokens=max_output_tokens, raw_system_prompt=raw_system_prompt)
+        except Exception:
+            # Nicht nur RuntimeError: ein Provider-Client kann auch eine rohe, nicht
+            # eigens verpackte Exception durchlassen (z.B. ein Netzwerk-Timeout, das nicht
+            # in die vom jeweiligen Client erwarteten except-Klauseln passt - live Bug
+            # 2026-09-03, siehe gemini_client.py::_call_gemini()-Kommentar zu
+            # socket.timeout vs. TimeoutError auf Python 3.9). force_provider soll auch
+            # dann noch auf den natuerlichen Provider zurueckfallen koennen, nicht nur bei
+            # sauber gemeldeten RuntimeErrors.
+            # force_provider ist ein Vorzugswunsch, kein hartes Muss (siehe Kommentar oben) -
+            # das gilt nicht nur fuer Nichtverfuegbarkeit (oben schon abgefangen), sondern auch
+            # fuer einen tatsaechlichen Fehlschlag beim Aufruf selbst (live beobachtet
+            # 2026-09-03: Gemini antwortete zeitweise mit HTTP 503 "high demand"). Ohne diesen
+            # Rueckfall haette der Nutzer die rohe Fehlermeldung als Jarvis-Antwort gesehen,
+            # obwohl der eigentlich aktive Provider (z.B. Claude Code) die Frage problemlos
+            # haette beantworten koennen. Nur EIN Rueckfallversuch, nur wenn wir wegen
+            # force_provider ueberhaupt vom natuerlichen self.provider abgewichen sind - ein
+            # Fehler vom natuerlichen Provider selbst wird weiterhin normal nach oben gereicht.
+            if force_provider and effective_provider == force_provider and effective_provider != self.provider and not force_local:
+                fallback_provider = self.provider
+                fallback_route = self._plan_for_provider(messages, user_text=user_text, force_local=force_local, provider_override=fallback_provider)
+                if max_output_tokens is not None:
+                    fallback_route.max_output_tokens = int(max_output_tokens)
+                return self._dispatch(fallback_provider, messages, fallback_route, max_output_tokens=max_output_tokens, raw_system_prompt=raw_system_prompt)
+            raise
+
+    def _dispatch(
+        self,
+        provider: str,
+        messages: list[dict[str, str]],
+        route: ModelRoute,
+        max_output_tokens: int | None = None,
+        raw_system_prompt: bool = False,
+    ) -> str:
+        if provider == "openai":
             return self._ask_openai(messages, max_output_tokens=max_output_tokens, route=route)
-        if effective_provider == "claude_code":
+        if provider == "claude_code":
             return self._ask_claude_code(messages, route=route)
-        if effective_provider == "gemini":
+        if provider == "gemini":
             return self._ask_gemini(messages, route=route)
-        if effective_provider == "ollama":
+        if provider == "ollama":
             return self._ask_ollama(messages, route=route, raw_system_prompt=raw_system_prompt)
-        raise ValueError(f"Unbekannter KI-Anbieter: {effective_provider}")
+        raise ValueError(f"Unbekannter KI-Anbieter: {provider}")
 
     def ask_structured(
         self,
@@ -159,7 +194,51 @@ class LLMClient:
                 turns.append(f"Nutzer: {content}")
         prompt = "\n\n".join(turns) if turns else "Antworte kurz und hilfreich."
 
-        if effective_provider == "claude_code":
+        try:
+            return self._dispatch_structured(effective_provider, prompt, json_schema, system_content, messages, route)
+        except Exception:
+            # Nicht nur RuntimeError: ein Provider-Client kann auch eine rohe, nicht
+            # eigens verpackte Exception durchlassen (z.B. ein Netzwerk-Timeout, das nicht
+            # in die vom jeweiligen Client erwarteten except-Klauseln passt - live Bug
+            # 2026-09-03, siehe gemini_client.py::_call_gemini()-Kommentar zu
+            # socket.timeout vs. TimeoutError auf Python 3.9). force_provider soll auch
+            # dann noch auf den natuerlichen Provider zurueckfallen koennen, nicht nur bei
+            # sauber gemeldeten RuntimeErrors.
+            # Gleicher Rueckfall-Gedanke wie in ask() - siehe dortigen Kommentar. Ein
+            # transienter Fehler (z.B. Gemini HTTP 503) beim erzwungenen Provider soll die
+            # Router-Entscheidung nicht platzen lassen, wenn der natuerliche Provider
+            # (self.provider) die Anfrage stattdessen beantworten kann.
+            if force_provider and effective_provider == force_provider and effective_provider != self.provider and not force_local:
+                fallback_provider = self.provider
+                fallback_route = self._plan_for_provider(messages, force_local=force_local, provider_override=fallback_provider)
+                fallback_prepared = self._prepare_messages(messages, route=fallback_route)
+                fallback_system = ""
+                fallback_turns: list[str] = []
+                for message in fallback_prepared:
+                    role = str(message.get("role") or "")
+                    content = str(message.get("content") or "").strip()
+                    if not content:
+                        continue
+                    if role == "system":
+                        fallback_system = content
+                    elif role == "assistant":
+                        fallback_turns.append(f"Jarvis: {content}")
+                    else:
+                        fallback_turns.append(f"Nutzer: {content}")
+                fallback_prompt = "\n\n".join(fallback_turns) if fallback_turns else "Antworte kurz und hilfreich."
+                return self._dispatch_structured(fallback_provider, fallback_prompt, json_schema, fallback_system, messages, fallback_route)
+            raise
+
+    def _dispatch_structured(
+        self,
+        provider: str,
+        prompt: str,
+        json_schema: dict,
+        system_content: str,
+        messages: list[dict[str, str]],
+        route: ModelRoute,
+    ) -> dict:
+        if provider == "claude_code":
             model = os.getenv("CLAUDE_CODE_MODEL", route.model or self.model_manager.active_model)
             timeout = float(self.config.get("claude_code_timeout", 90))
             try:
@@ -167,8 +246,8 @@ class LLMClient:
             except ClaudeCodeError as exc:
                 raise RuntimeError(str(exc)) from exc
 
-        if effective_provider == "gemini":
-            model = os.getenv("GEMINI_MODEL", route.model or str(self.config.get("gemini_model", "gemini-2.5-flash")))
+        if provider == "gemini":
+            model = os.getenv("GEMINI_MODEL", route.model or str(self.config.get("gemini_model", "gemini-3.6-flash")))
             timeout = float(self.config.get("gemini_timeout", 20))
             try:
                 return ask_gemini_structured(prompt, json_schema=json_schema, system_prompt=system_content, model=model, timeout=timeout)
@@ -511,7 +590,7 @@ class LLMClient:
                 turns.append(f"Nutzer: {content}")
 
         prompt = "\n\n".join(turns) if turns else "Antworte kurz und hilfreich."
-        model = os.getenv("GEMINI_MODEL", route.model or str(self.config.get("gemini_model", "gemini-2.5-flash")))
+        model = os.getenv("GEMINI_MODEL", route.model or str(self.config.get("gemini_model", "gemini-3.6-flash")))
         timeout = float(self.config.get("gemini_timeout", 20))
 
         try:

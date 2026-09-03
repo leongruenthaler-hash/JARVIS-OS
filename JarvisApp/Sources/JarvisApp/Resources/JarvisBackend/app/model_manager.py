@@ -179,7 +179,7 @@ class ModelManager:
         if provider == "claude_code":
             return str(self.config.get("claude_code_model", "sonnet"))
         if provider == "gemini":
-            return str(self.config.get("gemini_model", "gemini-2.5-flash"))
+            return str(self.config.get("gemini_model", "gemini-3.6-flash"))
         return normalize_model_name(str(self.data.get("local_model") or DEFAULT_LOCAL_MODEL))
 
     def use_standard_model(self) -> str:
@@ -264,7 +264,7 @@ class ModelManager:
         elif provider == "claude_code":
             active_model = str(self.config.get("claude_code_model", "sonnet"))
         elif provider == "gemini":
-            active_model = str(self.config.get("gemini_model", "gemini-2.5-flash"))
+            active_model = str(self.config.get("gemini_model", "gemini-3.6-flash"))
         else:
             active_model = normalize_model_name(str(self.data.get("local_model") or DEFAULT_LOCAL_MODEL))
         return ModelStatus(

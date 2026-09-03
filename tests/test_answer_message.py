@@ -194,12 +194,31 @@ def test_falls_through_to_chat_when_nothing_matches(memory, workers):
          patch.object(jarvis, "maybe_ask_domain_clarification", return_value=None), \
          patch.object(jarvis, "should_use_web_search", return_value=False), \
          patch.object(jarvis, "ensure_cloud_llm_permission", return_value=None), \
-         patch.object(jarvis, "execute_promised_action_if_possible", return_value=None):
+         patch.object(jarvis, "execute_promised_action_if_possible", return_value=None), \
+         patch.object(jarvis, "is_gemini_available", return_value=False):
         result = jarvis.answer_message("wie geht es dir", memory, llm, {}, workers=workers)
 
     assert result.text == "Allgemeine Antwort"
     assert result.provider == "ollama"
     assert result.model == "phi4-mini"
+
+
+def test_chat_answer_reports_gemini_as_source_when_available(memory, workers):
+    """Live-Bug 2026-09-03: force_provider="gemini" (siehe llm_client.py) aendert nur,
+    WER antwortet - ohne diesen Nachtrag zeigte das "source"-Feld weiterhin den
+    globalen Standard-Provider, obwohl Gemini tatsaechlich geantwortet hat."""
+    llm = _FakeLLM(answer="Allgemeine Antwort")
+    with patch.object(jarvis, "has_domain", return_value=False), \
+         patch.object(jarvis, "looks_like_calendar_query", return_value=False), \
+         patch.object(jarvis, "maybe_ask_domain_clarification", return_value=None), \
+         patch.object(jarvis, "should_use_web_search", return_value=False), \
+         patch.object(jarvis, "ensure_cloud_llm_permission", return_value=None), \
+         patch.object(jarvis, "execute_promised_action_if_possible", return_value=None), \
+         patch.object(jarvis, "is_gemini_available", return_value=True):
+        result = jarvis.answer_message("wie geht es dir", memory, llm, {"gemini_model": "gemini-2.5-flash"}, workers=workers)
+
+    assert result.provider == "gemini"
+    assert result.model == "gemini-2.5-flash"
 
 
 # --- Tagesbriefing: muss auch im Server-/App-Pfad greifen, nicht nur CLI -------
@@ -252,7 +271,8 @@ def test_general_chat_answer_still_has_name_stripped(memory, workers):
          patch.object(jarvis, "maybe_ask_domain_clarification", return_value=None), \
          patch.object(jarvis, "should_use_web_search", return_value=False), \
          patch.object(jarvis, "ensure_cloud_llm_permission", return_value=None), \
-         patch.object(jarvis, "execute_promised_action_if_possible", return_value=None):
+         patch.object(jarvis, "execute_promised_action_if_possible", return_value=None), \
+         patch.object(jarvis, "is_gemini_available", return_value=False):
         result = jarvis.answer_message("wie geht es dir", memory, llm, {}, workers=workers)
 
     assert "Leon" not in result.text
@@ -283,7 +303,8 @@ def test_streaming_uses_ask_stream_and_forwards_chunks(memory, workers):
          patch.object(jarvis, "maybe_ask_domain_clarification", return_value=None), \
          patch.object(jarvis, "should_use_web_search", return_value=False), \
          patch.object(jarvis, "ensure_cloud_llm_permission", return_value=None), \
-         patch.object(jarvis, "execute_promised_action_if_possible", return_value=None):
+         patch.object(jarvis, "execute_promised_action_if_possible", return_value=None), \
+         patch.object(jarvis, "is_gemini_available", return_value=False):
         result = jarvis.answer_message(
             "wie geht es dir", memory, llm, {}, workers=workers, on_llm_chunk=chunks.append
         )
