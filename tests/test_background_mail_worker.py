@@ -21,7 +21,7 @@ class _FakeLLM:
     _build_summary() ruft das ueber summarize_mail_digest_via_llm() auf, siehe
     plans/2026-08-10-jarvis-mail-update-menschlich.md."""
 
-    def ask(self, messages, max_output_tokens=None, user_text=None, route=None, force_local=False):
+    def ask(self, messages, max_output_tokens=None, user_text=None, route=None, force_local=False, **kwargs):
         return "Menschliche Zusammenfassung."
 
 

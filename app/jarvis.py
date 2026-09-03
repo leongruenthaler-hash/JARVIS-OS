@@ -117,7 +117,9 @@ from secure_storage import (
     SecureStorageError,
     check_secure_storage,
     delete_openai_api_key,
+    delete_gemini_api_key,
     prompt_and_store_openai_key,
+    prompt_and_store_gemini_key,
     remove_openai_key_from_env_file,
 )
 from photos_client import (
@@ -2253,7 +2255,7 @@ def handle_model_command(
     model_manager: ModelManager | None = None,
 ) -> str | None:
     normalized = normalize_text(text)
-    if not any(term in normalized for term in ("modell", "gemma", "qwen", "openai", "lokal", "cloud", "claude")):
+    if not any(term in normalized for term in ("modell", "gemma", "qwen", "openai", "lokal", "cloud", "claude", "gemini")):
         return None
 
     # `model_manager` laesst den Aufrufer eine bereits vorhandene, langlebige
@@ -2305,6 +2307,15 @@ def handle_model_command(
         if permission_answer is not None:
             return permission_answer
         return manager.use_claude_code()
+
+    if "nutze gemini" in normalized or "gemini aktiv" in normalized:
+        permission_answer = ensure_permission(memory, "cloud_llm", "Jarvis würde Gemini als Cloud-KI aktivieren.") if memory is not None else None
+        if permission_answer is not None:
+            return permission_answer
+        api_permission = ensure_permission(memory, "external_api", "Jarvis würde externe API-Anfragen an Gemini erlauben.") if memory is not None else None
+        if api_permission is not None:
+            return api_permission
+        return manager.use_gemini()
 
     return None
 
@@ -3183,10 +3194,14 @@ def summarize_mail_digest_via_llm(
         },
     ]
 
+    # force_provider="claude_code": Mail-Zusammenfassung ist eine "eigentliche Aufgabe"
+    # (Nutzerwunsch 2026-09-03), faellt bei fehlender Verfuegbarkeit still auf den
+    # aktiven Provider zurueck (siehe llm_client.py::_resolve_effective_provider()).
     answer = llm.ask(
         prompt,
         max_output_tokens=MAIL_SUMMARY_MAX_OUTPUT_TOKENS,
         user_text="mail zusammenfassen und thematisch bündeln",
+        force_provider="claude_code",
     )
     if not answer.strip():
         return None
@@ -3251,7 +3266,7 @@ def humanize_camera_feedback_via_llm(llm: LLMClient, raw_description: str) -> st
     # 600 statt vorher 90 - reasoning-faehige Modelle (aktuell qwen3:4b)
     # bauchen oft 300-500+ Token allein zum Nachdenken, sonst kaeme eine leere
     # Antwort zurueck (siehe llm_client.py::_THINKING_CAPABLE_MODELS).
-    answer = llm.ask(prompt, max_output_tokens=600, user_text="kamera outfit feedback umformulieren")
+    answer = llm.ask(prompt, max_output_tokens=600, user_text="kamera outfit feedback umformulieren", force_provider="claude_code")
     answer = answer.strip()
     if not answer:
         return None
@@ -8291,6 +8306,29 @@ def run_delete_openai_key() -> int:
         return 1
 
 
+def run_set_gemini_key() -> int:
+    try:
+        message = prompt_and_store_gemini_key()
+        print(message)
+        return 0
+    except SecureStorageError as exc:
+        print(f"Gemini API-Key konnte nicht gespeichert werden: {type(exc).__name__}")
+        return 1
+    except KeyboardInterrupt:
+        print("Abgebrochen. Kein API-Key gespeichert.")
+        return 1
+
+
+def run_delete_gemini_key() -> int:
+    try:
+        deleted = delete_gemini_api_key()
+        print("Gemini API-Key aus der macOS Keychain gelöscht." if deleted else "Kein Gemini API-Key in der macOS Keychain gefunden.")
+        return 0
+    except SecureStorageError as exc:
+        print(f"Gemini API-Key konnte nicht gelöscht werden: {type(exc).__name__}")
+        return 1
+
+
 def run_check_secure_storage() -> int:
     result = check_secure_storage()
     print("Secure Storage Check")
@@ -8887,16 +8925,22 @@ def answer_message(
     # bereits bereinigten answer (ein erster Versuch, hier die rohen Chunks zu
     # puffern und unveraendert wiederzugeben, hat genau diese Bereinigung
     # umgangen - Codex Stop-Time-Review 2026-08-23).
+    # force_provider="gemini": ab hier ist die Router-Entscheidung entweder "chat" oder
+    # (Faehigkeit nicht gefunden/ohne Ergebnis) durchgefallen - in beiden Faellen soll die
+    # eigentliche Gespraechsantwort ueber den schnellen Provider laufen (Nutzerwunsch
+    # 2026-09-03), waehrend Faehigkeiten/Hintergrund-Aktionen oben bereits ueber Claude
+    # Code liefen. `route` NICHT weiterreichen: es wurde weiter oben fuer den zuvor
+    # aktiven Provider berechnet (Modellname/Token-Budget passen sonst nicht zu Gemini) -
+    # llm.ask()/ask_stream() bauen sich mit force_provider selbst eine passende Route.
     if callable(on_llm_chunk):
         answer = llm.ask_stream(
             messages,
-            max_output_tokens=route.max_output_tokens,
             user_text=question,
-            route=route,
             force_local=force_local,
+            force_provider="gemini",
         )
     else:
-        answer = llm.ask(messages, max_output_tokens=route.max_output_tokens, user_text=question, route=route, force_local=force_local)
+        answer = llm.ask(messages, user_text=question, force_local=force_local, force_provider="gemini")
     answer = clean_ai_answer(answer)
     if not wants_first_name_permission(question):
         answer = strip_first_name_address(answer, configured_user_name())
@@ -9115,6 +9159,10 @@ if __name__ == "__main__":
         raise SystemExit(run_set_openai_key())
     if "--delete-openai-key" in sys.argv:
         raise SystemExit(run_delete_openai_key())
+    if "--set-gemini-key" in sys.argv:
+        raise SystemExit(run_set_gemini_key())
+    if "--delete-gemini-key" in sys.argv:
+        raise SystemExit(run_delete_gemini_key())
     if "--check-secure-storage" in sys.argv:
         raise SystemExit(run_check_secure_storage())
     if "--privacy-test" in sys.argv:

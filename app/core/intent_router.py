@@ -175,7 +175,12 @@ def decide(
         history = [*history, {"role": "user", "content": question}]
     router_messages = [{"role": "system", "content": router_system}, *history]
     try:
-        data = llm.ask_structured(router_messages, json_schema=ROUTER_SCHEMA)
+        # force_provider="gemini": die Klassifikationsentscheidung selbst soll immer
+        # ueber den schnellsten verfuegbaren Anbieter laufen (Nutzerwunsch 2026-09-03:
+        # "Gemini fuer die schnelleren Antworten"), unabhaengig davon, welcher Anbieter
+        # gerade als Haupt-Provider aktiv ist. Faellt in llm.ask_structured() still auf
+        # den aktiven Anbieter zurueck, wenn (noch) kein Gemini-Key hinterlegt ist.
+        data = llm.ask_structured(router_messages, json_schema=ROUTER_SCHEMA, force_provider="gemini")
     except Exception:
         return RouterDecision(response_type="chat", chat_reply="")
     return parse_router_decision(data)

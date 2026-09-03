@@ -298,7 +298,7 @@ class _FakeLLM:
         self._response = response
         self.last_messages = None
 
-    def ask(self, messages, max_output_tokens=None, user_text=None, route=None, raw_system_prompt=False):
+    def ask(self, messages, max_output_tokens=None, user_text=None, route=None, raw_system_prompt=False, **kwargs):
         self.last_messages = messages
         return self._response
 

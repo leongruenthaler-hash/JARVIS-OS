@@ -71,6 +71,24 @@ class ModelRouter:
                 mode="quality",
             )
 
+        if active_provider == "gemini" and not force_local:
+            # Bewusst knapperes recent_context_limit/Token-Budget als Claude Code -
+            # Gemini uebernimmt laut Nutzerwunsch (2026-09-03) die Router-Klassifikation
+            # und normale Chat-Antworten, wo niedrige Latenz wichtiger ist als maximale
+            # Kontexttiefe; fuer eigentliche Aufgaben/Hintergrund-Aktionen bleibt
+            # Claude Code zustaendig (siehe core/intent_router.py, app/jarvis.py).
+            return ModelRoute(
+                provider="gemini",
+                model=str(self.config.get("gemini_model", "gemini-2.5-flash")),
+                max_output_tokens=int(self.config.get("gemini_max_output_tokens", 400)),
+                num_ctx=int(self.config.get("ollama_num_ctx", 1024)),
+                temperature=float(self.config.get("gemini_temperature", 0.3)),
+                recent_context_limit=4,
+                compact_prompt=False,
+                stream=False,
+                mode="quality",
+            )
+
         simple = self._is_simple(text)
         complex_task = self._is_complex(text)
         pinned = self._pinned_local_model(installed_models=installed_models)

@@ -21,8 +21,10 @@ def _log_keyring_fallback(action: str, exc: Exception) -> None:
 
 SERVICE_NAME = "JarvisOS"
 OPENAI_KEY_NAME = "OPENAI_API_KEY"
+GEMINI_KEY_NAME = "GEMINI_API_KEY"
 OPTIONAL_SECRET_NAMES = {
     "openai": OPENAI_KEY_NAME,
+    "gemini": GEMINI_KEY_NAME,
 }
 
 
@@ -127,6 +129,45 @@ def prompt_and_store_openai_key() -> str:
     return "OpenAI API-Key wurde sicher in der macOS Keychain gespeichert."
 
 
+_GEMINI_KEY_CACHE: tuple[float, str | None] = (0.0, None)
+_GEMINI_KEY_CACHE_TTL_SECONDS = 5.0
+
+
+def set_gemini_api_key(value: str) -> None:
+    global _GEMINI_KEY_CACHE
+    set_secret(GEMINI_KEY_NAME, value)
+    _GEMINI_KEY_CACHE = (0.0, None)
+
+
+def get_gemini_api_key() -> str | None:
+    """Analog zu get_openai_api_key() - siehe dessen Kommentar zum Cache-Grund."""
+    global _GEMINI_KEY_CACHE
+    cached_at, cached_value = _GEMINI_KEY_CACHE
+    if time.monotonic() - cached_at < _GEMINI_KEY_CACHE_TTL_SECONDS:
+        return cached_value
+
+    try:
+        key = get_secret(GEMINI_KEY_NAME)
+    except SecureStorageError:
+        raise
+    if not key:
+        key = os.getenv(GEMINI_KEY_NAME) or None
+    _GEMINI_KEY_CACHE = (time.monotonic(), key)
+    return key
+
+
+def delete_gemini_api_key() -> bool:
+    global _GEMINI_KEY_CACHE
+    _GEMINI_KEY_CACHE = (0.0, None)
+    return delete_secret(GEMINI_KEY_NAME)
+
+
+def prompt_and_store_gemini_key() -> str:
+    key = getpass.getpass("Gemini API-Key eingeben (wird nicht angezeigt): ").strip()
+    set_gemini_api_key(key)
+    return "Gemini API-Key wurde sicher in der macOS Keychain gespeichert."
+
+
 def check_secure_storage() -> dict[str, Any]:
     result: dict[str, Any] = {
         "service": SERVICE_NAME,
@@ -164,7 +205,7 @@ def find_plaintext_secret_locations(project_root: Path | None = None) -> list[st
         except OSError:
             continue
         lowered = text.lower()
-        if "openai_api_key" in lowered or "api_key" in lowered or "sk-" in text:
+        if "openai_api_key" in lowered or "gemini_api_key" in lowered or "api_key" in lowered or "sk-" in text:
             suspicious.append(str(path))
     return suspicious
 

@@ -82,10 +82,10 @@ class _FakeLLM:
             temperature=0.3, recent_context_limit=6, compact_prompt=False, stream=False, mode="performance",
         )
 
-    def ask(self, messages, max_output_tokens=None, user_text=None, route=None, force_local=False):
+    def ask(self, messages, max_output_tokens=None, user_text=None, route=None, force_local=False, **kwargs):
         return "Chat-Antwort"
 
-    def ask_structured(self, messages, json_schema, route=None, force_local=False):
+    def ask_structured(self, messages, json_schema, route=None, force_local=False, **kwargs):
         return {"response_type": "capability_call", "capability": "reservation"}
 
 

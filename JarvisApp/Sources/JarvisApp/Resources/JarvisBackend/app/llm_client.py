@@ -11,7 +11,8 @@ from secure_storage import SecureStorageError, get_openai_api_key
 from model_router import ModelRoute, ModelRouter
 from model_manager import ModelManager, ollama_hint_for_model, ollama_base_url
 from jarvis_personality import normalize_jarvis_messages
-from claude_code_client import ask_claude_code, ask_claude_code_structured, ClaudeCodeError
+from claude_code_client import ask_claude_code, ask_claude_code_structured, ClaudeCodeError, is_claude_code_available
+from gemini_client import ask_gemini, ask_gemini_structured, GeminiError, is_gemini_available
 
 # Modelle, die Ollamas "thinking"-Feature unterstuetzen (per "ollama show <model>"
 # verifiziert, 2026-08-19). "think": True bei einem nicht-faehigen Modell
@@ -40,6 +41,43 @@ class LLMClient:
         self.model_router = ModelRouter(self.config, self.model_manager)
         self._last_state_refresh = now
 
+    def _provider_is_available(self, name: str) -> bool:
+        """Prueft, ob ein per force_provider gewuenschter Anbieter gerade wirklich
+        nutzbar ist (API-Key/CLI-Login vorhanden) - force_provider soll NIE zu einem
+        harten Fehler fuehren, nur zu einem stillen Rueckfall auf self.provider, wenn
+        der bevorzugte Anbieter (noch) nicht konfiguriert ist."""
+        if name == "gemini":
+            return is_gemini_available()
+        if name == "claude_code":
+            return is_claude_code_available()
+        if name == "openai":
+            try:
+                return bool(get_openai_api_key())
+            except SecureStorageError:
+                return False
+        if name == "ollama":
+            return True
+        return False
+
+    def _resolve_effective_provider(self, force_local: bool, force_provider: str | None) -> str:
+        if force_local:
+            return "ollama"
+        if force_provider and self._provider_is_available(force_provider):
+            return force_provider
+        return self.provider
+
+    def _plan_for_provider(
+        self,
+        messages: list[dict[str, str]],
+        user_text: str | None = None,
+        force_local: bool = False,
+        provider_override: str | None = None,
+    ) -> ModelRoute:
+        provider = provider_override or self.provider
+        installed = self.model_manager.status().installed_models if (provider == "ollama" or force_local) else []
+        inferred = user_text or self._last_user_text(messages)
+        return self.model_router.route(inferred, provider=provider, installed_models=installed, force_local=force_local)
+
     def ask(
         self,
         messages: list[dict[str, str]],
@@ -48,9 +86,18 @@ class LLMClient:
         route: ModelRoute | None = None,
         force_local: bool = False,
         raw_system_prompt: bool = False,
+        force_provider: str | None = None,
     ) -> str:
         self._refresh_model_state()
-        route = route or self.plan(messages, user_text=user_text, force_local=force_local)
+        # force_provider erlaubt einem Aufrufer, unabhaengig vom global aktiven Provider
+        # (self.provider) gezielt einen anderen Anbieter fuer diesen einen Aufruf zu
+        # verlangen - Grundlage der Rollenaufteilung Gemini (schnelle Router-Entscheidung
+        # + normale Chat-Antworten) / Claude Code (Hintergrund-Aktionen, eigentliche
+        # Aufgaben), siehe core/intent_router.py und jarvis.py::answer_message().
+        # Faellt still auf self.provider zurueck, wenn der gewuenschte Anbieter (noch)
+        # nicht verfuegbar ist (z.B. kein Gemini-Key hinterlegt).
+        effective_provider = self._resolve_effective_provider(force_local, force_provider)
+        route = route or self._plan_for_provider(messages, user_text=user_text, force_local=force_local, provider_override=effective_provider)
         # Ein explizit uebergebenes max_output_tokens muss die vom Router
         # berechnete Standard-Budgetierung ueberschreiben - ask_stream() macht
         # das bereits korrekt (siehe dort), ask() ignorierte es bisher fuer den
@@ -67,15 +114,12 @@ class LLMClient:
         # antwortete.
         if max_output_tokens is not None:
             route.max_output_tokens = int(max_output_tokens)
-        # "Privater Modus": dispatch on the effective provider, not the user's
-        # configured default - route.provider already reflects force_local via plan(),
-        # but the actual network call below must too, or a stale/explicitly-passed
-        # `route` with provider="ollama" could still be sent to OpenAI here.
-        effective_provider = "ollama" if force_local else self.provider
         if effective_provider == "openai":
             return self._ask_openai(messages, max_output_tokens=max_output_tokens, route=route)
         if effective_provider == "claude_code":
             return self._ask_claude_code(messages, route=route)
+        if effective_provider == "gemini":
+            return self._ask_gemini(messages, route=route)
         if effective_provider == "ollama":
             return self._ask_ollama(messages, route=route, raw_system_prompt=raw_system_prompt)
         raise ValueError(f"Unbekannter KI-Anbieter: {effective_provider}")
@@ -86,16 +130,19 @@ class LLMClient:
         json_schema: dict,
         route: ModelRoute | None = None,
         force_local: bool = False,
+        force_provider: str | None = None,
     ) -> dict:
         """Wie ask(), aber erzwingt schema-validierte JSON-Ausgabe statt freien Text -
         Grundlage des Intent-Routers (core/intent_router.py). Claude Code nutzt dafuer
-        --json-schema (claude_code_client.py::ask_claude_code_structured), Ollama das
+        --json-schema (claude_code_client.py::ask_claude_code_structured), Gemini das
+        native responseSchema-Feld (gemini_client.py::ask_gemini_structured), Ollama das
         native "format"-Feld von /api/chat. Der Nachrichtenverlauf wird wie bei ask()
         ueber _prepare_messages()/normalize_jarvis_messages() vorbereitet, damit
-        System-Prompt/Persona identisch aufgebaut werden."""
+        System-Prompt/Persona identisch aufgebaut werden. Siehe force_provider-Kommentar
+        in ask()."""
         self._refresh_model_state()
-        route = route or self.plan(messages)
-        effective_provider = "ollama" if force_local else self.provider
+        effective_provider = self._resolve_effective_provider(force_local, force_provider)
+        route = route or self._plan_for_provider(messages, force_local=force_local, provider_override=effective_provider)
         prepared = self._prepare_messages(messages, route=route)
         system_content = ""
         turns: list[str] = []
@@ -120,6 +167,14 @@ class LLMClient:
             except ClaudeCodeError as exc:
                 raise RuntimeError(str(exc)) from exc
 
+        if effective_provider == "gemini":
+            model = os.getenv("GEMINI_MODEL", route.model or str(self.config.get("gemini_model", "gemini-2.5-flash")))
+            timeout = float(self.config.get("gemini_timeout", 20))
+            try:
+                return ask_gemini_structured(prompt, json_schema=json_schema, system_prompt=system_content, model=model, timeout=timeout)
+            except GeminiError as exc:
+                raise RuntimeError(str(exc)) from exc
+
         # Ollama (auch fuer force_local/"privater Modus") und Fallback fuer alles
         # andere (OpenAI hat noch keinen strukturierten Pfad - low priority laut Plan,
         # faellt hier auf Ollama-Aufruf mit demselben Schema zurueck, statt zu scheitern).
@@ -141,12 +196,13 @@ class LLMClient:
         route: ModelRoute | None = None,
         on_chunk: Any | None = None,
         force_local: bool = False,
+        force_provider: str | None = None,
     ) -> str:
         self._refresh_model_state()
-        route = route or self.plan(messages, user_text=user_text, force_local=force_local)
+        effective_provider = self._resolve_effective_provider(force_local, force_provider)
+        route = route or self._plan_for_provider(messages, user_text=user_text, force_local=force_local, provider_override=effective_provider)
         if max_output_tokens is not None:
             route.max_output_tokens = int(max_output_tokens)
-        effective_provider = "ollama" if force_local else self.provider
         if effective_provider == "ollama":
             # Live beobachtet (2026-08-12): Ollamas Streaming-Endpunkt liefert fuer
             # phi4-mini gelegentlich HTTP 200 mit komplett leerem Body (0 Bytes,
@@ -163,7 +219,7 @@ class LLMClient:
                 return self._ask_openai_stream(messages, max_output_tokens=max_output_tokens, route=route, on_chunk=on_chunk)
             except Exception:
                 pass
-        answer = self.ask(messages, max_output_tokens=max_output_tokens, user_text=user_text, route=route, force_local=force_local)
+        answer = self.ask(messages, max_output_tokens=max_output_tokens, user_text=user_text, route=route, force_local=force_local, force_provider=force_provider)
         if callable(on_chunk) and answer:
             words = answer.split()
             for index, word in enumerate(words):
@@ -172,9 +228,7 @@ class LLMClient:
 
     def plan(self, messages: list[dict[str, str]], user_text: str | None = None, force_local: bool = False) -> ModelRoute:
         self._refresh_model_state()
-        installed = self.model_manager.status().installed_models if (self.provider == "ollama" or force_local) else []
-        inferred = user_text or self._last_user_text(messages)
-        return self.model_router.route(inferred, provider=self.provider, installed_models=installed, force_local=force_local)
+        return self._plan_for_provider(messages, user_text=user_text, force_local=force_local)
 
     def _ask_ollama(
         self,
@@ -427,6 +481,42 @@ class LLMClient:
         try:
             return ask_claude_code(prompt, system_prompt=system_content, model=model, timeout=timeout)
         except ClaudeCodeError as exc:
+            raise RuntimeError(str(exc)) from exc
+
+    def _ask_gemini(
+        self,
+        messages: list[dict[str, str]],
+        route: ModelRoute | None = None,
+    ) -> str:
+        """Nutzt die Google Gemini API als Provider - im Gegensatz zu Claude Code (Abo
+        ueber die lokale CLI) laeuft das ueber einen API-Key und einen einzelnen HTTP-
+        Aufruf (gemini_client.py). Gleiches Prompt-Zusammenbau-Muster wie
+        _ask_claude_code(), da Geminis generateContent ebenfalls kein Rollen-Array mit
+        beliebig vielen System-Nachrichten erwartet."""
+        route = route or self.plan(messages)
+        prepared = self._prepare_messages(messages, route=route)
+
+        system_content = ""
+        turns: list[str] = []
+        for message in prepared:
+            role = str(message.get("role") or "")
+            content = str(message.get("content") or "").strip()
+            if not content:
+                continue
+            if role == "system":
+                system_content = content
+            elif role == "assistant":
+                turns.append(f"Jarvis: {content}")
+            else:
+                turns.append(f"Nutzer: {content}")
+
+        prompt = "\n\n".join(turns) if turns else "Antworte kurz und hilfreich."
+        model = os.getenv("GEMINI_MODEL", route.model or str(self.config.get("gemini_model", "gemini-2.5-flash")))
+        timeout = float(self.config.get("gemini_timeout", 20))
+
+        try:
+            return ask_gemini(prompt, system_prompt=system_content, model=model, timeout=timeout)
+        except GeminiError as exc:
             raise RuntimeError(str(exc)) from exc
 
     def _read_ollama_stream(self, response: Any, on_chunk: Any | None = None) -> str:

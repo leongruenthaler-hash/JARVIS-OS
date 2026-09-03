@@ -43,14 +43,14 @@ class _FakeLLM:
     def plan(self, messages, user_text=None, force_local=False):
         return self._route
 
-    def ask(self, messages, max_output_tokens=None, user_text=None, route=None, force_local=False):
+    def ask(self, messages, max_output_tokens=None, user_text=None, route=None, force_local=False, **kwargs):
         self.ask_calls.append({"messages": messages, "user_text": user_text, "force_local": force_local})
         return self._answer
 
-    def ask_structured(self, messages, json_schema, route=None, force_local=False):
+    def ask_structured(self, messages, json_schema, route=None, force_local=False, **kwargs):
         return self._router_decision
 
-    def ask_stream(self, messages, max_output_tokens=None, user_text=None, route=None, on_chunk=None, force_local=False):
+    def ask_stream(self, messages, max_output_tokens=None, user_text=None, route=None, on_chunk=None, force_local=False, **kwargs):
         if callable(on_chunk):
             on_chunk(self._answer)
         return self._answer

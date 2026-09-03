@@ -110,6 +110,22 @@ def test_decide_falls_back_to_chat_when_llm_raises():
     assert decision.chat_reply == ""
 
 
+def test_decide_forces_gemini_provider_for_the_classification_call():
+    """Nutzerwunsch 2026-09-03: die Router-Entscheidung selbst soll immer ueber den
+    schnellsten verfuegbaren Anbieter (Gemini) laufen, unabhaengig vom sonst aktiven
+    Provider - llm.ask_structured() faellt intern still zurueck, wenn kein Gemini-Key
+    hinterlegt ist (siehe llm_client.py::_resolve_effective_provider())."""
+    llm = MagicMock()
+    llm.ask_structured.return_value = {"response_type": "chat"}
+    memory = MagicMock()
+    memory.get.return_value = {}
+
+    decide(llm, memory=memory, question="hallo", messages=[])
+
+    _, kwargs = llm.ask_structured.call_args
+    assert kwargs["force_provider"] == "gemini"
+
+
 def test_decide_returns_parsed_capability_call():
     llm = MagicMock()
     llm.ask_structured.return_value = {"response_type": "capability_call", "capability": "music"}
