@@ -191,6 +191,19 @@ class JarvisLocalServer:
         self._last_partial_transcript = ""
         self._listen_lock = threading.Lock()
         self._listen_cancel_event = threading.Event()
+        # ThreadingHTTPServer bedient jede Anfrage in einem eigenen Thread - ohne
+        # diesen Lock koennen zwei gleichzeitige /api/chat- (oder chat+listen-)
+        # Anfragen denselben self.memory (Zustand wie pending_note/pending_calendar_*)
+        # und dieselben self._last_answer_source/_last_answer_model-Instanzattribute
+        # gleichzeitig lesen/schreiben. Live-Bug 2026-09-03: eine manuelle Testanfrage
+        # ueberschnitt sich mit einem automatisierten Testlauf, wodurch der Router eine
+        # simple Scherzfrage faelschlich als Notiz-Erstellung einordnete UND diese
+        # tatsaechlich in Apple Notizen anlegte - reproduzierbar verschwand der Fehler,
+        # sobald dieselbe Nachricht isoliert (ohne Ueberschneidung) gesendet wurde. Diese
+        # App bedient technisch einen einzelnen Nutzer/ein Gespraech gleichzeitig, daher
+        # ist volle Serialisierung der Antwort-Erzeugung (nicht nur der Anfragen-Annahme)
+        # die richtige, einfache Lösung - siehe _answer_with_core()-Aufrufstellen.
+        self._answer_lock = threading.Lock()
         self._audio_listener = None
         self._audio_listener_lock = threading.Lock()
         self._tts_speaking = threading.Event()
@@ -508,12 +521,14 @@ class JarvisLocalServer:
             return {"answer": f"Ich brauche eine konkrete Eingabe, {user_name}.", "source": "local", "model": self.models.active_model}
 
         self._pipeline_log("userMessage", text=text, history=history)
-        answer = self._answer_with_core(text, transient_history=self._clean_history(history))
+        with self._answer_lock:
+            answer = self._answer_with_core(text, transient_history=self._clean_history(history))
+            source, model = self._last_answer_source, self._last_answer_model
         voice_mode = normalize_voice_mode(str((self.memory.get("settings") or {}).get("voice_mode") or ""))
         return {
             "answer": answer,
-            "source": self._last_answer_source,
-            "model": self._last_answer_model,
+            "source": source,
+            "model": model,
             "voice_output_suppressed": voice_mode_suppresses_voice_output(voice_mode),
         }
 
@@ -1876,11 +1891,13 @@ class JarvisLocalServer:
                 payload = json.dumps({"chunk": str(chunk)}, ensure_ascii=False)
                 print(f"JarvisStreamChunk: {payload}", file=sys.stderr, flush=True)
 
-            answer = self._answer_with_core(
-                transcript,
-                transient_history=self._clean_history(history),
-                on_llm_chunk=_emit_answer_chunk,
-            )
+            with self._answer_lock:
+                answer = self._answer_with_core(
+                    transcript,
+                    transient_history=self._clean_history(history),
+                    on_llm_chunk=_emit_answer_chunk,
+                )
+                source, model = self._last_answer_source, self._last_answer_model
             if self._listen_cancel_event.is_set():
                 return {"transcript": "", "answer": "", "status": "cancelled", "source": "local", "model": self.models.active_model}
             return {
@@ -1888,8 +1905,8 @@ class JarvisLocalServer:
                 "answer": answer,
                 "status": "ok",
                 "stats": stats,
-                "source": self._last_answer_source,
-                "model": self._last_answer_model,
+                "source": source,
+                "model": model,
             }
         except Exception as exc:
             return {
@@ -2575,11 +2592,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._write_stream_chunk(chunk)
 
         try:
-            answer = str(SERVER._answer_with_core(
-                message,
-                transient_history=SERVER._clean_history(history),
-                on_llm_chunk=_emit,
-            ))
+            with SERVER._answer_lock:
+                answer = str(SERVER._answer_with_core(
+                    message,
+                    transient_history=SERVER._clean_history(history),
+                    on_llm_chunk=_emit,
+                ))
             if not chunk_sent:
                 for index, word in enumerate(answer.split(" ")):
                     chunk = word if index == 0 else " " + word
