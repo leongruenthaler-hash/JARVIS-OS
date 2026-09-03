@@ -21,14 +21,21 @@ def test_parse_router_decision_reads_all_fields():
     data = {
         "response_type": "capability_call",
         "capability": "calendar",
+        "capability_command": "Zeige die Termine fuer heute.",
         "reasoning": "Nutzer fragt nach Terminen.",
     }
     decision = parse_router_decision(data)
     assert decision.response_type == "capability_call"
     assert decision.capability == "calendar"
+    assert decision.capability_command == "Zeige die Termine fuer heute."
     assert decision.reasoning == "Nutzer fragt nach Terminen."
     assert decision.is_capability_call is True
     assert decision.is_chat is False
+
+
+def test_parse_router_decision_defaults_capability_command_to_empty_string():
+    decision = parse_router_decision({"response_type": "capability_call", "capability": "notes"})
+    assert decision.capability_command == ""
 
 
 def test_decision_type_properties():

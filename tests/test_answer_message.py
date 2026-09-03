@@ -120,6 +120,58 @@ def test_router_capability_call_invokes_the_chosen_capability(memory, workers):
     assert result.text == "Notiz erstellt"
 
 
+def test_router_capability_call_uses_cleaned_capability_command_when_present(memory, workers):
+    """capability_command (core/intent_router.py::ROUTER_SCHEMA, Nutzerwunsch 2026-09-03:
+    Claude Code soll effektiver mit dem Befehl arbeiten koennen) - der Handler bekommt die
+    vom Router bereits bereinigte Formulierung statt des rohen, ggf. umgangssprachlichen
+    Nutzertexts."""
+    llm = _FakeLLM(router_decision={
+        "response_type": "capability_call",
+        "capability": "notes",
+        "capability_command": "Erstelle eine Notiz mit dem Inhalt: Milch kaufen",
+    })
+    captured_ctx = {}
+
+    from core.capabilities import get_capability
+
+    original_handler = get_capability("notes").handler
+
+    def wrapped_handler(ctx):
+        captured_ctx["text"] = ctx.text
+        return "Notiz erstellt"
+
+    get_capability("notes").handler = wrapped_handler
+    try:
+        result = jarvis.answer_message("äh Notiz Milch kaufen sozusagen", memory, llm, {}, workers=workers)
+    finally:
+        get_capability("notes").handler = original_handler
+
+    assert captured_ctx["text"] == "Erstelle eine Notiz mit dem Inhalt: Milch kaufen"
+    assert result.text == "Notiz erstellt"
+
+
+def test_router_capability_call_falls_back_to_raw_question_without_capability_command(memory, workers):
+    llm = _FakeLLM(router_decision={"response_type": "capability_call", "capability": "notes"})
+
+    from core.capabilities import get_capability
+
+    captured_ctx = {}
+    original_handler = get_capability("notes").handler
+
+    def wrapped_handler(ctx):
+        captured_ctx["text"] = ctx.text
+        return "Notiz erstellt"
+
+    get_capability("notes").handler = wrapped_handler
+    try:
+        result = jarvis.answer_message("Notiz: Milch kaufen", memory, llm, {}, workers=workers)
+    finally:
+        get_capability("notes").handler = original_handler
+
+    assert captured_ctx["text"] == "Notiz: Milch kaufen"
+    assert result.text == "Notiz erstellt"
+
+
 def test_router_capability_call_permission_denial_returns_prompt_without_calling_handler(memory, workers):
     llm = _FakeLLM(router_decision={"response_type": "capability_call", "capability": "notes"})
     with patch.object(jarvis, "ensure_privacy_domain_permission", return_value="Erlaubst du Notizen?") as fake_ensure, \

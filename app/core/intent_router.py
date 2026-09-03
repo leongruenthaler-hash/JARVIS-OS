@@ -27,6 +27,20 @@ ROUTER_SCHEMA: dict[str, Any] = {
             "type": "string",
             "description": "Nur bei response_type=capability_call: der Name der zu nutzenden Faehigkeit.",
         },
+        "capability_command": {
+            "type": "string",
+            "description": (
+                "Nur bei response_type=capability_call: der Befehl in einer klaren, "
+                "vollstaendigen, eindeutigen Formulierung fuer die Ausfuehrung - kein "
+                "Roh-Transkript, keine Fuellwoerter/Selbstkorrekturen, relative "
+                "Zeitangaben (heute/morgen/naechsten Montag) unveraendert lassen (die "
+                "Ausfuehrung loest die datumsmaessig selbst auf), aber Tippfehler "
+                "und Umgangssprache klaeren und alles fuer die Aufgabe Relevante aus "
+                "dem bisherigen Gespraech ergaenzen, falls die letzte Nachricht allein "
+                "nicht vollstaendig waere (z.B. eine kurze Zustimmung nach einer "
+                "Rueckfrage)."
+            ),
+        },
         "reasoning": {
             "type": "string",
             "description": "Ein knapper Satz, warum diese Entscheidung getroffen wurde (nicht fuer den Nutzer sichtbar).",
@@ -50,7 +64,10 @@ Entscheide response_type:
 - "chat": eine normale Gespraechsantwort reicht, keine der Faehigkeiten oben ist wirklich \
 gemeint. Fuelle chat_reply mit einer kurzen, natuerlichen Antwort im ueblichen Jarvis-Ton.
 - "capability_call": die Nachricht ist eine klare Anfrage/Aufgabe, die zu einer der \
-Faehigkeiten oben passt. Setze "capability" auf deren exakten Namen. Formuliere KEINE eigene \
+Faehigkeiten oben passt. Setze "capability" auf deren exakten Namen. Setze zusaetzlich \
+"capability_command" auf eine klare, vollstaendige Formulierung des Befehls (siehe \
+Schema-Beschreibung) - die Ausfuehrung bekommt NUR diesen Text, nicht den gesamten \
+Gespraechsverlauf, muss ihn also allein verstehen koennen. Formuliere KEINE eigene \
 Antwort - die Ausfuehrung passiert danach separat.
 - "confirm_pending": es gibt oben einen offenen Vorschlag, und der Nutzer stimmt dem gerade zu \
 (auch indirekt/knapp wie "ja", "mach das", "passt").
@@ -68,6 +85,7 @@ class RouterDecision:
     response_type: str
     chat_reply: str = ""
     capability: str = ""
+    capability_command: str = ""
     reasoning: str = ""
     raw: dict[str, Any] = field(default_factory=dict)
 
@@ -143,6 +161,7 @@ def parse_router_decision(data: dict[str, Any]) -> RouterDecision:
         response_type=response_type,
         chat_reply=str(data.get("chat_reply") or "").strip(),
         capability=str(data.get("capability") or "").strip(),
+        capability_command=str(data.get("capability_command") or "").strip(),
         reasoning=str(data.get("reasoning") or "").strip(),
         raw=data,
     )
