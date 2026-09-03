@@ -31,7 +31,13 @@ class PrivacyDashboard:
         manager = ModelManager(self.config, self.base_path)
         model_status = manager.status()
         provider = model_status.provider
-        cloud_ai = provider.lower() in {"openai", "anthropic", "google"}
+        # Live-Bug 2026-09-03: diese Liste kannte "claude_code"/"gemini" nie (nur die
+        # API-Anbieternamen "openai"/"anthropic"/"google", nie die tatsaechlichen
+        # ModelManager-Provider-Strings) - dadurch behauptete der Datenschutzstatus
+        # "komplett lokal auf diesem Mac", waehrend Claude Code oder Gemini (beide
+        # echte Cloud-Provider) aktiv liefen. "ollama" ist der einzige lokale
+        # Provider-Wert, daher robuster als eine feste Positivliste.
+        cloud_ai = provider.lower() != "ollama"
 
         ai_line = f"Ich arbeite gerade mit {model_status.active_model}, "
         ai_line += "über die Cloud." if cloud_ai else "komplett lokal auf diesem Mac."

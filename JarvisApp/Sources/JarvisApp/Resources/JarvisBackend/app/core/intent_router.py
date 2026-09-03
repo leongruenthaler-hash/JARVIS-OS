@@ -25,20 +25,31 @@ ROUTER_SCHEMA: dict[str, Any] = {
         },
         "capability": {
             "type": "string",
-            "description": "Nur bei response_type=capability_call: der Name der zu nutzenden Faehigkeit.",
+            "description": (
+                "PFLICHT bei response_type=capability_call: EXAKT der Name einer Faehigkeit "
+                "aus der Liste oben (z.B. 'calendar', 'notes', 'mail') - nie ein Befehlstext, "
+                "nie ein Satz, nur der eine kurze Name selbst."
+            ),
         },
-        "capability_command": {
+        "clean_command": {
             "type": "string",
             "description": (
-                "Nur bei response_type=capability_call: der Befehl in einer klaren, "
-                "vollstaendigen, eindeutigen Formulierung fuer die Ausfuehrung - kein "
-                "Roh-Transkript, keine Fuellwoerter/Selbstkorrekturen, relative "
-                "Zeitangaben (heute/morgen/naechsten Montag) unveraendert lassen (die "
-                "Ausfuehrung loest die datumsmaessig selbst auf), aber Tippfehler "
-                "und Umgangssprache klaeren und alles fuer die Aufgabe Relevante aus "
-                "dem bisherigen Gespraech ergaenzen, falls die letzte Nachricht allein "
-                "nicht vollstaendig waere (z.B. eine kurze Zustimmung nach einer "
-                "Rueckfrage)."
+                "Nur bei response_type=capability_call, ZUSAETZLICH zu 'capability' (nicht "
+                "statt dessen): der Befehl in einer klaren, vollstaendigen, eindeutigen "
+                "Formulierung fuer die Ausfuehrung. IMMER AUF DEUTSCH, in derselben Sprache "
+                "wie die Nutzer-Nachricht selbst - NIE ins Englische uebersetzen, auch wenn "
+                "Englisch als Zwischenschritt natuerlicher wirkt (die Ausfuehrung erkennt nur "
+                "deutsche Stichwoerter wie 'Termine', 'Notiz', 'heute'). Behalte zentrale "
+                "Woerter aus der Originalnachricht moeglichst woertlich bei (z.B. 'Termine'/"
+                "'Notiz'/Fragewoerter wie 'welche'/'wann') statt frei umzuformulieren - nur "
+                "echtes Rauschen entfernen (Fuellwoerter, Selbstkorrekturen, Tippfehler), "
+                "keinen neuen Satzbau erfinden. Eine Frage bleibt eine Frage (z.B. mit "
+                "Fragewort/Fragezeichen), wird NICHT in eine Aussage oder Aufforderung "
+                "umformuliert. Relative Zeitangaben (heute/morgen/naechsten Montag) "
+                "unveraendert lassen (die Ausfuehrung loest die datumsmaessig selbst auf). "
+                "Ergaenze alles fuer die Aufgabe Relevante aus dem bisherigen Gespraech, "
+                "falls die letzte Nachricht allein nicht vollstaendig waere (z.B. eine kurze "
+                "Zustimmung nach einer Rueckfrage)."
             ),
         },
         "reasoning": {
@@ -55,7 +66,11 @@ entscheiden, WIE geantwortet werden soll - nicht die eigentliche Persoenlichkeit
 formulieren (das passiert in einem separaten Schritt).
 
 Verfuegbare Faehigkeiten (nutze eine davon nur, wenn die Nachricht wirklich danach verlangt,\
- nicht bei beilaeufiger Erwaehnung im Gespraech):
+ nicht bei beilaeufiger Erwaehnung im Gespraech). Vertraue der Beschreibung: wenn eine \
+Nachricht zu einer Faehigkeit passt, waehle "capability_call" dafuer, auch wenn du selbst \
+unsicher waerst, ob DU das koenntest - die Beschreibung sagt verbindlich, was die \
+Ausfuehrung (nicht du) tatsaechlich kann. Behaupte im chat-Zweig NIE, etwas nicht zu \
+koennen, das laut einer der Beschreibungen unten moeglich ist:
 {capabilities}
 
 {pending_context}
@@ -64,11 +79,12 @@ Entscheide response_type:
 - "chat": eine normale Gespraechsantwort reicht, keine der Faehigkeiten oben ist wirklich \
 gemeint. Fuelle chat_reply mit einer kurzen, natuerlichen Antwort im ueblichen Jarvis-Ton.
 - "capability_call": die Nachricht ist eine klare Anfrage/Aufgabe, die zu einer der \
-Faehigkeiten oben passt. Setze "capability" auf deren exakten Namen. Setze zusaetzlich \
-"capability_command" auf eine klare, vollstaendige Formulierung des Befehls (siehe \
-Schema-Beschreibung) - die Ausfuehrung bekommt NUR diesen Text, nicht den gesamten \
-Gespraechsverlauf, muss ihn also allein verstehen koennen. Formuliere KEINE eigene \
-Antwort - die Ausfuehrung passiert danach separat.
+Faehigkeiten oben passt. Setze IMMER BEIDE Felder: "capability" auf deren exakten, kurzen \
+Namen (nur den Namen, z.B. "calendar" - niemals einen Satz oder Befehlstext in dieses \
+Feld!) UND zusaetzlich "clean_command" auf eine klare, vollstaendige Formulierung des \
+Befehls (siehe Schema-Beschreibung) - die Ausfuehrung bekommt NUR diesen Text, nicht den \
+gesamten Gespraechsverlauf, muss ihn also allein verstehen koennen. Formuliere KEINE \
+eigene Antwort - die Ausfuehrung passiert danach separat.
 - "confirm_pending": es gibt oben einen offenen Vorschlag, und der Nutzer stimmt dem gerade zu \
 (auch indirekt/knapp wie "ja", "mach das", "passt").
 - "cancel_pending": es gibt oben einen offenen Vorschlag, und der Nutzer lehnt ab oder wechselt \
@@ -85,7 +101,7 @@ class RouterDecision:
     response_type: str
     chat_reply: str = ""
     capability: str = ""
-    capability_command: str = ""
+    clean_command: str = ""
     reasoning: str = ""
     raw: dict[str, Any] = field(default_factory=dict)
 
@@ -161,7 +177,7 @@ def parse_router_decision(data: dict[str, Any]) -> RouterDecision:
         response_type=response_type,
         chat_reply=str(data.get("chat_reply") or "").strip(),
         capability=str(data.get("capability") or "").strip(),
-        capability_command=str(data.get("capability_command") or "").strip(),
+        clean_command=str(data.get("clean_command") or "").strip(),
         reasoning=str(data.get("reasoning") or "").strip(),
         raw=data,
     )

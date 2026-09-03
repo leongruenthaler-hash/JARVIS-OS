@@ -5,11 +5,45 @@ alte ~30-stufige Regex-/Fuzzy-Keyword-Kaskade in jarvis.py::answer_message() ers
 from unittest.mock import MagicMock
 
 from core.intent_router import (
+    ROUTER_SCHEMA,
+    ROUTER_SYSTEM_PROMPT_TEMPLATE,
     RouterDecision,
     decide,
     describe_pending_action,
     parse_router_decision,
 )
+
+
+# --- Live-Bugs 2026-09-03 (50-Nachrichten-Test der Gemini/Claude-Code-Rollenaufteilung):
+# (a) das Modell uebersetzte clean_command gelegentlich ins Englische ("show my schedule
+# for today"), was die deutsch-stichwortbasierten Faehigkeiten-Handler ins Leere laufen
+# liess (Kalender-Anfragen wurden als kaputte Termin-Erstellung fehlinterpretiert);
+# (b) das Modell schrieb den Faehigkeiten-NAMEN in "capability_command" statt in
+# "capability" (liess "capability" leer) - vermutlich Verwechslung durch die aehnlichen
+# Feldnamen. Feld auf "clean_command" umbenannt + Schema-Beschreibungen praezisiert;
+# diese Tests halten die wörtlichen Anweisungen fest, damit ein spaeteres Umformulieren
+# nicht wieder unbemerkt eine der beiden Anweisungen verliert.
+
+
+def test_schema_instructs_capability_to_hold_only_the_short_name():
+    description = ROUTER_SCHEMA["properties"]["capability"]["description"]
+    assert "nie ein Befehlstext" in description or "nur der eine kurze Name" in description
+
+
+def test_schema_instructs_clean_command_to_stay_german():
+    description = ROUTER_SCHEMA["properties"]["clean_command"]["description"]
+    assert "AUF DEUTSCH" in description
+    assert "NIE ins Englische" in description
+
+
+def test_schema_has_no_more_capability_command_field():
+    """capability_command hiess vorher so - der Name war Teil des Bugs (b) oben, siehe
+    Kommentar dort, und darf nicht versehentlich wieder auftauchen."""
+    assert "capability_command" not in ROUTER_SCHEMA["properties"]
+
+
+def test_prompt_tells_model_to_set_both_capability_fields():
+    assert "IMMER BEIDE Felder" in ROUTER_SYSTEM_PROMPT_TEMPLATE
 
 
 def test_parse_router_decision_defaults_unknown_type_to_chat():
@@ -21,21 +55,21 @@ def test_parse_router_decision_reads_all_fields():
     data = {
         "response_type": "capability_call",
         "capability": "calendar",
-        "capability_command": "Zeige die Termine fuer heute.",
+        "clean_command": "Zeige die Termine fuer heute.",
         "reasoning": "Nutzer fragt nach Terminen.",
     }
     decision = parse_router_decision(data)
     assert decision.response_type == "capability_call"
     assert decision.capability == "calendar"
-    assert decision.capability_command == "Zeige die Termine fuer heute."
+    assert decision.clean_command == "Zeige die Termine fuer heute."
     assert decision.reasoning == "Nutzer fragt nach Terminen."
     assert decision.is_capability_call is True
     assert decision.is_chat is False
 
 
-def test_parse_router_decision_defaults_capability_command_to_empty_string():
+def test_parse_router_decision_defaults_clean_command_to_empty_string():
     decision = parse_router_decision({"response_type": "capability_call", "capability": "notes"})
-    assert decision.capability_command == ""
+    assert decision.clean_command == ""
 
 
 def test_decision_type_properties():

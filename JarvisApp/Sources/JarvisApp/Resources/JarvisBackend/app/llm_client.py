@@ -22,6 +22,47 @@ from gemini_client import ask_gemini, ask_gemini_structured, GeminiError, is_gem
 # eigentlichen Antwort - siehe Kommentar in _ask_ollama().
 _THINKING_CAPABLE_MODELS = {"qwen3:4b"}
 
+# Live-Bug 2026-09-03: auf die direkte Frage "funktionierst du grad ueber Gemini
+# oder Claude?" antwortete Gemini selbst "Ich laufe über Claude, Gemini hat hier
+# keinen Fuß in die Tür bekommen" - falsch, denn GENAU DIESE Antwort kam von
+# Gemini. Ursache: nichts im System-Prompt sagt dem Modell, welcher Anbieter
+# GERADE (fuer diesen einen Aufruf) tatsaechlich antwortet - das Modell fiel
+# stattdessen auf eine veraltete/allgemeine Selbstbeschreibung zurueck (z.B. eine
+# frueher gespeicherte Erinnerung "Claude Code seit 2026-09-02 nutzbar"). Da
+# force_provider (siehe ask()/ask_structured()) den tatsaechlichen Anbieter erst
+# WAEHREND des Aufrufs entscheidet (mit stillem Fallback bei Nichtverfuegbarkeit/
+# Fehler), kann diese Notiz nicht schon beim Bauen des allgemeinen System-Prompts
+# (build_input() in jarvis.py) feststehen - sie wird deshalb hier, direkt vor dem
+# jeweiligen Provider-Aufruf, angehaengt (siehe _prepare_messages()).
+_PROVIDER_SELF_NOTICE: dict[str, str] = {
+    "gemini": (
+        "Interner Hinweis, nicht fuer den Nutzer bestimmt: Diese konkrete Antwort "
+        "generierst technisch gerade Google Gemini im Hintergrund. Falls direkt "
+        "gefragt wird, welches Modell/welcher Anbieter gerade antwortet oder ob "
+        "du Gemini oder Claude bist, sag das ehrlich - erfinde keine andere Antwort."
+    ),
+    "claude_code": (
+        "Interner Hinweis, nicht fuer den Nutzer bestimmt: Diese konkrete Antwort "
+        "generierst technisch gerade Claude (Anthropic) über Claude Code im "
+        "Hintergrund. Falls direkt gefragt wird, welches Modell/welcher Anbieter "
+        "gerade antwortet oder ob du Gemini oder Claude bist, sag das ehrlich - "
+        "erfinde keine andere Antwort."
+    ),
+    "openai": (
+        "Interner Hinweis, nicht fuer den Nutzer bestimmt: Diese konkrete Antwort "
+        "generierst technisch gerade ein OpenAI-Modell im Hintergrund. Falls direkt "
+        "gefragt wird, welches Modell/welcher Anbieter gerade antwortet, sag das "
+        "ehrlich - erfinde keine andere Antwort."
+    ),
+    "ollama": (
+        "Interner Hinweis, nicht fuer den Nutzer bestimmt: Diese konkrete Antwort "
+        "generierst technisch gerade ein lokales Modell auf diesem Mac (über "
+        "Ollama), nicht ueber die Cloud. Falls direkt gefragt wird, welches "
+        "Modell/welcher Anbieter gerade antwortet, sag das ehrlich - erfinde keine "
+        "andere Antwort."
+    ),
+}
+
 
 class LLMClient:
     def __init__(self, config: dict[str, Any]):
@@ -372,6 +413,7 @@ class LLMClient:
         messages: list[dict[str, str]],
         route: ModelRoute | None = None,
         raw_system_prompt: bool = False,
+        active_provider: str | None = None,
     ) -> list[dict[str, str]]:
         recent_limit = route.recent_context_limit if route is not None else min(int(self.config.get("recent_context_messages", 4)), 4)
         if raw_system_prompt:
@@ -397,6 +439,16 @@ class LLMClient:
         prepared = normalize_jarvis_messages(messages, recent_limit=recent_limit)
         if route is not None and route.system_prompt_suffix and prepared and prepared[0]["role"] == "system":
             prepared[0]["content"] = f"{prepared[0]['content']}\n\n{route.system_prompt_suffix}"
+        if active_provider and prepared and prepared[0]["role"] == "system":
+            notice = _PROVIDER_SELF_NOTICE.get(active_provider)
+            if notice:
+                # VORANgestellt, nicht angehaengt: live beobachtet 2026-09-03, dass ein rein
+                # angehaengter Hinweis am Ende des ohnehin langen Jarvis-System-Prompts vom
+                # Modell zuverlaessig ignoriert wurde (Gemini behauptete weiterhin, die
+                # Antwort komme von Claude) - vermutlich ueberstimmt von der viel laengeren,
+                # frueher im Prompt stehenden allgemeinen Rollenbeschreibung. Ganz vorne, vor
+                # jedem anderen Inhalt, gibt der Anweisung das groesstmoegliche Gewicht.
+                prepared[0]["content"] = f"{notice}\n\n{prepared[0]['content']}"
         return prepared
 
     def _ask_openai_stream(
@@ -537,7 +589,7 @@ class LLMClient:
         deshalb werden die vorbereiteten Nachrichten hier zu System-Prompt +
         Verlauf-Text zusammengefasst statt als Rollen-Liste uebergeben."""
         route = route or self.plan(messages)
-        prepared = self._prepare_messages(messages, route=route)
+        prepared = self._prepare_messages(messages, route=route, active_provider="claude_code")
 
         system_content = ""
         turns: list[str] = []
@@ -573,7 +625,7 @@ class LLMClient:
         _ask_claude_code(), da Geminis generateContent ebenfalls kein Rollen-Array mit
         beliebig vielen System-Nachrichten erwartet."""
         route = route or self.plan(messages)
-        prepared = self._prepare_messages(messages, route=route)
+        prepared = self._prepare_messages(messages, route=route, active_provider="gemini")
 
         system_content = ""
         turns: list[str] = []

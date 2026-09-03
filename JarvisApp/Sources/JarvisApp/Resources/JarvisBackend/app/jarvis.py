@@ -764,6 +764,7 @@ COMMAND_SHAPE_PREFIXES = (
     "starte ", "kopiere ", "verschiebe ", "verschieb ", "pausier", "mach ", "mache ",
     "schau ", "guck ", "lies ", "lese ", "trag ", "trage ", "sag ", "sag,", "sag mal",
     "ergänze ", "ergaenze ", "füge ", "fuege ", "streich ", "entferne ", "vergiss ",
+    "notiere ", "notier ",
 )
 
 
@@ -786,6 +787,9 @@ DOMAIN_TERMS = {
     "notes": (
         "notiz",
         "notizen",
+        "notiere",
+        "notier",
+        "notiert",
         "einkaufszettel",
         "einkaufsliste",
         "zettel",
@@ -2054,7 +2058,6 @@ def should_use_web_search(text: str) -> bool:
     current_keywords = {
         "aktuell",
         "heute",
-        "gerade",
         "momentan",
         "inzwischen",
         "mittlerweile",
@@ -2066,8 +2069,6 @@ def should_use_web_search(text: str) -> bool:
         "kurs",
         "wetter",
         "nachrichten",
-        "modell",
-        "modelle",
     }
 
     changing_topics = {
@@ -8865,7 +8866,7 @@ def answer_message(
     elif router_decision.response_type == "capability_call" and router_decision.capability:
         capability = get_capability(router_decision.capability)
         if capability is not None:
-            # capability_command (siehe core/intent_router.py::ROUTER_SCHEMA): eine vom
+            # clean_command (siehe core/intent_router.py::ROUTER_SCHEMA): eine vom
             # Router bereits bereinigte, vollstaendige Formulierung des Befehls statt des
             # rohen Nutzertexts - die einzelnen Faehigkeiten-Handler (handle_X_command())
             # parsen Datum/Titel/Suchbegriffe weiterhin selbst per Regex aus DIESEM Text,
@@ -8873,7 +8874,7 @@ def answer_message(
             # statt roh. Faellt auf die rohe Frage zurueck, wenn das Feld leer blieb (z.B.
             # bei einem sehr knappen, bereits eindeutigen Befehl).
             ctx = CapabilityContext(
-                text=router_decision.capability_command or question,
+                text=router_decision.clean_command or question,
                 memory=memory,
                 llm=llm,
                 config=config,
