@@ -9,6 +9,7 @@ import time
 import urllib.error
 import urllib.request
 import wave
+from collections import defaultdict, deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -58,17 +59,61 @@ from secure_storage import (
 from settings import load_config, save_config
 from stt_engines import create_stt_engine
 
-# Shared secret between this process and the Swift app, required on every request except
-# /api/health. Without it, any webpage open in the user's browser could otherwise send
-# blind requests to 127.0.0.1:8765 (grant itself Mail/Calendar/Photos access, swap the
-# OpenAI key, delete the privacy log, move indexed files, ...) since a local HTTP server
-# has no other way to distinguish "the Jarvis app" from "any other local process/page".
-# Regenerated every process start and persisted (0600) so the Swift app can read it back.
+# Shared secret between this process and the Swift app (or, once bound to a
+# tailnet-reachable host instead of 127.0.0.1 - see run() - a remote MacBook/iPhone
+# client too), required on every request except /api/health. Without it, any webpage
+# open in the user's browser could otherwise send blind requests to this server (grant
+# itself Mail/Calendar/Photos access, swap the OpenAI key, delete the privacy log, move
+# indexed files, ...) since an HTTP server has no other way to distinguish "the Jarvis
+# app" from "any other process/page" that can reach it.
+#
+# Bis 2026-09-03 wurde dieses Token bei JEDEM Prozessstart neu erzeugt
+# (secrets.token_hex(32)) - unkritisch, solange der Server nur auf 127.0.0.1 lauscht
+# (Bedrohungsmodell: andere lokale Prozesse auf DERSELBEN Maschine, die den Neustart
+# ohnehin nicht mitbekommen wuerden). Sobald der Server auf einem Tailscale-erreichbaren
+# Host laeuft (z.B. der Mac Mini als 24/7-"Gehirn", siehe local_server_bind_host unten),
+# ist dieses Token die einzige verbleibende Verteidigungslinie fuer einen Dienst mit
+# Mail-/Kalender-/Datei-/Fotos-Zugriff - ein bei jedem (unbeaufsichtigten) Neustart
+# wechselnder Token wuerde MacBook+iPhone bei jedem Reboot aussperren, ohne dass jemand
+# den neuen Wert abholen koennte. Deshalb jetzt dasselbe "einmalig erzeugen, danach
+# dauerhaft laden"-Muster wie remote_worker_server.py::_load_or_create_pairing_token()
+# (dort bewusst so gebaut, weil dessen Token ebenfalls einmalig manuell in die
+# Gegenstelle eingetragen wird) - Rotation passiert jetzt bewusst nur noch ueber
+# POST /api/admin/rotate-token, nicht mehr als Nebeneffekt eines Neustarts.
 AUTH_TOKEN: str | None = None
 AUTH_TOKEN_FILENAME = "local_server.token"
 
+# Sperre nach zu vielen fehlgeschlagenen Token-Versuchen pro Quell-IP - dieselbe
+# einfache In-Memory-Drosselung wie remote_worker_server.py, hier nachgezogen jetzt,
+# wo dieser Server ebenfalls ausserhalb von 127.0.0.1 erreichbar sein kann. Kein
+# Anspruch auf DoS-Haertung, nur ein Schutz gegen ploetzliches Token-Erraten.
+ACCESS_LOG_FILENAME = "local_server_access.log"
+_RATE_LIMIT_WINDOW_SECONDS = 60
+_RATE_LIMIT_MAX_FAILURES = 10
 
-def _generate_auth_token() -> str:
+_rate_lock = threading.Lock()
+_failure_log: dict[str, deque[float]] = defaultdict(deque)
+
+
+def _load_or_create_auth_token() -> str:
+    global AUTH_TOKEN
+    token_path = data_root() / AUTH_TOKEN_FILENAME
+    if token_path.exists():
+        existing = token_path.read_text(encoding="utf-8").strip()
+        if existing:
+            AUTH_TOKEN = existing
+            return AUTH_TOKEN
+
+    AUTH_TOKEN = secrets.token_hex(32)
+    try:
+        token_path.write_text(AUTH_TOKEN, encoding="utf-8")
+        token_path.chmod(0o600)
+    except OSError as exc:
+        print(f"Warning: could not persist local server auth token: {exc}", file=sys.stderr)
+    return AUTH_TOKEN
+
+
+def _rotate_auth_token() -> str:
     global AUTH_TOKEN
     AUTH_TOKEN = secrets.token_hex(32)
     token_path = data_root() / AUTH_TOKEN_FILENAME
@@ -76,8 +121,33 @@ def _generate_auth_token() -> str:
         token_path.write_text(AUTH_TOKEN, encoding="utf-8")
         token_path.chmod(0o600)
     except OSError as exc:
-        print(f"Warning: could not persist local server auth token: {exc}", file=sys.stderr)
+        print(f"Warning: could not persist rotated local server auth token: {exc}", file=sys.stderr)
     return AUTH_TOKEN
+
+
+def _log_access(path: str, source_ip: str, outcome: str) -> None:
+    # Bewusst inhaltsfrei (kein Query, kein Body) - nur Pfad, Quelle, Ergebnis.
+    entry = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "path": path, "ip": source_ip, "outcome": outcome}
+    log_path = data_root() / ACCESS_LOG_FILENAME
+    try:
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+def _is_rate_limited(source_ip: str) -> bool:
+    now = time.time()
+    with _rate_lock:
+        recent = _failure_log[source_ip]
+        while recent and now - recent[0] > _RATE_LIMIT_WINDOW_SECONDS:
+            recent.popleft()
+        return len(recent) >= _RATE_LIMIT_MAX_FAILURES
+
+
+def _record_failure(source_ip: str) -> None:
+    with _rate_lock:
+        _failure_log[source_ip].append(time.time())
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG = load_config()
@@ -2364,8 +2434,16 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "JarvisLocalServer/1.0"
 
     def _authorized(self) -> bool:
+        source_ip = self.client_address[0]
+        if _is_rate_limited(source_ip):
+            _log_access(urlparse(self.path).path, source_ip, "rate_limited")
+            return False
         token = self.headers.get("X-Jarvis-Token", "")
-        return bool(AUTH_TOKEN) and hmac.compare_digest(token, AUTH_TOKEN)
+        ok = bool(AUTH_TOKEN) and hmac.compare_digest(token, AUTH_TOKEN)
+        if not ok:
+            _record_failure(source_ip)
+        _log_access(urlparse(self.path).path, source_ip, "ok" if ok else "denied")
+        return ok
 
     def do_GET(self):
         path = urlparse(self.path).path
@@ -2567,6 +2645,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"message": SERVER.dashboard.delete_history()})
             elif path == "/api/privacy/clear-logs":
                 self._json(200, {"message": SERVER.dashboard.clear_logs()})
+            elif path == "/api/admin/rotate-token":
+                # AUTH_TOKEN ist seit 2026-09-03 dauerhaft (siehe Kommentar dort) statt bei
+                # jedem Neustart neu erzeugt - dieser Endpunkt ist der bewusste Ersatz fuer
+                # den seltenen "Token evtl. geleakt"-Fall. Braucht das AKTUELLE Token (per
+                # _authorized() bereits geprueft), liefert das neue einmalig in der Antwort
+                # zurueck - es steht sonst nirgends im Klartext, ausser in der 0600-Datei.
+                new_token = _rotate_auth_token()
+                self._json(200, {"token": new_token})
             else:
                 self._json(404, {"error": "not_found"})
         except SecureStorageError as exc:
@@ -2682,11 +2768,26 @@ def _warm_up_contacts_app() -> None:
         pass
 
 
-def run(host: str = "127.0.0.1", port: int = 8765):
-    _generate_auth_token()
+def run(host: str | None = None, port: int | None = None):
+    # host/port sind config-getrieben (local_server_bind_host/local_server_port), analog zu
+    # remote_worker_server.py::run()'s remote_worker_bind_host - Default bleibt 127.0.0.1/8765
+    # (heutiges Verhalten), aendert sich nur, wenn eine Maschine (z.B. der Mac Mini als
+    # 24/7-"Gehirn") das explizit in ihrer config.json umstellt. Ein expliziter Aufruf-Parameter
+    # (falls je gebraucht) hat weiterhin Vorrang vor der Konfiguration.
+    bind_host = host or str(CONFIG.get("local_server_bind_host", "127.0.0.1"))
+    bind_port = port or int(CONFIG.get("local_server_port", 8765))
+    if bind_host not in ("127.0.0.1", "localhost"):
+        print(
+            f"Warnung: Jarvis Local Server bindet auf {bind_host} statt nur localhost - "
+            "erreichbar fuer jeden, der dieses Netzwerk (z.B. das Tailnet) erreicht. "
+            "Absichern ueber ein dauerhaftes Token (siehe AUTH_TOKEN-Kommentar) und "
+            "Tailscale-ACLs.",
+            file=sys.stderr,
+        )
+    _load_or_create_auth_token()
     threading.Thread(target=_warm_up_contacts_app, daemon=True).start()
-    httpd = ThreadingHTTPServer((host, port), Handler)
-    print(f"Jarvis Local Server läuft auf http://{host}:{port}")
+    httpd = ThreadingHTTPServer((bind_host, bind_port), Handler)
+    print(f"Jarvis Local Server läuft auf http://{bind_host}:{bind_port}")
     httpd.serve_forever()
 
 
