@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchAgent fuer das volle Jarvis-Backend auf dem Mac Mini ("Gehirn").
+  Siehe scripts/mac_mini_launch.sh und Plan "Jarvis proaktiv machen", Phase 2.
+  Loest com.leon.jarvis.remoteworker.plist ab (bitte VOR der Installation
+  dieser Datei entladen, siehe Terminal-Anleitung).
+
+  Installation auf dem Mac Mini (einmalig):
+    cp scripts/com.leon.jarvis.macmini.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.leon.jarvis.macmini.plist
+
+  Neu starten nach einer Code-Aenderung:
+    launchctl unload ~/Library/LaunchAgents/com.leon.jarvis.macmini.plist
+    launchctl load ~/Library/LaunchAgents/com.leon.jarvis.macmini.plist
+
+  WICHTIG: der <string>-Pfad unter ProgramArguments unten muss auf den
+  tatsaechlichen Speicherort des geklonten Repos auf DIESEM Mac Mini zeigen -
+  beim Kopieren dieser Datei den Platzhalter ersetzen.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.leon.jarvis.macmini</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>REPO_ROOT_PLACEHOLDER/scripts/mac_mini_launch.sh</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/jarvis_mac_mini_launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/jarvis_mac_mini_launchd.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
