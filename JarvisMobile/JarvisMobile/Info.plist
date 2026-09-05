@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>UILaunchScreen</key>
+    <dict/>
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+    </array>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <!-- Gleicher Grund wie bei JarvisApp (macOS): Tailscale nutzt den
+             CGNAT-Bereich 100.64.0.0/10 (RFC 6598), den Apples
+             NSAllowsLocalNetworking-Heuristik nicht abdeckt - live
+             verifiziert 2026-09-05. Diese App spricht nur mit einem
+             einzigen, selbst konfigurierten Fernserver (Mac Mini). -->
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
+</dict>
+</plist>

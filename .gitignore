@@ -33,6 +33,7 @@ CalendarHelper/
 # Swift / Xcode
 JarvisApp/.build/
 JarvisApp/.swiftpm/
+JarvisMobile/build/
 **/DerivedData/
 
 # Zur Laufzeit aus app/*.swift kompilierte Helfer-Binaries (photos_client.py/
