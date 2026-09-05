@@ -85,3 +85,25 @@ def test_is_configured_requires_host_and_topic():
     assert push_notify.is_configured({}) is False
     assert push_notify.is_configured({"ntfy_host": "100.64.0.1"}) is False
     assert push_notify.is_configured({"ntfy_host": "100.64.0.1", "ntfy_topic": "x"}) is True
+
+
+# Phase 4 ("Jarvis proaktiv machen"-Plan, 2026-09-05): das echte ntfy-Topic lebt
+# NIE in config.json (git-getrackt), sondern in einer eigenen, gitignoreden Datei
+# unter data_root() - siehe load_or_create_ntfy_topic()-Docstring.
+def test_load_or_create_ntfy_topic_creates_a_long_random_topic(tmp_path):
+    topic = push_notify.load_or_create_ntfy_topic(base_path=tmp_path)
+    assert topic.startswith("jarvis-")
+    assert len(topic) > 20
+    assert (tmp_path / push_notify.NTFY_TOPIC_FILENAME).exists()
+
+
+def test_load_or_create_ntfy_topic_persists_across_calls(tmp_path):
+    first = push_notify.load_or_create_ntfy_topic(base_path=tmp_path)
+    second = push_notify.load_or_create_ntfy_topic(base_path=tmp_path)
+    assert first == second
+
+
+def test_ntfy_topic_file_is_owner_only(tmp_path):
+    push_notify.load_or_create_ntfy_topic(base_path=tmp_path)
+    mode = (tmp_path / push_notify.NTFY_TOPIC_FILENAME).stat().st_mode & 0o777
+    assert mode == 0o600

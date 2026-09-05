@@ -202,6 +202,16 @@ class ProactivityEngine:
                 for key, rule_name in pushed_kritisch.items()
                 if key in raw_kritisch_keys or rule_name not in successful_rule_names
             }
+            # Push-Schwelle konfigurierbar (Phase 4, "Jarvis proaktiv machen"-Plan,
+            # 2026-09-05): frueher wurde ausschliesslich "kritisch" gepusht, alles
+            # andere blieb auf die Mac-App (offen + pollend) beschraenkt - ohne
+            # laufende App kam praktisch nie etwas beim Nutzer an. Default "wichtig"
+            # statt bisher implizit "kritisch", per Rang statt Gleichheit, da die
+            # Prioritaetsreihenfolge (PRIORITY_RANK) das schon hergibt.
+            push_min_priority = config.get("proactivity_push_min_priority", "wichtig")
+            if push_min_priority not in PRIORITIES:
+                push_min_priority = "wichtig"
+            push_min_rank = PRIORITY_RANK[push_min_priority]
             for event in candidates:
                 # "kritisch" bricht oben bewusst durch dismissed_forever durch (siehe
                 # Kommentar dort, 2026-08-20-Audit) - fuer die Mac-Oberflaeche richtig,
@@ -227,6 +237,18 @@ class ProactivityEngine:
                     # Push-Kanal loeste effektiv nie aus (Codex-Review 2026-08-23).
                     if send_push(config, title=event.trigger, message=event.message, priority="max"):
                         pushed_kritisch[event.dedup_key] = event.trigger
+                elif PRIORITY_RANK.get(event.priority, 0) >= push_min_rank:
+                    # Nicht-kritische Ereignisse haben oben bereits Cooldown/
+                    # Dismiss-forever/Snooze durchlaufen (anders als "kritisch", das
+                    # diese Filter bewusst umgeht) - ein einmaliger Best-Effort-Push
+                    # pro Zyklus reicht hier, kein eigener pushed_*-Merker noetig.
+                    # ntfy erlaubt nur max/high/default/low/min als Priority.
+                    send_push(
+                        config,
+                        title=event.trigger,
+                        message=event.message,
+                        priority="high" if event.priority == "wichtig" else "default",
+                    )
                 last_shown[event.dedup_key] = now.isoformat(timespec="seconds")
                 state["history"].append(event.to_dict())
             pushed_kritisch_changed = pushed_kritisch != pushed_kritisch_before

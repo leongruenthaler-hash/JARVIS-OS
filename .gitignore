@@ -8,6 +8,7 @@ __pycache__/
 .env
 local_server.token
 remote_worker_pairing.token
+ntfy_topic.token
 
 # macOS
 .DS_Store

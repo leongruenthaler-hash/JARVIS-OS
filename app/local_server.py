@@ -26,6 +26,7 @@ from fast_intent_router import FastIntentRouter
 from core.conversation_manager import ConversationManager
 from core.daily_briefing import build_daily_briefing
 from core.proactivity_engine import PROACTIVITY_ENGINE
+from core.proactivity_scheduler import ProactivityScheduler
 from core.task_manager import TaskManager
 from core.usage_patterns import recurring_patterns
 from core.voice_performance import VOICE_PERFORMANCE_LOG
@@ -45,6 +46,7 @@ from model_manager import ModelManager, ollama_base_url
 from model_router import ModelRouter
 from music_client import now_playing as music_now_playing
 from photos_client import PhotoBackgroundWorker, PhotoIndex
+from push_notify import load_or_create_ntfy_topic
 import remote_worker_client
 from voice_profile import VoiceProfileError, VoiceProfileStore, DEFAULT_SPEAKER_THRESHOLD
 from permission_manager import PermissionManager
@@ -297,6 +299,15 @@ class JarvisLocalServer:
         self._model_pull_thread = None
         self._last_answer_source = "local"
         self._last_answer_model = self.models.active_model
+        # Phase 4 ("Jarvis proaktiv machen"-Plan, 2026-09-05): eager statt lazy wie
+        # mail_worker/photo_worker (siehe _ensure_mail_worker() oben) - Proaktivitaet
+        # soll auch dann laufen, wenn noch niemand einen mail-/foto-bezogenen Befehl
+        # ausgeloest hat. self._run_proactivity_tick() haelt denselben _answer_lock
+        # wie ein normaler Chat-Request, damit ein Timer-Tick niemals mit einer
+        # laufenden /api/chat-Anfrage um self.memory/Zustand kollidiert (gleicher
+        # Bug wie beim lock-losen Vorfall 2026-09-03).
+        self.proactivity_scheduler = ProactivityScheduler(self.config, self._run_proactivity_tick)
+        self.proactivity_scheduler.start()
 
     def conversation_history(self) -> dict[str, Any]:
         enabled = bool(self.config.get("privacy_store_conversation", False))
@@ -1431,8 +1442,20 @@ class JarvisLocalServer:
             "photo_vision_run": photo_vision_run,
         }
 
+    def _run_proactivity_tick(self) -> None:
+        with self._answer_lock:
+            self.proactivity_events()
+
+    def _config_with_ntfy_topic(self) -> dict[str, Any]:
+        """Kopie von self.config mit dem echten ntfy-Topic ergaenzt - NIE
+        self.config selbst mutieren, sonst wuerde ein spaeteres save_config()
+        (siehe die /api/settings-Handler weiter unten) das Geheimnis doch ins
+        getrackte config.json zurueckschreiben (siehe push_notify.
+        load_or_create_ntfy_topic()-Docstring)."""
+        return {**self.config, "ntfy_topic": load_or_create_ntfy_topic()}
+
     def proactivity_events(self) -> dict[str, Any]:
-        events = PROACTIVITY_ENGINE.evaluate(self._proactivity_context(), self.config)
+        events = PROACTIVITY_ENGINE.evaluate(self._proactivity_context(), self._config_with_ntfy_topic())
         # Sobald die "Kalender-Vorschlaege warten auf Bestaetigung"-Meldung tatsaechlich
         # ausgeliefert wird, einen Merker hinterlegen, an den ein spaeterer freier
         # Chat-Satz ("das bestaetige ich nicht") anknuepfen kann - siehe
@@ -2785,6 +2808,12 @@ def run(host: str | None = None, port: int | None = None):
             file=sys.stderr,
         )
     _load_or_create_auth_token()
+    ntfy_topic = load_or_create_ntfy_topic()
+    if str(CONFIG.get("ntfy_host") or "").strip():
+        print(
+            f"ntfy-Push-Topic (einmalig in der ntfy-App unter 'ntfy.sh' abonnieren): {ntfy_topic}",
+            file=sys.stderr,
+        )
     threading.Thread(target=_warm_up_contacts_app, daemon=True).start()
     httpd = ThreadingHTTPServer((bind_host, bind_port), Handler)
     print(f"Jarvis Local Server läuft auf http://{bind_host}:{bind_port}")
