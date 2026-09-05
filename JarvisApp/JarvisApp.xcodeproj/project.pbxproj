@@ -35,6 +35,8 @@
 		60467FD683924CD5B6294679 /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9B0BF54072C48A6A3F466B6 /* HistoryView.swift */; };
 		5EA0C61453C727CED1DD9588 /* JarvisMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDB9A78B15C2C04E8B5296A0 /* JarvisMacApp.swift */; };
 		7565F6938579AAC278653159 /* JarvisAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B46CBAFAF3DB457C442D8FD3 /* JarvisAPIClient.swift */; };
+		B4566CA9F17C4309A5145759 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D4D9F07ACC146A7AA290861 /* KeychainStore.swift */; };
+		C615B91CFDEC42E6A636DB84 /* RemoteConnectionSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4E8E0B77E2241F9A6422944 /* RemoteConnectionSettings.swift */; };
 		9B3222560E60EFA286A779D5 /* PrivacyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85002DF6FCD359EC134EC4F9 /* PrivacyView.swift */; };
 		A967EE67784809B6D279BE80 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 992C4FC6091295CB38DABD5C /* AppState.swift */; };
 		AC88AFFB19BB65617496152F /* LocalServerController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30E64A9827D02FDF81834A79 /* LocalServerController.swift */; };
@@ -97,6 +99,8 @@
 		992C4FC6091295CB38DABD5C /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		AEF63687048485D45524643C /* JarvisApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = JarvisApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B46CBAFAF3DB457C442D8FD3 /* JarvisAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisAPIClient.swift; sourceTree = "<group>"; };
+		6D4D9F07ACC146A7AA290861 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
+		A4E8E0B77E2241F9A6422944 /* RemoteConnectionSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteConnectionSettings.swift; sourceTree = "<group>"; };
 		CD87D845E1639C0D7F9C10A3 /* ModelsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelsView.swift; sourceTree = "<group>"; };
 		CE436B2B3FAF9DED68E8828A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		ECD6CEA34720D0375415009B /* ServerStatusCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerStatusCard.swift; sourceTree = "<group>"; };
@@ -215,6 +219,8 @@
 				2A1B3C4D5E6F708192A3B4C0 /* AudioCaptureService.swift */,
 				B86BFE542B4A6C67A06D1284 /* NotificationPermissionManager.swift */,
 				B46CBAFAF3DB457C442D8FD3 /* JarvisAPIClient.swift */,
+				6D4D9F07ACC146A7AA290861 /* KeychainStore.swift */,
+				A4E8E0B77E2241F9A6422944 /* RemoteConnectionSettings.swift */,
 				2805D3602E78FDB8A2D88F3B /* JarvisModels.swift */,
 					3F96930612F747DFA5C63B67 /* MemoryCoreLayout.swift */,
 					370756B3665D46F78BA83C51 /* MemorySynapsePulse.swift */,
@@ -387,6 +393,8 @@
 				EE1BE78BAB5E3FEAD8C2DBDD /* StatusPill.swift in Sources */,
 				A967EE67784809B6D279BE80 /* AppState.swift in Sources */,
 				7565F6938579AAC278653159 /* JarvisAPIClient.swift in Sources */,
+				B4566CA9F17C4309A5145759 /* KeychainStore.swift in Sources */,
+				C615B91CFDEC42E6A636DB84 /* RemoteConnectionSettings.swift in Sources */,
 				C4B7BAE04211F925F46CE89E /* JarvisModels.swift in Sources */,
 				AC88AFFB19BB65617496152F /* LocalServerController.swift in Sources */,
 				90890DC4E684B2478412645D /* JarvisVoiceOrb.swift in Sources */,

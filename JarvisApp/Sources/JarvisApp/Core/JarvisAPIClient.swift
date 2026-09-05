@@ -8,7 +8,12 @@ import Foundation
 /// tell "the Mac app" apart from "any local process/page". The token is unknown to a remote
 /// attacker and isn't guessable, so unauthenticated requests are simply rejected (401).
 struct JarvisAPIClient {
-    var baseURL = URL(string: "http://127.0.0.1:8765")!
+    /// Live-berechnet statt einmalig gesetzt, damit ein Umschalten des Fernbetrieb-
+    /// Schalters in den Einstellungen (siehe RemoteConnectionSettings) sofort greift,
+    /// ohne diesen Client neu zu erzeugen.
+    var baseURL: URL {
+        RemoteConnectionSettings.remoteBaseURL ?? URL(string: "http://127.0.0.1:8765")!
+    }
 
     private static var cachedToken: String?
 
@@ -24,6 +29,13 @@ struct JarvisAPIClient {
     /// requests don't hit disk each time; `forceRefresh` re-reads after a 401, which happens
     /// whenever the Python process has (re)started since the token was cached.
     private func loadToken(forceRefresh: Bool = false) -> String? {
+        if RemoteConnectionSettings.isEnabled {
+            // Fernbetrieb: der Token kommt ausschliesslich aus der Keychain (siehe
+            // RemoteConnectionSettings), nie aus der lokalen Token-Datei unten - die
+            // gehoert zu diesem Mac' eigenem (in diesem Modus gar nicht laufenden)
+            // Server. Keychain-Lesezugriffe sind billig genug, um hier nicht zu cachen.
+            return RemoteConnectionSettings.token
+        }
         if !forceRefresh, let cached = Self.cachedToken {
             return cached
         }

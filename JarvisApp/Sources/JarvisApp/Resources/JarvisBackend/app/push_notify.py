@@ -18,11 +18,45 @@ blockieren. Ein Push ist immer nur ein Zusatzkanal, nie der garantierte Weg.
 """
 
 import ipaddress
+import os
+import secrets
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any
 
+from data_dir import data_root
+
 _DEFAULT_TIMEOUT_SECONDS = 3.0
+
+NTFY_TOPIC_FILENAME = "ntfy_topic.token"
+
+
+def load_or_create_ntfy_topic(base_path: Path | None = None) -> str:
+    """Erzeugt beim allerersten Aufruf ein langes, zufaelliges ntfy-Topic und haelt
+    es danach dauerhaft in einer eigenen, gitignoreden Datei unter data_root() fest
+    - NIE in config.json (das ist eingecheckt, siehe .gitignore und Plan
+    "Jarvis proaktiv machen" Abschnitt "Sicherheits-Erkenntnis"). Bei einem
+    oeffentlichen ntfy.sh-Server ist der Topic-Name das einzige Geheimnis (wer ihn
+    kennt, kann mitlesen), deshalb getrennt von der restlichen, versionierten
+    Konfiguration - selbes Muster wie local_server.py::_load_or_create_auth_token().
+    Der Aufrufer traegt das Ergebnis bewusst nur in eine LOKALE Kopie des Config-
+    Dicts ein (siehe JarvisLocalServer._config_with_ntfy_topic()), niemals in
+    self.config selbst, sonst wuerde ein spaeteres save_config() das Geheimnis doch
+    ins getrackte config.json zurueckschreiben."""
+    path = (base_path or data_root()) / NTFY_TOPIC_FILENAME
+    if path.exists():
+        existing = path.read_text(encoding="utf-8").strip()
+        if existing:
+            return existing
+    topic = f"jarvis-{secrets.token_hex(24)}"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(topic, encoding="utf-8")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+    return topic
 
 
 def is_configured(config: dict[str, Any]) -> bool:

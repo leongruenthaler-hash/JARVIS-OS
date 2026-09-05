@@ -113,6 +113,22 @@ final class LocalServerController: ObservableObject {
 
     @discardableResult
     func start() -> Bool {
+        if RemoteConnectionSettings.isEnabled {
+            // Fernbetrieb (Phase 3, "Jarvis proaktiv machen"-Plan, 2026-09-05): kein
+            // eigener lokaler Python-Prozess mehr - apiClient zeigt bereits (ueber
+            // baseURL) auf den Mac Mini. Es gibt hier nichts zu starten; falls
+            // start() ueberhaupt aufgerufen wird, hat der vorangegangene
+            // health()-Aufruf in AppState.ensureServerConnected() bereits gezeigt,
+            // dass der Fernserver GERADE nicht erreichbar ist - optimistisch
+            // isRunning=true zu setzen waere hier (anders als beim lokalen Bootstrap
+            // unten, wo ein neu gestarteter Prozess erst noch hochfahren muss) schlicht
+            // falsch. Die anschliessende Polling-Schleife dort ruft echtes
+            // refreshStatus()/health() ohnehin wiederholt auf und erkennt eine
+            // wiederkehrende Verbindung ganz normal.
+            lastLaunchError = nil
+            return false
+        }
+
         // Only trust an already-running process if its venv is still intact - otherwise
         // a zombie process left over from a deleted/replaced JARVIS-OS folder (e.g. after
         // extracting a fresh export on top of an old one) silently blocks every future
