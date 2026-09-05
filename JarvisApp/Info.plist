@@ -44,5 +44,19 @@
     <false/>
     <key>NSSupportsSuddenTermination</key>
     <false/>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <!-- NSAllowsLocalNetworking allein reicht nicht: Apples Heuristik dafuer prueft
+             nur klassische RFC-1918-Bereiche (10.x/172.16-31.x/192.168.x) und .local-
+             Domains. Tailscale nutzt den CGNAT-Bereich 100.64.0.0/10 (RFC 6598), der
+             davon NICHT abgedeckt ist - ATS blockierte http-Verbindungen zum Mac Mini
+             (100.115.128.74) trotzdem, live verifiziert 2026-09-05 (Nutzer hat die
+             App-weite Ausnahme nach Abwaegung der Sicherheitsfolgen explizit bestaetigt).
+             Diese App spricht nur mit einem einzigen, selbst konfigurierten Fernserver
+             (Mac Mini ueber Tailscale) sowie ein paar bekannten https-Diensten, keine
+             beliebigen Nutzer-URLs wie ein Browser. -->
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
 </dict>
 </plist>
