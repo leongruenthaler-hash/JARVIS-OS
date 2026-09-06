@@ -7,31 +7,31 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		3E60C075FB624524BB61AD24 /* JarvisMobileApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C3757FE4F654FFF83C13B3B /* JarvisMobileApp.swift */; };
-		3A395D977AAA4B8B8932DDA5 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85946240563841CCA46BE5A8 /* RootView.swift */; };
-		CF5720A68A2147DBBE4105D1 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2AEE122E43A4E169DAD951B /* ChatView.swift */; };
 		00224641BF904904A7806596 /* PairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9854A7D2A46747E4BD385187 /* PairingView.swift */; };
-		4534614208C94B3EBCCEFC97 /* ProactivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB13DB5071C944289ED40279 /* ProactivityView.swift */; };
 		301DA50CDF474CA3B928E180 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C2DE75FCE6E40C69291B56A /* APIClient.swift */; };
+		3A395D977AAA4B8B8932DDA5 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85946240563841CCA46BE5A8 /* RootView.swift */; };
+		3E60C075FB624524BB61AD24 /* JarvisMobileApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C3757FE4F654FFF83C13B3B /* JarvisMobileApp.swift */; };
+		4534614208C94B3EBCCEFC97 /* ProactivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB13DB5071C944289ED40279 /* ProactivityView.swift */; };
 		643218832C9E421D8C798541 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D4F6318242843DC8CBCFF62 /* Models.swift */; };
 		92A8E883E5214124BFE0F796 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14CA8B348B1246BBBA6EA69A /* KeychainStore.swift */; };
-		E4E834C5D35D4A79AA2C8A58 /* RemoteSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2A163257D394487BFFC7449 /* RemoteSettings.swift */; };
+		CF5720A68A2147DBBE4105D1 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2AEE122E43A4E169DAD951B /* ChatView.swift */; };
 		E479A905F0844F2DBEC2BE80 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6AA9C0CDA9B143E19675A4A0 /* Assets.xcassets */; };
+		E4E834C5D35D4A79AA2C8A58 /* RemoteSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2A163257D394487BFFC7449 /* RemoteSettings.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		2C3757FE4F654FFF83C13B3B /* JarvisMobileApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisMobileApp.swift; sourceTree = "<group>"; };
-		85946240563841CCA46BE5A8 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
-		E2AEE122E43A4E169DAD951B /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
-		9854A7D2A46747E4BD385187 /* PairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingView.swift; sourceTree = "<group>"; };
-		CB13DB5071C944289ED40279 /* ProactivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProactivityView.swift; sourceTree = "<group>"; };
-		6C2DE75FCE6E40C69291B56A /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
-		2D4F6318242843DC8CBCFF62 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		14CA8B348B1246BBBA6EA69A /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
-		B2A163257D394487BFFC7449 /* RemoteSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSettings.swift; sourceTree = "<group>"; };
+		2C3757FE4F654FFF83C13B3B /* JarvisMobileApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisMobileApp.swift; sourceTree = "<group>"; };
+		2D4F6318242843DC8CBCFF62 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		6AA9C0CDA9B143E19675A4A0 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		6C2DE75FCE6E40C69291B56A /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
+		85946240563841CCA46BE5A8 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		9854A7D2A46747E4BD385187 /* PairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingView.swift; sourceTree = "<group>"; };
 		A7A1A6FAC6B741D2857C61F9 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B2A163257D394487BFFC7449 /* RemoteSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSettings.swift; sourceTree = "<group>"; };
 		C0B8E7D0DEFD4EF8AE67B731 /* JarvisMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = JarvisMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CB13DB5071C944289ED40279 /* ProactivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProactivityView.swift; sourceTree = "<group>"; };
+		E2AEE122E43A4E169DAD951B /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -45,14 +45,6 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		F48D7BD801D746B99029E2BD = {
-			isa = PBXGroup;
-			children = (
-				ED7BB0C6983D4AA89AE35CD2 /* JarvisMobile */,
-				CA8A977082AE418C80FC857D /* Products */,
-			);
-			sourceTree = "<group>";
-		};
 		CA8A977082AE418C80FC857D /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -77,6 +69,14 @@
 				A7A1A6FAC6B741D2857C61F9 /* Info.plist */,
 			);
 			path = JarvisMobile;
+			sourceTree = "<group>";
+		};
+		F48D7BD801D746B99029E2BD = {
+			isa = PBXGroup;
+			children = (
+				ED7BB0C6983D4AA89AE35CD2 /* JarvisMobile */,
+				CA8A977082AE418C80FC857D /* Products */,
+			);
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -163,6 +163,115 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
+		A170808940A54FBD96576CA8 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = N446A8R3Z9;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = JarvisMobile/Info.plist;
+				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.leon.jarvis.mobile;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		AE54E7830C8E46CEB6724374 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = N446A8R3Z9;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = JarvisMobile/Info.plist;
+				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.leon.jarvis.mobile;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		B634721A16B742E4976F76A0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
 		C761870F6505462DACEBD3F8 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -223,132 +332,23 @@
 			};
 			name = Debug;
 		};
-		B634721A16B742E4976F76A0 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				CLANG_ANALYZER_NONNULL = YES;
-				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
-				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
-				CLANG_ENABLE_MODULES = YES;
-				CLANG_ENABLE_OBJC_ARC = YES;
-				CLANG_ENABLE_OBJC_WEAK = YES;
-				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
-				CLANG_WARN_BOOL_CONVERSION = YES;
-				CLANG_WARN_COMMA = YES;
-				CLANG_WARN_CONSTANT_CONVERSION = YES;
-				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
-				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
-				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
-				CLANG_WARN_EMPTY_BODY = YES;
-				CLANG_WARN_ENUM_CONVERSION = YES;
-				CLANG_WARN_INFINITE_RECURSION = YES;
-				CLANG_WARN_INT_CONVERSION = YES;
-				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
-				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
-				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
-				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
-				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
-				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
-				CLANG_WARN_STRICT_PROTOTYPES = YES;
-				CLANG_WARN_SUSPICIOUS_MOVE = YES;
-				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
-				CLANG_WARN_UNREACHABLE_CODE = YES;
-				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-				COPY_PHASE_STRIP = NO;
-				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				ENABLE_NS_ASSERTIONS = NO;
-				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				GCC_C_LANGUAGE_STANDARD = gnu17;
-				GCC_NO_COMMON_BLOCKS = YES;
-				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
-				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
-				GCC_WARN_UNDECLARED_SELECTOR = YES;
-				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
-				GCC_WARN_UNUSED_FUNCTION = YES;
-				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MTL_ENABLE_DEBUG_INFO = NO;
-				MTL_FAST_MATH = YES;
-				SDKROOT = iphoneos;
-				SWIFT_COMPILATION_MODE = wholemodule;
-				VALIDATE_PRODUCT = YES;
-			};
-			name = Release;
-		};
-		AE54E7830C8E46CEB6724374 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_IDENTITY = "-";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = JarvisMobile/Info.plist;
-				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				MARKETING_VERSION = 0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.leon.jarvis.mobile;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SUPPORTS_MACCATALYST = NO;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
-			};
-			name = Debug;
-		};
-		A170808940A54FBD96576CA8 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_IDENTITY = "-";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = JarvisMobile/Info.plist;
-				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				MARKETING_VERSION = 0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.leon.jarvis.mobile;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SUPPORTS_MACCATALYST = NO;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		619CFC18D60D47AAB4439209 /* Build configuration list for PBXProject "JarvisMobile" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				C761870F6505462DACEBD3F8 /* Debug */,
-				B634721A16B742E4976F76A0 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
 		29ACB4CCA09B461695B1CADF /* Build configuration list for PBXNativeTarget "JarvisMobile" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				AE54E7830C8E46CEB6724374 /* Debug */,
 				A170808940A54FBD96576CA8 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		619CFC18D60D47AAB4439209 /* Build configuration list for PBXProject "JarvisMobile" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C761870F6505462DACEBD3F8 /* Debug */,
+				B634721A16B742E4976F76A0 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

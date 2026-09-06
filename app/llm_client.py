@@ -644,9 +644,16 @@ class LLMClient:
         prompt = "\n\n".join(turns) if turns else "Antworte kurz und hilfreich."
         model = os.getenv("GEMINI_MODEL", route.model or str(self.config.get("gemini_model", "gemini-3.6-flash")))
         timeout = float(self.config.get("gemini_timeout", 20))
+        # route.max_output_tokens/temperature wurden bisher berechnet, aber nie an
+        # Gemini weitergereicht (Ollama/OpenAI respektieren das Router-Budget schon
+        # laenger) - ohne generationConfig antwortet Gemini mit eigenen Standardwerten
+        # (kein Token-Limit, unbekannte Temperatur), was bei Meta-Fragen wie "welches
+        # Modell bist du" beobachtbar zu abschweifenden/inkonsistenten Antworten fuehrte
+        # (Live-Bug 2026-09-06).
+        generation_config = {"maxOutputTokens": route.max_output_tokens, "temperature": route.temperature}
 
         try:
-            return ask_gemini(prompt, system_prompt=system_content, model=model, timeout=timeout)
+            return ask_gemini(prompt, system_prompt=system_content, model=model, timeout=timeout, generation_config=generation_config)
         except GeminiError as exc:
             raise RuntimeError(str(exc)) from exc
 

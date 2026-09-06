@@ -4,10 +4,13 @@ struct ProactivityView: View {
     @State private var events: [ProactiveEvent] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
+    // Siehe ChatView.swift: RemoteSettings.isPaired ist nicht SwiftUI-reaktiv,
+    // deshalb als @State + Refresh bei jedem Erscheinen des Tabs.
+    @State private var isPaired = RemoteSettings.isPaired
 
     var body: some View {
         Group {
-            if !RemoteSettings.isPaired {
+            if !isPaired {
                 ContentUnavailableView(
                     "Noch nicht verbunden",
                     systemImage: "network.slash",
@@ -63,6 +66,7 @@ struct ProactivityView: View {
                 }
             }
         }
+        .onAppear { isPaired = RemoteSettings.isPaired }
         .task { await refresh() }
         .refreshable { await refresh() }
         .overlay {

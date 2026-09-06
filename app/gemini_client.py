@@ -128,8 +128,9 @@ def ask_gemini(
     system_prompt: str = "",
     model: str = DEFAULT_MODEL,
     timeout: float = 20,
+    generation_config: dict | None = None,
 ) -> str:
-    data = _call_gemini(prompt, system_prompt=system_prompt, model=model, timeout=timeout)
+    data = _call_gemini(prompt, system_prompt=system_prompt, model=model, timeout=timeout, generation_config=generation_config)
     return _extract_text(data)
 
 

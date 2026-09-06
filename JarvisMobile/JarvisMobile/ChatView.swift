@@ -5,10 +5,16 @@ struct ChatView: View {
     @State private var draft = ""
     @State private var isSending = false
     @State private var errorMessage: String?
+    // RemoteSettings.isPaired liest UserDefaults/Keychain direkt - ohne dieses
+    // @State wuerde SwiftUI diese View nie neu zeichnen, wenn die Kopplung im
+    // "Verbindung"-Tab erst NACH dem ersten Anzeigen dieses Tabs gesetzt wird
+    // (Live-Bug 2026-09-06: Chat blieb dauerhaft auf "Noch nicht verbunden"
+    // stehen, obwohl der Verbindungstest schon erfolgreich war).
+    @State private var isPaired = RemoteSettings.isPaired
 
     var body: some View {
         VStack(spacing: 0) {
-            if !RemoteSettings.isPaired {
+            if !isPaired {
                 ContentUnavailableView(
                     "Noch nicht verbunden",
                     systemImage: "network.slash",
@@ -59,6 +65,7 @@ struct ChatView: View {
             }
         }
         .navigationTitle("Chat")
+        .onAppear { isPaired = RemoteSettings.isPaired }
     }
 
     private func send() async {
