@@ -3,7 +3,7 @@
     "creator_name": "Leon",
     "user_salutation": "sir",
     "language": "Deutsch",
-    "ai_provider": "ollama",
+    "ai_provider": "claude_code",
     "ollama_model": "phi4-mini",
     "ollama_host": "127.0.0.1:11434",
     "openai_model": "gpt-5.4-nano",
