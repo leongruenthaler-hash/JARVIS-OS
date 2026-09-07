@@ -1,51 +1,34 @@
 import Foundation
 
-/// Thin HTTP client for the Jarvis backend (Mac Mini over Tailscale) - same
-/// X-Jarvis-Token header pattern as JarvisApp's JarvisAPIClient.swift on
-/// macOS, but always remote (no local baseURL fallback: this app has no
-/// local core to spawn at all).
+/// Thin HTTP client for the OpenClaw Gateway (Mac Mini over Tailscale/
+/// tailscale-serve on port 18789). Replaces the old Jarvis local_server.py
+/// client (2026-09-06 OpenClaw migration) - auth is now a standard Bearer
+/// token (OpenClaw Gateway convention) instead of the old X-Jarvis-Token
+/// header, and chat goes through OpenClaw's OpenAI-compatible
+/// /v1/chat/completions endpoint instead of a custom /api/chat.
 struct APIClient {
     func health() async throws -> ServerHealth {
-        try await get("/api/health")
+        try await get("/health")
     }
 
+    /// history/message are converted into the OpenAI messages array; OpenClaw's
+    /// agent itself keeps session memory server-side (SOUL.md/MEMORY.md), so
+    /// the history array here is mainly for a fresh/stateless call context.
     func sendChat(_ message: String, history: [[String: String]] = []) async throws -> ChatResponse {
-        struct Request: Encodable { let message: String; let history: [[String: String]] }
-        return try await post("/api/chat", body: Request(message: message, history: history))
-    }
-
-    func proactivityEvents() async throws -> [ProactiveEvent] {
-        let response: ProactiveEventsResponse = try await get("/api/proactivity/events")
-        return response.events
-    }
-
-    @discardableResult
-    func snoozeProactivityEvent(dedupKey: String, minutes: Int = 60) async throws -> Bool {
-        struct Request: Encodable {
-            let dedupKey: String
-            let minutes: Int
-            enum CodingKeys: String, CodingKey { case dedupKey = "dedup_key"; case minutes }
+        var messages = history.map { entry in
+            ChatCompletionMessage(role: entry["role"] ?? "user", content: entry["content"] ?? "")
         }
-        struct Response: Decodable { let ok: Bool }
-        let response: Response = try await post("/api/proactivity/snooze", body: Request(dedupKey: dedupKey, minutes: minutes))
-        return response.ok
-    }
-
-    @discardableResult
-    func dismissProactivityEvent(dedupKey: String) async throws -> Bool {
-        struct Request: Encodable {
-            let dedupKey: String
-            enum CodingKeys: String, CodingKey { case dedupKey = "dedup_key" }
-        }
-        struct Response: Decodable { let ok: Bool }
-        let response: Response = try await post("/api/proactivity/dismiss", body: Request(dedupKey: dedupKey))
-        return response.ok
+        messages.append(ChatCompletionMessage(role: "user", content: message))
+        let request = ChatCompletionRequest(model: "openclaw", messages: messages)
+        let response: ChatCompletionResponse = try await post("/v1/chat/completions", body: request)
+        let answer = response.choices.first?.message.content ?? ""
+        return ChatResponse(answer: answer)
     }
 
     private func get<T: Decodable>(_ path: String) async throws -> T {
         var request = URLRequest(url: try makeURL(path))
         if let token = RemoteSettings.token {
-            request.setValue(token, forHTTPHeaderField: "X-Jarvis-Token")
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         let (data, response) = try await URLSession.shared.data(for: request)
         try validate(response, data: data)
@@ -57,9 +40,9 @@ struct APIClient {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let token = RemoteSettings.token {
-            request.setValue(token, forHTTPHeaderField: "X-Jarvis-Token")
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
-        request.timeoutInterval = 60
+        request.timeoutInterval = 90
         request.httpBody = try JSONEncoder().encode(body)
         let (data, response) = try await URLSession.shared.data(for: request)
         try validate(response, data: data)

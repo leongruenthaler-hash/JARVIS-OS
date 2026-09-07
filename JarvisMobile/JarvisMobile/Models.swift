@@ -1,20 +1,34 @@
 import Foundation
 
+/// OpenClaw's Gateway /health is much simpler than the old Jarvis backend's
+/// (just liveness, no provider/model info) - those details now live in the
+/// chat completion response instead.
 struct ServerHealth: Decodable {
     let ok: Bool
-    let provider: String
-    let activeModel: String
-
-    enum CodingKeys: String, CodingKey {
-        case ok, provider
-        case activeModel = "active_model"
-    }
+    let status: String
 }
 
-struct ChatResponse: Decodable {
+/// OpenAI-compatible chat completions wire format (OpenClaw Gateway
+/// /v1/chat/completions, enabled via gateway.http.endpoints.chatCompletions).
+struct ChatCompletionRequest: Encodable {
+    let model: String
+    let messages: [ChatCompletionMessage]
+}
+
+struct ChatCompletionMessage: Codable {
+    let role: String
+    let content: String
+}
+
+struct ChatCompletionResponse: Decodable {
+    struct Choice: Decodable {
+        let message: ChatCompletionMessage
+    }
+    let choices: [Choice]
+}
+
+struct ChatResponse {
     let answer: String
-    let source: String?
-    let model: String?
 }
 
 struct ChatMessage: Identifiable, Equatable {

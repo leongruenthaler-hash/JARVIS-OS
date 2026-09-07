@@ -15,8 +15,15 @@
 		643218832C9E421D8C798541 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D4F6318242843DC8CBCFF62 /* Models.swift */; };
 		92A8E883E5214124BFE0F796 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14CA8B348B1246BBBA6EA69A /* KeychainStore.swift */; };
 		CF5720A68A2147DBBE4105D1 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2AEE122E43A4E169DAD951B /* ChatView.swift */; };
+		9A1B2C3D4E5F6A7B8C9D0E1F /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F7A8B9C0D1E2F /* Theme.swift */; };
+		7B6A5C4D3E2F1A0B9C8D7E6F /* VoiceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F5E4D3C2B1A0F9E8D7C6B5A /* VoiceManager.swift */; };
+		3D2E1F0A9B8C7D6E5F4A3B2C /* KeyboardObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C3D4E5F6A7B8C9D0E1F2A3B /* KeyboardObserver.swift */; };
+		5A4B3C2D1E0F9A8B7C6D5E4F /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F3E2D1C0B9A8F7E6D5C4B3A /* SettingsView.swift */; };
+		6B5A4C3D2E1F0A9B8C7D6E5F /* GatewayClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B2A1C0D9E8F7A6B5C4D3E2F /* GatewayClient.swift */; };
+		7C6B5A4D3E2F1A0B9C8D7E6F /* MemoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C3B2A1D0E9F8A7B6C5D4E3F /* MemoryView.swift */; };
 		E479A905F0844F2DBEC2BE80 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6AA9C0CDA9B143E19675A4A0 /* Assets.xcassets */; };
 		E4E834C5D35D4A79AA2C8A58 /* RemoteSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2A163257D394487BFFC7449 /* RemoteSettings.swift */; };
+		460A7F84E9AD4331BC79D905 /* EdgeTTSClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF45526484154DF6B3EB3971 /* EdgeTTSClient.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -32,6 +39,13 @@
 		C0B8E7D0DEFD4EF8AE67B731 /* JarvisMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = JarvisMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CB13DB5071C944289ED40279 /* ProactivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProactivityView.swift; sourceTree = "<group>"; };
 		E2AEE122E43A4E169DAD951B /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F7A8B9C0D1E2F /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		6F5E4D3C2B1A0F9E8D7C6B5A /* VoiceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceManager.swift; sourceTree = "<group>"; };
+		2C3D4E5F6A7B8C9D0E1F2A3B /* KeyboardObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardObserver.swift; sourceTree = "<group>"; };
+		4F3E2D1C0B9A8F7E6D5C4B3A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		3B2A1C0D9E8F7A6B5C4D3E2F /* GatewayClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GatewayClient.swift; sourceTree = "<group>"; };
+		4C3B2A1D0E9F8A7B6C5D4E3F /* MemoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryView.swift; sourceTree = "<group>"; };
+		EF45526484154DF6B3EB3971 /* EdgeTTSClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeTTSClient.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -59,6 +73,13 @@
 				2C3757FE4F654FFF83C13B3B /* JarvisMobileApp.swift */,
 				85946240563841CCA46BE5A8 /* RootView.swift */,
 				E2AEE122E43A4E169DAD951B /* ChatView.swift */,
+				1A2B3C4D5E6F7A8B9C0D1E2F /* Theme.swift */,
+				6F5E4D3C2B1A0F9E8D7C6B5A /* VoiceManager.swift */,
+				2C3D4E5F6A7B8C9D0E1F2A3B /* KeyboardObserver.swift */,
+				4F3E2D1C0B9A8F7E6D5C4B3A /* SettingsView.swift */,
+				3B2A1C0D9E8F7A6B5C4D3E2F /* GatewayClient.swift */,
+				4C3B2A1D0E9F8A7B6C5D4E3F /* MemoryView.swift */,
+				EF45526484154DF6B3EB3971 /* EdgeTTSClient.swift */,
 				9854A7D2A46747E4BD385187 /* PairingView.swift */,
 				CB13DB5071C944289ED40279 /* ProactivityView.swift */,
 				6C2DE75FCE6E40C69291B56A /* APIClient.swift */,
@@ -151,6 +172,13 @@
 				3E60C075FB624524BB61AD24 /* JarvisMobileApp.swift in Sources */,
 				3A395D977AAA4B8B8932DDA5 /* RootView.swift in Sources */,
 				CF5720A68A2147DBBE4105D1 /* ChatView.swift in Sources */,
+				9A1B2C3D4E5F6A7B8C9D0E1F /* Theme.swift in Sources */,
+				7B6A5C4D3E2F1A0B9C8D7E6F /* VoiceManager.swift in Sources */,
+				3D2E1F0A9B8C7D6E5F4A3B2C /* KeyboardObserver.swift in Sources */,
+				5A4B3C2D1E0F9A8B7C6D5E4F /* SettingsView.swift in Sources */,
+				6B5A4C3D2E1F0A9B8C7D6E5F /* GatewayClient.swift in Sources */,
+				7C6B5A4D3E2F1A0B9C8D7E6F /* MemoryView.swift in Sources */,
+				460A7F84E9AD4331BC79D905 /* EdgeTTSClient.swift in Sources */,
 				00224641BF904904A7806596 /* PairingView.swift in Sources */,
 				4534614208C94B3EBCCEFC97 /* ProactivityView.swift in Sources */,
 				301DA50CDF474CA3B928E180 /* APIClient.swift in Sources */,

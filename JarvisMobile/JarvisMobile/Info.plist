@@ -38,5 +38,19 @@
         <key>NSAllowsArbitraryLoads</key>
         <true/>
     </dict>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Jarvis braucht Mikrofonzugriff, um deine gesprochenen Nachrichten zu verstehen.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Jarvis wandelt deine gesprochenen Nachrichten lokal auf dem Gerät in Text um.</string>
+    <key>UIBackgroundModes</key>
+    <array>
+        <!-- Erlaubt einer BEREITS AKTIVEN Audio-Sitzung (Mikrofon-Aufnahme
+             oder Sprachausgabe), im Hintergrund weiterzulaufen (z.B. bei
+             gesperrtem Bildschirm) - wie ChatGPTs Sprachmodus. Startet KEIN
+             neues Zuhoeren aus dem Hintergrund heraus (das bleibt technisch
+             ausgeschlossen, siehe VoiceManager.swift-Kommentar zu Voice
+             Wake) - nur eine schon laufende Sitzung wird nicht abgewuergt. -->
+        <string>audio</string>
+    </array>
 </dict>
 </plist>

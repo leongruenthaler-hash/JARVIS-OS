@@ -2928,6 +2928,37 @@ def clean_spoken_answer(text: str) -> str:
     return text.strip()
 
 
+def adapt_answer_to_jarvis_persona(answer: str, llm: LLMClient, config: dict[str, Any]) -> str:
+    """Falls Gemini antwortet, kurz durch Claude Code schicken, um in Jarvis-Stil
+    umzuschreiben (Disclaimers entfernen, direkt und persönlich machen). Nur fuer
+    normale Chat-Antworten, nicht fuer Fehler oder Spezialfaelle."""
+    if not answer or not answer.strip():
+        return answer
+
+    # Nur adaptieren, wenn typische Gemini "Als KI..."-Disclaimers vorhanden
+    lowered = answer.lower()
+    if not any(phrase in lowered for phrase in ("als ki", "als ki-", "als assistent", "als sprachmodell")):
+        return answer
+
+    try:
+        # Kurz durch Claude Code schicken - braucht keine Kontexttiefe, nur Umschreiben
+        adapted = llm.ask(
+            [{"role": "user", "content": (
+                f"Schreib die folgende Antwort in Jarvis-Stil um:\n"
+                f"- Entferne generische 'Als KI...' oder 'Als Sprachmodell...'-Disclaimers\n"
+                f"- Antworte direkt und persönlich wie Jarvis (ein KI-Assistent namens Jarvis)\n"
+                f"- Behalte den Kern der Antwort, mach sie nur natürlicher und persönlicher\n\n"
+                f"Antwort zum Umschreiben:\n{answer}"
+            )}],
+            force_provider="claude_code",
+            max_output_tokens=min(int(config.get("claude_code_max_output_tokens", 500)), len(answer) + 100)
+        )
+        return str(adapted).strip() if adapted else answer
+    except Exception:
+        # Fallback: Original-Antwort, falls Claude Code nicht erreichbar
+        return answer
+
+
 def clean_mail_answer(answer: str) -> str:
     answer = clean_ai_answer(answer)
     replacements = {
@@ -8934,34 +8965,57 @@ def answer_message(
     # bereits bereinigten answer (ein erster Versuch, hier die rohen Chunks zu
     # puffern und unveraendert wiederzugeben, hat genau diese Bereinigung
     # umgangen - Codex Stop-Time-Review 2026-08-23).
-    # force_provider="gemini": ab hier ist die Router-Entscheidung entweder "chat" oder
-    # (Faehigkeit nicht gefunden/ohne Ergebnis) durchgefallen - in beiden Faellen soll die
-    # eigentliche Gespraechsantwort ueber den schnellen Provider laufen (Nutzerwunsch
-    # 2026-09-03), waehrend Faehigkeiten/Hintergrund-Aktionen oben bereits ueber Claude
-    # Code liefen. `route` NICHT weiterreichen: es wurde weiter oben fuer den zuvor
-    # aktiven Provider berechnet (Modellname/Token-Budget passen sonst nicht zu Gemini) -
-    # llm.ask()/ask_stream() bauen sich mit force_provider selbst eine passende Route.
-    # `route` (von _result() als provider/model fuer die API-Antwort ausgelesen, siehe
-    # oben) muss hier dieselbe Verfuegbarkeitspruefung nachvollziehen, sonst zeigt das
-    # "source"-Feld weiterhin faelschlich den globalen Standard-Provider (z.B.
-    # claude_code), obwohl die Antwort tatsaechlich von Gemini kam - live entdeckter
-    # Bug 2026-09-03: force_provider="gemini" aendert nur, WER antwortet, nicht was
-    # _result() dafuer berichtet.
+    # Welcher Provider fuer die eigentliche Gespraechsantwort zustaendig ist, richtet
+    # sich jetzt nach der konfigurierten ai_provider-Einstellung statt Gemini hart zu
+    # erzwingen (frueher: Nutzerwunsch 2026-09-03 "Gemini fuer die schnelleren
+    # Antworten") - Claude Code laeuft ueber das bestehende Abo (--print/OAuth, siehe
+    # claude_code_client.py), ist zuverlaessig genug fuer den Chat-Pfad und haelt sich
+    # (anders als Gemini) verlaesslich an die Jarvis-Persona. Faellt auf Gemini, dann
+    # auf lokal zurueck, falls der konfigurierte Provider gerade nicht verfuegbar ist.
+    # `route` NICHT weiterreichen: es wurde weiter oben fuer den zuvor aktiven Provider
+    # berechnet (Modellname/Token-Budget passen sonst nicht) - llm.ask()/ask_stream()
+    # bauen sich mit force_provider selbst eine passende Route. `route` (von _result()
+    # als provider/model fuer die API-Antwort ausgelesen, siehe oben) muss hier dieselbe
+    # Verfuegbarkeitspruefung nachvollziehen, sonst zeigt das "source"-Feld weiterhin
+    # faelschlich den globalen Standard-Provider, obwohl die Antwort tatsaechlich von
+    # einem anderen Provider kam - live entdeckter Bug 2026-09-03.
+    configured_chat_provider = str(config.get("ai_provider", "ollama")).strip().lower()
     if force_local:
-        pass
+        chat_provider = None
+    elif configured_chat_provider == "claude_code" and is_claude_code_available():
+        chat_provider = "claude_code"
+    elif configured_chat_provider == "gemini" and is_gemini_available():
+        chat_provider = "gemini"
+    elif is_claude_code_available():
+        chat_provider = "claude_code"
     elif is_gemini_available():
+        chat_provider = "gemini"
+    else:
+        chat_provider = None
+    print(f"DEBUG chat_provider selection: force_local={force_local} configured={configured_chat_provider!r} chosen={chat_provider!r} claude_avail={is_claude_code_available()} gemini_avail={is_gemini_available()}", file=sys.stderr)
+
+    if chat_provider == "claude_code":
+        route.provider = "claude_code"
+        route.model = str(config.get("claude_code_model", "sonnet"))
+    elif chat_provider == "gemini":
         route.provider = "gemini"
         route.model = str(config.get("gemini_model", "gemini-3.6-flash"))
+
     if callable(on_llm_chunk):
         answer = llm.ask_stream(
             messages,
             user_text=question,
             force_local=force_local,
-            force_provider="gemini",
+            force_provider=chat_provider,
         )
     else:
-        answer = llm.ask(messages, user_text=question, force_local=force_local, force_provider="gemini")
+        answer = llm.ask(messages, user_text=question, force_local=force_local, force_provider=chat_provider)
     answer = clean_ai_answer(answer)
+    # Persona-Adapter: nur noch fuer den Gemini-Fallback noetig (Gemini haelt sich
+    # nicht zuverlaessig an die Jarvis-Persona) - laeuft Claude Code, ist das nicht
+    # noetig, da es die Persona-Anweisungen bereits korrekt befolgt.
+    if route.provider == "gemini" and not force_local:
+        answer = adapt_answer_to_jarvis_persona(answer, llm, config)
     if not wants_first_name_permission(question):
         answer = strip_first_name_address(answer, configured_user_name())
     if fabricated_transaction_claim(answer):
