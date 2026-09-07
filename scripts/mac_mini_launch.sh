@@ -16,7 +16,7 @@ set -e
 # LaunchAgents starten OHNE Login-Shell (kein .zprofile/.zshrc) - Homebrews PATH-Erweiterung
 # (brew shellenv) fehlt dadurch, shutil.which("ollama") in Python findet den Befehl sonst
 # nicht, obwohl Ollama installiert ist (Apple-Silicon-Homebrew-Standardpfad zuerst).
-export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
 
 # Repo-Wurzel = Elternordner dieses Skripts (scripts/mac_mini_launch.sh -> Repo-Root)
 SCRIPT_DIR="${0:A:h}"
