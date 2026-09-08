@@ -51,13 +51,21 @@ def _load_or_create_token() -> str:
 TOKEN = _load_or_create_token()
 
 
+SYNTHESIS_TIMEOUT_SECONDS = 12
+
+
 async def _synthesize(text: str, voice: str, rate: str, pitch: str, volume: str) -> bytes:
     # Ueber eine temporaere Datei statt communicate.stream() - spiegelt exakt
-    # den bereits erprobten Pfad in app/voice_output.py::_save_edge_audio.
+    # den bereits erprobten Pfad in app/voice_output.py::_save_edge_audio,
+    # inklusive dessen Zeitlimit (dort edge_tts_timeout_seconds) - ohne das
+    # wuerde eine haengende Microsoft-Antwort den Request unbegrenzt offen
+    # halten, statt schnell einen klaren Fehler zurueckzugeben (live
+    # beobachtet 2026-09-08: die App lief 20s in einen eigenen Timeout,
+    # ohne dass klar war, ob der Server ueberhaupt noch arbeitet).
     audio_file = Path(tempfile.gettempdir()) / f"jarvis_tts_proxy_{uuid.uuid4().hex}.mp3"
     try:
         communicate = edge_tts.Communicate(text=text, voice=voice, rate=rate, pitch=pitch, volume=volume)
-        await communicate.save(str(audio_file))
+        await asyncio.wait_for(communicate.save(str(audio_file)), timeout=SYNTHESIS_TIMEOUT_SECONDS)
         return audio_file.read_bytes()
     finally:
         audio_file.unlink(missing_ok=True)
@@ -93,6 +101,13 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             audio = asyncio.run(_synthesize(text, voice, rate, pitch, volume))
+        except asyncio.TimeoutError:
+            self._send_plain(
+                502,
+                f"Edge-TTS-Synthese hat das Zeitlimit von {SYNTHESIS_TIMEOUT_SECONDS}s "
+                "ueberschritten (vermutlich langsame/blockierte Verbindung zu Microsoft).",
+            )
+            return
         except Exception as exc:  # noqa: BLE001 - Synthese-Fehler sollen als 502 durchgereicht werden
             self._send_plain(502, f"Edge-TTS-Synthese fehlgeschlagen: {exc}")
             return
