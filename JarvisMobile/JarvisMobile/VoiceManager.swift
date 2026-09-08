@@ -525,10 +525,20 @@ final class VoiceManager: NSObject, ObservableObject {
     /// as the old project's _speak_edge/_speak_macos fallback.
     private static let edgeVoiceName = "de-DE-KillianNeural"
 
-    /// Speaks Jarvis's reply aloud - Edge-TTS first, Apple's on-device
-    /// synthesizer as an automatic fallback. Awaits real completion (see
-    /// `speakContinuation`/`edgePlaybackContinuation` above) rather than just
-    /// returning once playback starts. Assumes
+    /// Speaks Jarvis's reply aloud - tries three tiers in order:
+    /// 1. PiperVoiceEngine (on-device, no network at all - the reliable
+    ///    default per the user's explicit request 2026-09-08, after the
+    ///    direct-to-Microsoft and Mac-Mini-proxy Edge-TTS paths both proved
+    ///    too fragile: Microsoft's bot detection blocked the former, the
+    ///    latter kept failing over Tailscale despite real debugging effort -
+    ///    macOS firewall permissions, buffered logs, etc.).
+    /// 2. Edge-TTS via the Mac Mini proxy (kept as a safety net - should
+    ///    essentially never be reached, since PiperVoiceEngine only returns
+    ///    nil if the bundled model resources are somehow missing).
+    /// 3. Apple's on-device synthesizer (always available, worst-sounding
+    ///    but never fails outright).
+    /// Awaits real completion (see `speakContinuation`/`edgePlaybackContinuation`
+    /// above) rather than just returning once playback starts. Assumes
     /// `prepareSpeechSessionForUpcomingReply()` already ran (see
     /// ChatView.send()) - only re-engages the session here as a fallback for
     /// any OTHER caller that speaks without that priming step.
@@ -548,22 +558,34 @@ final class VoiceManager: NSObject, ObservableObject {
         try? AVAudioSession.sharedInstance().setActive(true)
         isSpeaking = true
 
-        do {
-            let audioData = try await EdgeTTS.synthesize(text: trimmed, voice: Self.edgeVoiceName)
-            await playEdgeAudio(audioData)
-        } catch {
-            // TEMPORAER sichtbar statt lautlos zu verschlucken (live gemeldet
-            // 2026-09-08: "es ist immer noch die alte Stimme") - ohne dieses
-            // Signal ist von aussen nicht zu unterscheiden, ob Edge-TTS
-            // ueberhaupt versucht wurde und woran es genau scheitert.
-            errorMessage = "Edge-TTS fehlgeschlagen (\(error)) - nutze Apple-Stimme."
-            await speakWithAppleVoice(trimmed)
+        if let piperAudio = await synthesizePiperAudio(trimmed) {
+            await playAudioData(piperAudio)
+        } else {
+            do {
+                let audioData = try await EdgeTTS.synthesize(text: trimmed, voice: Self.edgeVoiceName)
+                await playAudioData(audioData)
+            } catch {
+                errorMessage = "Edge-TTS fehlgeschlagen (\(error)) - nutze Apple-Stimme."
+                await speakWithAppleVoice(trimmed)
+            }
         }
 
         isSpeaking = false
     }
 
-    private func playEdgeAudio(_ data: Data) async {
+    /// PiperVoiceEngine's synthesis is synchronous, CPU-bound work - runs it
+    /// off the main actor so a longer reply doesn't stall the UI while it
+    /// renders.
+    private func synthesizePiperAudio(_ text: String) async -> Data? {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let data = PiperVoiceEngine.synthesize(text)
+                continuation.resume(returning: data)
+            }
+        }
+    }
+
+    private func playAudioData(_ data: Data) async {
         await withCheckedContinuation { continuation in
             guard let player = try? AVAudioPlayer(data: data) else {
                 continuation.resume()

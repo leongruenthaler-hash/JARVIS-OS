@@ -24,6 +24,13 @@
 		E479A905F0844F2DBEC2BE80 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6AA9C0CDA9B143E19675A4A0 /* Assets.xcassets */; };
 		E4E834C5D35D4A79AA2C8A58 /* RemoteSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2A163257D394487BFFC7449 /* RemoteSettings.swift */; };
 		460A7F84E9AD4331BC79D905 /* EdgeTTSClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF45526484154DF6B3EB3971 /* EdgeTTSClient.swift */; };
+		6E74984E5E28466EAF896A82 /* SherpaOnnx.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53E2B7817E5C47E0BAD15DB5 /* SherpaOnnx.swift */; };
+		C32279FA3762456EA0079848 /* PiperVoiceEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9411381B1A8F46C18DC23AD3 /* PiperVoiceEngine.swift */; };
+		708CBDBA19EC48A5848F819E /* sherpa-onnx.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5388DB1B10F74C2894617F4D /* sherpa-onnx.xcframework */; };
+		FF528164F5344FDA9B4249A9 /* onnxruntime.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 882969B9201D4211B8112BAD /* onnxruntime.xcframework */; };
+		FE11E70784CC4F7A958A2041 /* de_DE-thorsten-medium.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 17D5433E772445CD9808B203 /* de_DE-thorsten-medium.onnx */; };
+		0527B912515F421EB1E4BBF0 /* tokens.txt in Resources */ = {isa = PBXBuildFile; fileRef = 425D67354BA64473ABC410C7 /* tokens.txt */; };
+		D0E3EE47688443A980BB4E6A /* espeak-ng-data in Resources */ = {isa = PBXBuildFile; fileRef = A891503EB60847F7B837A7CF /* espeak-ng-data */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -46,6 +53,13 @@
 		3B2A1C0D9E8F7A6B5C4D3E2F /* GatewayClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GatewayClient.swift; sourceTree = "<group>"; };
 		4C3B2A1D0E9F8A7B6C5D4E3F /* MemoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryView.swift; sourceTree = "<group>"; };
 		EF45526484154DF6B3EB3971 /* EdgeTTSClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeTTSClient.swift; sourceTree = "<group>"; };
+		53E2B7817E5C47E0BAD15DB5 /* SherpaOnnx.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SherpaOnnx.swift; sourceTree = "<group>"; };
+		9411381B1A8F46C18DC23AD3 /* PiperVoiceEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiperVoiceEngine.swift; sourceTree = "<group>"; };
+		5388DB1B10F74C2894617F4D /* sherpa-onnx.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = "sherpa-onnx.xcframework"; sourceTree = "<group>"; };
+		882969B9201D4211B8112BAD /* onnxruntime.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = "onnxruntime.xcframework"; sourceTree = "<group>"; };
+		17D5433E772445CD9808B203 /* de_DE-thorsten-medium.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; path = "PiperVoice/de_DE-thorsten-medium.onnx"; sourceTree = "<group>"; };
+		425D67354BA64473ABC410C7 /* tokens.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "PiperVoice/tokens.txt"; sourceTree = "<group>"; };
+		A891503EB60847F7B837A7CF /* espeak-ng-data */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "PiperVoice/espeak-ng-data"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -53,6 +67,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				708CBDBA19EC48A5848F819E /* sherpa-onnx.xcframework in Frameworks */,
+				FF528164F5344FDA9B4249A9 /* onnxruntime.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -80,6 +96,13 @@
 				3B2A1C0D9E8F7A6B5C4D3E2F /* GatewayClient.swift */,
 				4C3B2A1D0E9F8A7B6C5D4E3F /* MemoryView.swift */,
 				EF45526484154DF6B3EB3971 /* EdgeTTSClient.swift */,
+				53E2B7817E5C47E0BAD15DB5 /* SherpaOnnx.swift */,
+				9411381B1A8F46C18DC23AD3 /* PiperVoiceEngine.swift */,
+				5388DB1B10F74C2894617F4D /* sherpa-onnx.xcframework */,
+				882969B9201D4211B8112BAD /* onnxruntime.xcframework */,
+				17D5433E772445CD9808B203 /* de_DE-thorsten-medium.onnx */,
+				425D67354BA64473ABC410C7 /* tokens.txt */,
+				A891503EB60847F7B837A7CF /* espeak-ng-data */,
 				9854A7D2A46747E4BD385187 /* PairingView.swift */,
 				CB13DB5071C944289ED40279 /* ProactivityView.swift */,
 				6C2DE75FCE6E40C69291B56A /* APIClient.swift */,
@@ -159,6 +182,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				E479A905F0844F2DBEC2BE80 /* Assets.xcassets in Resources */,
+				FE11E70784CC4F7A958A2041 /* de_DE-thorsten-medium.onnx in Resources */,
+				0527B912515F421EB1E4BBF0 /* tokens.txt in Resources */,
+				D0E3EE47688443A980BB4E6A /* espeak-ng-data in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -179,6 +205,8 @@
 				6B5A4C3D2E1F0A9B8C7D6E5F /* GatewayClient.swift in Sources */,
 				7C6B5A4D3E2F1A0B9C8D7E6F /* MemoryView.swift in Sources */,
 				460A7F84E9AD4331BC79D905 /* EdgeTTSClient.swift in Sources */,
+				6E74984E5E28466EAF896A82 /* SherpaOnnx.swift in Sources */,
+				C32279FA3762456EA0079848 /* PiperVoiceEngine.swift in Sources */,
 				00224641BF904904A7806596 /* PairingView.swift in Sources */,
 				4534614208C94B3EBCCEFC97 /* ProactivityView.swift in Sources */,
 				301DA50CDF474CA3B928E180 /* APIClient.swift in Sources */,
@@ -209,6 +237,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1;
+				OTHER_LDFLAGS = "-lc++";
 				PRODUCT_BUNDLE_IDENTIFIER = com.leon.jarvis.mobile;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -237,6 +266,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1;
+				OTHER_LDFLAGS = "-lc++";
 				PRODUCT_BUNDLE_IDENTIFIER = com.leon.jarvis.mobile;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";

@@ -57,3 +57,15 @@ app/photos_helper
 # text files).
 JarvisApp/Sources/JarvisApp/Resources/ollama-runtime/
 JarvisApp/Sources/JarvisApp/Resources/bundled-models/
+
+# sherpa-onnx/onnxruntime xcframeworks for JarvisMobile's on-device Piper TTS
+# (~194 MB combined) - compiled build artifacts, not source. Only ever built
+# and deployed from this MacBook (JarvisMobile is never built on the Mac
+# Mini), so there is no need to sync them via git. Rebuild with:
+#   git clone --depth 1 https://github.com/k2-fsa/sherpa-onnx.git /tmp/sherpa-onnx-build
+#   cd /tmp/sherpa-onnx-build && brew install cmake wget && ./build-ios.sh
+# then copy build-ios/sherpa-onnx.xcframework and
+# build-ios/ios-onnxruntime/<version>/onnxruntime.xcframework into
+# JarvisMobile/JarvisMobile/.
+JarvisMobile/JarvisMobile/sherpa-onnx.xcframework/
+JarvisMobile/JarvisMobile/onnxruntime.xcframework/
