@@ -16,7 +16,7 @@
 // keinen eigenen Kalender-Code hier. Die Antwort wird zurueck an WhatsApp
 // gesendet.
 
-import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } from '@whiskeysockets/baileys'
+import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, jidNormalizedUser } from '@whiskeysockets/baileys'
 import qrcodeTerminal from 'qrcode-terminal'
 import pino from 'pino'
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
@@ -177,9 +177,13 @@ async function handleMessage(sock, msg) {
 }
 
 async function notifyLeon(sock, text) {
-  // "Nachricht an mich selbst" - dieselbe eigene JID, an die WhatsApp auch
-  // den "Nachricht an dich"-Chat adressiert.
-  const selfJid = sock.user?.id
+  // "Nachricht an mich selbst" - sock.user.id traegt bei Multi-Device eine
+  // Geraete-Kennung ("<nummer>:<deviceId>@s.whatsapp.net"), an die eine
+  // Nachricht nicht im normalen "Nachricht an dich"-Chat auftaucht (live
+  // beobachtet 2026-09-09: die Notiz wurde laut Log verschickt, kam aber nie
+  // im WhatsApp-Chat an) - jidNormalizedUser() strippt die Geraete-Kennung
+  // auf die eigentliche, sichtbare Chat-JID herunter.
+  const selfJid = sock.user?.id ? jidNormalizedUser(sock.user.id) : null
   if (!selfJid) return
   await sock.sendMessage(selfJid, { text: `[Jarvis]\n${text}` })
   logMessage({ ts: new Date().toISOString(), direction: 'note', jid: selfJid, name: 'Leon', text })
