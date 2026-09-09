@@ -19,8 +19,7 @@
 import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } from '@whiskeysockets/baileys'
 import qrcodeTerminal from 'qrcode-terminal'
 import pino from 'pino'
-import { execSync } from 'node:child_process'
-import { appendFileSync, mkdirSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import path from 'node:path'
 
@@ -68,8 +67,18 @@ Antworte immer knapp, hoeflich, auf Deutsch. Gib NUR den Text zurueck, der
 als WhatsApp-Nachricht an den Absender verschickt werden soll - keine
 Anfuehrungszeichen, keine Erklaerungen drumherum.`
 
+const OPENCLAW_CONFIG_FILE = path.join(homedir(), '.openclaw', 'openclaw.json')
+
 function getGatewayToken() {
-  return execSync('openclaw config get gateway.auth.token', { encoding: 'utf8' }).trim()
+  // "openclaw config get gateway.auth.token" maskiert den Wert zu
+  // "__OPENCLAW_REDACTED__", sobald es nicht in einem interaktiven Terminal
+  // laeuft (live beobachtet 2026-09-09 - genau das hat den ersten
+  // Testlauf mit 401 Unauthorized scheitern lassen). Also direkt aus der
+  // Config-Datei lesen, wo der Wert im Klartext steht.
+  const config = JSON.parse(readFileSync(OPENCLAW_CONFIG_FILE, 'utf8'))
+  const token = config?.gateway?.auth?.token
+  if (!token) throw new Error(`Kein gateway.auth.token in ${OPENCLAW_CONFIG_FILE} gefunden.`)
+  return token
 }
 
 function logMessage(entry) {
