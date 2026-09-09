@@ -10,6 +10,13 @@
 
 set -e
 
+# launchd startet Prozesse mit einem minimalen PATH ohne Homebrews
+# bin-Verzeichnisse - node/npm sind darin sonst "command not found", obwohl
+# sie in einer normalen Terminal-Sitzung funktionieren (live beobachtet
+# 2026-09-09, gleiche Fehlerklasse wie die "mkdir ~"-Tilde-Falle beim
+# vorherigen WhatsApp-Skill).
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 # Repo-Wurzel = Elternordner dieses Skripts (scripts/whatsapp_bridge_launch.sh -> Repo-Root)
 SCRIPT_DIR="${0:A:h}"
 REPO_ROOT="${SCRIPT_DIR:h}"
