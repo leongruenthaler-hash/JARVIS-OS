@@ -19,7 +19,7 @@
 import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } from '@whiskeysockets/baileys'
 import qrcodeTerminal from 'qrcode-terminal'
 import pino from 'pino'
-import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -27,6 +27,7 @@ import { fileURLToPath } from 'node:url'
 const DATA_DIR = path.join(homedir(), '.jarvis-whatsapp')
 const AUTH_DIR = path.join(DATA_DIR, 'auth')
 const LOG_FILE = path.join(DATA_DIR, 'messages.jsonl')
+const STANDARD_REPLY_STATE_FILE = path.join(DATA_DIR, 'last_standard_reply.json')
 const GATEWAY_URL = 'http://127.0.0.1:18789/v1/chat/completions'
 
 // whatsapp-bridge/ liegt direkt unter der Repo-Wurzel, wo config.json und
@@ -101,6 +102,27 @@ function parseAgentResponse(raw) {
   const noteRaw = notePart.trim()
   const note = noteRaw && noteRaw.toUpperCase() !== 'LEER' ? noteRaw : null
   return { reply, note }
+}
+
+function todayKey() {
+  // Lokales Kalenderdatum (Zeitzone des Mac Mini), nicht UTC - sonst wuerde
+  // die Tagesgrenze in CEST um 1-2h verschoben.
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function loadStandardReplyState() {
+  try {
+    return JSON.parse(readFileSync(STANDARD_REPLY_STATE_FILE, 'utf8'))
+  } catch {
+    return {}
+  }
+}
+
+function markStandardReplySent(jid) {
+  const state = loadStandardReplyState()
+  state[jid] = todayKey()
+  writeFileSync(STANDARD_REPLY_STATE_FILE, JSON.stringify(state))
 }
 
 const OPENCLAW_CONFIG_FILE = path.join(homedir(), '.openclaw', 'openclaw.json')
@@ -179,7 +201,19 @@ async function handleMessage(sock, msg) {
   if (!raw) return
   const { reply, note } = parseAgentResponse(raw)
 
-  if (reply) {
+  // Nur der Standardfall (kein Termin erkannt, also auch keine Notiz) wird
+  // pro Kontakt auf einmal am Tag gedrosselt - eine Terminantwort enthaelt
+  // immer eine echte, neue inhaltliche Antwort und wird deshalb IMMER
+  // verschickt.
+  const isStandardCase = !note
+  let shouldSendReply = true
+  if (isStandardCase) {
+    const alreadySentToday = loadStandardReplyState()[jid] === todayKey()
+    shouldSendReply = !alreadySentToday
+    if (shouldSendReply) markStandardReplySent(jid)
+  }
+
+  if (reply && shouldSendReply) {
     await sock.sendMessage(jid, { text: reply })
     logMessage({ ts: new Date().toISOString(), direction: 'out', jid, name, text: reply })
   }
