@@ -16,17 +16,26 @@
 // keinen eigenen Kalender-Code hier. Die Antwort wird zurueck an WhatsApp
 // gesendet.
 
-import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, jidNormalizedUser } from '@whiskeysockets/baileys'
+import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } from '@whiskeysockets/baileys'
 import qrcodeTerminal from 'qrcode-terminal'
 import pino from 'pino'
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const DATA_DIR = path.join(homedir(), '.jarvis-whatsapp')
 const AUTH_DIR = path.join(DATA_DIR, 'auth')
 const LOG_FILE = path.join(DATA_DIR, 'messages.jsonl')
 const GATEWAY_URL = 'http://127.0.0.1:18789/v1/chat/completions'
+
+// whatsapp-bridge/ liegt direkt unter der Repo-Wurzel, wo config.json und
+// ntfy_topic.token bereits fuer den bestehenden Push-Kanal liegen (siehe
+// app/push_notify.py) - denselben Kanal wiederverwenden statt einen
+// zweiten aufzubauen.
+const REPO_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+const NTFY_TOPIC_FILE = path.join(REPO_ROOT, 'ntfy_topic.token')
+const JARVIS_CONFIG_FILE = path.join(REPO_ROOT, 'config.json')
 
 mkdirSync(AUTH_DIR, { recursive: true })
 
@@ -160,7 +169,11 @@ async function handleMessage(sock, msg) {
   // damit das zuverlaessig passiert und nicht von dessen
   // Format-Befolgung abhaengt. Vor dem (langsameren) Gateway-Aufruf, damit
   // Leon nicht extra auf die KI-Antwort warten muss, um Bescheid zu wissen.
-  await notifyLeon(sock, `${name} hat dir geschrieben:\n"${text}"`)
+  // Ueber ntfy statt einer WhatsApp-Nachricht-an-mich-selbst (die kam trotz
+  // erfolgreichem Log-Eintrag nie sichtbar im Chat an, live beobachtet
+  // 2026-09-09) - ntfy ist der bereits bestehende Push-Kanal, den Jarvis
+  // auch sonst nutzt (siehe app/push_notify.py).
+  await notifyLeon('WhatsApp', `${name} hat dir geschrieben:\n"${text}"`)
 
   const raw = await askJarvis(name, jid, text)
   if (!raw) return
@@ -172,21 +185,48 @@ async function handleMessage(sock, msg) {
   }
 
   if (note) {
-    await notifyLeon(sock, note)
+    await notifyLeon('WhatsApp-Termin', note)
   }
 }
 
-async function notifyLeon(sock, text) {
-  // "Nachricht an mich selbst" - sock.user.id traegt bei Multi-Device eine
-  // Geraete-Kennung ("<nummer>:<deviceId>@s.whatsapp.net"), an die eine
-  // Nachricht nicht im normalen "Nachricht an dich"-Chat auftaucht (live
-  // beobachtet 2026-09-09: die Notiz wurde laut Log verschickt, kam aber nie
-  // im WhatsApp-Chat an) - jidNormalizedUser() strippt die Geraete-Kennung
-  // auf die eigentliche, sichtbare Chat-JID herunter.
-  const selfJid = sock.user?.id ? jidNormalizedUser(sock.user.id) : null
-  if (!selfJid) return
-  await sock.sendMessage(selfJid, { text: `[Jarvis]\n${text}` })
-  logMessage({ ts: new Date().toISOString(), direction: 'note', jid: selfJid, name: 'Leon', text })
+function _ntfyScheme(host) {
+  // Nackte IP -> http (kein TLS-Zertifikat im Privatnetz zu erwarten),
+  // echter Hostname (z.B. ntfy.sh) -> https. Gleiche Heuristik wie
+  // app/push_notify.py::_default_scheme().
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(host) ? 'http' : 'https'
+}
+
+async function sendNtfyPush(title, message) {
+  // Niemals werfen/blockieren - ein Push ist immer nur ein Zusatzkanal,
+  // nie der garantierte Weg (gleiches Prinzip wie app/push_notify.py).
+  try {
+    const config = JSON.parse(readFileSync(JARVIS_CONFIG_FILE, 'utf8'))
+    const host = String(config.ntfy_host || '').trim()
+    const topic = readFileSync(NTFY_TOPIC_FILE, 'utf8').trim()
+    if (!host || !topic) return false
+
+    const scheme = _ntfyScheme(host)
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 5000)
+    try {
+      const res = await fetch(`${scheme}://${host}/${topic}`, {
+        method: 'POST',
+        headers: { Title: title, Priority: 'default' },
+        body: message,
+        signal: controller.signal,
+      })
+      return res.ok
+    } finally {
+      clearTimeout(timeout)
+    }
+  } catch {
+    return false
+  }
+}
+
+async function notifyLeon(title, text) {
+  await sendNtfyPush(title, text)
+  logMessage({ ts: new Date().toISOString(), direction: 'note', jid: 'ntfy', name: 'Leon', text })
 }
 
 async function start() {
