@@ -104,7 +104,11 @@ async function askJarvis(name, jid, text) {
 async function handleMessage(sock, msg) {
   if (!msg.message || msg.key.fromMe) return
   const jid = msg.key.remoteJid
-  if (!jid || !jid.endsWith('@s.whatsapp.net')) return // nur Direktnachrichten, keine Gruppen/Broadcasts
+  // Direktnachrichten kommen nicht mehr nur als klassische Telefonnummer-JID
+  // (@s.whatsapp.net) - WhatsApp adressiert viele Chats inzwischen ueber das
+  // neuere, nummernverschleiernde @lid-Schema (live beobachtet 2026-09-09).
+  // Gruppen (@g.us) und Broadcasts/Status bleiben weiterhin ausgeschlossen.
+  if (!jid || (!jid.endsWith('@s.whatsapp.net') && !jid.endsWith('@lid'))) return
 
   const ts = (Number(msg.messageTimestamp) || 0) * 1000
   if (ts && ts < STARTED_AT) return // beim Start keinen alten Verlauf erneut beantworten
