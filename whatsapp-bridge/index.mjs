@@ -153,6 +153,19 @@ function extractText(message) {
   )
 }
 
+function detectMediaType(message) {
+  // Nur fuer eine kurze, menschenlesbare Notiz - keine tatsaechliche
+  // Medienauswertung (Bild-/Spracherkennung waere ein eigenes Projekt).
+  // null fuer alles andere (z.B. Reaktionen, Protokollnachrichten), damit
+  // die nicht faelschlich eine "kann ich nicht auswerten"-Antwort ausloesen.
+  if (message.imageMessage) return 'ein Bild'
+  if (message.videoMessage) return 'ein Video'
+  if (message.audioMessage) return message.audioMessage.ptt ? 'eine Sprachnachricht' : 'eine Audiodatei'
+  if (message.stickerMessage) return 'einen Sticker'
+  if (message.documentMessage) return 'ein Dokument'
+  return null
+}
+
 async function askJarvis(name, jid, text) {
   const token = getGatewayToken()
   const prompt = `${OPERATING_INSTRUCTIONS}\n\nEingehende WhatsApp-Nachricht von "${name}" (${jid}):\n"${text}"\n\nAntworte jetzt gemaess der obigen Anweisung.`
@@ -180,10 +193,16 @@ async function handleMessage(sock, msg) {
   const ts = (Number(msg.messageTimestamp) || 0) * 1000
   if (ts && ts < STARTED_AT) return // beim Start keinen alten Verlauf erneut beantworten
 
-  const text = extractText(msg.message)
-  if (!text) return // Nicht-Text-Nachrichten (Bilder/Sprachnotizen/...) vorerst ignorieren
-
   const name = msg.pushName || jid
+  const text = extractText(msg.message)
+
+  if (!text) {
+    const mediaType = detectMediaType(msg.message)
+    if (!mediaType) return // unbekannter/irrelevanter Nachrichtentyp (Reaktion, Protokollnachricht, ...)
+    await handleMediaMessage(sock, jid, name, mediaType)
+    return
+  }
+
   logMessage({ ts: new Date().toISOString(), direction: 'in', jid, name, text })
 
   // Sofortige Benachrichtigung an Leon selbst bei JEDER eingehenden
@@ -221,6 +240,24 @@ async function handleMessage(sock, msg) {
   if (note) {
     await notifyLeon('WhatsApp-Termin', note)
   }
+}
+
+async function handleMediaMessage(sock, jid, name, mediaType) {
+  // Keine tatsaechliche Medienauswertung (siehe detectMediaType) - nur
+  // Bescheid geben, damit sowas nicht mehr wie bisher spurlos verschwindet.
+  // Gleiche Einmal-pro-Tag-Drosselung wie beim Standardsatz (derselbe
+  // Zustand), damit z.B. mehrere Sprachnachrichten hintereinander nicht
+  // jedes Mal erneut eine Antwort ausloesen.
+  logMessage({ ts: new Date().toISOString(), direction: 'in', jid, name, text: `[${mediaType}]` })
+  await notifyLeon('WhatsApp', `${name} hat dir ${mediaType} geschickt.`)
+
+  const alreadySentToday = loadStandardReplyState()[jid] === todayKey()
+  if (alreadySentToday) return
+  markStandardReplySent(jid)
+
+  const reply = `Guten Tag, hier ist Jarvis, der persönliche Assistent von Herrn Grünthaler. Ich kann ${mediaType} aktuell leider noch nicht auswerten, aber ich gebe ihm Bescheid, und er wird sich in Kürze bei Ihnen melden.`
+  await sock.sendMessage(jid, { text: reply })
+  logMessage({ ts: new Date().toISOString(), direction: 'out', jid, name, text: reply })
 }
 
 function _ntfyScheme(host) {
