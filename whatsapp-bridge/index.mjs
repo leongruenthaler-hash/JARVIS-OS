@@ -155,6 +155,13 @@ async function handleMessage(sock, msg) {
   const name = msg.pushName || jid
   logMessage({ ts: new Date().toISOString(), direction: 'in', jid, name, text })
 
+  // Sofortige Benachrichtigung an Leon selbst bei JEDER eingehenden
+  // Nachricht (nicht nur bei erkannten Terminen) - unabhaengig vom Modell,
+  // damit das zuverlaessig passiert und nicht von dessen
+  // Format-Befolgung abhaengt. Vor dem (langsameren) Gateway-Aufruf, damit
+  // Leon nicht extra auf die KI-Antwort warten muss, um Bescheid zu wissen.
+  await notifyLeon(sock, `${name} hat dir geschrieben:\n"${text}"`)
+
   const raw = await askJarvis(name, jid, text)
   if (!raw) return
   const { reply, note } = parseAgentResponse(raw)
@@ -165,14 +172,17 @@ async function handleMessage(sock, msg) {
   }
 
   if (note) {
-    // "Nachricht an mich selbst" - dieselbe eigene JID, an die WhatsApp auch
-    // den "Nachricht an dich"-Chat adressiert.
-    const selfJid = sock.user?.id
-    if (selfJid) {
-      await sock.sendMessage(selfJid, { text: `[Jarvis - WhatsApp von ${name}]\n${note}` })
-      logMessage({ ts: new Date().toISOString(), direction: 'note', jid: selfJid, name, text: note })
-    }
+    await notifyLeon(sock, note)
   }
+}
+
+async function notifyLeon(sock, text) {
+  // "Nachricht an mich selbst" - dieselbe eigene JID, an die WhatsApp auch
+  // den "Nachricht an dich"-Chat adressiert.
+  const selfJid = sock.user?.id
+  if (!selfJid) return
+  await sock.sendMessage(selfJid, { text: `[Jarvis]\n${text}` })
+  logMessage({ ts: new Date().toISOString(), direction: 'note', jid: selfJid, name: 'Leon', text })
 }
 
 async function start() {
