@@ -63,9 +63,27 @@ Schreib in diesem Fall Herrn Gruenthaler zusaetzlich selbst eine kurze
 Nachricht, was du dem Absender geantwortet hast - er soll nie ueberrascht
 werden von einer automatischen Zusage.
 
-Antworte immer knapp, hoeflich, auf Deutsch. Gib NUR den Text zurueck, der
-als WhatsApp-Nachricht an den Absender verschickt werden soll - keine
-Anfuehrungszeichen, keine Erklaerungen drumherum.`
+Antworte immer knapp, hoeflich, auf Deutsch.
+
+WICHTIG - Antwortformat: gib GENAU diese zwei Zeilen zurueck, sonst nichts
+(keine Anfuehrungszeichen, keine Erklaerungen, kein Markdown):
+
+ANTWORT_AN_ABSENDER: <die Nachricht, die an den Absender geschickt wird>
+NOTIZ_AN_LEON: <im Terminfall die kurze Info fuer Herrn Gruenthaler, sonst genau das Wort LEER>`
+
+// Trennt die zwei vom Modell zurueckgegebenen Textteile (Antwort an den
+// Absender vs. interne Notiz an Herrn Gruenthaler) - ohne diese Trennung
+// landete die interne Notiz versehentlich direkt in der Nachricht an den
+// Absender (live beobachtet 2026-09-09: Laura bekam "Termin eingetragen.
+// Antwort an Laura folgt." mit in ihrer eigentlichen Antwort zu lesen).
+function parseAgentResponse(raw) {
+  const replyMatch = raw.match(/ANTWORT_AN_ABSENDER:\s*([\s\S]*?)(?:\nNOTIZ_AN_LEON:|$)/)
+  const noteMatch = raw.match(/NOTIZ_AN_LEON:\s*([\s\S]*)$/)
+  const reply = (replyMatch?.[1] || raw).trim()
+  const noteRaw = (noteMatch?.[1] || '').trim()
+  const note = noteRaw && noteRaw.toUpperCase() !== 'LEER' ? noteRaw : null
+  return { reply, note }
+}
 
 const OPENCLAW_CONFIG_FILE = path.join(homedir(), '.openclaw', 'openclaw.json')
 
@@ -128,11 +146,24 @@ async function handleMessage(sock, msg) {
   const name = msg.pushName || jid
   logMessage({ ts: new Date().toISOString(), direction: 'in', jid, name, text })
 
-  const reply = await askJarvis(name, jid, text)
-  if (!reply) return
+  const raw = await askJarvis(name, jid, text)
+  if (!raw) return
+  const { reply, note } = parseAgentResponse(raw)
 
-  await sock.sendMessage(jid, { text: reply })
-  logMessage({ ts: new Date().toISOString(), direction: 'out', jid, name, text: reply })
+  if (reply) {
+    await sock.sendMessage(jid, { text: reply })
+    logMessage({ ts: new Date().toISOString(), direction: 'out', jid, name, text: reply })
+  }
+
+  if (note) {
+    // "Nachricht an mich selbst" - dieselbe eigene JID, an die WhatsApp auch
+    // den "Nachricht an dich"-Chat adressiert.
+    const selfJid = sock.user?.id
+    if (selfJid) {
+      await sock.sendMessage(selfJid, { text: `[Jarvis - WhatsApp von ${name}]\n${note}` })
+      logMessage({ ts: new Date().toISOString(), direction: 'note', jid: selfJid, name, text: note })
+    }
+  }
 }
 
 async function start() {
