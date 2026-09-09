@@ -73,6 +73,21 @@ struct ChatView: View {
                 Color.clear
                     .onAppear { keyboard.viewMaxY = proxy.frame(in: .global).maxY }
                     .onChange(of: proxy.frame(in: .global).maxY) { _, newValue in
+                        // NUR bei geschlossener Tastatur uebernehmen - sonst
+                        // entsteht eine sich selbst verstaerkende
+                        // Rueckkopplungsschleife: Tastatur oeffnet -> Hoehe
+                        // gesetzt -> inputBar-Padding waechst -> Gesamthoehe
+                        // dieses VStack aendert sich -> maxY aendert sich ->
+                        // Tastaturhoehe wird (aus dem jetzt VERSCHOBENEN
+                        // Referenzpunkt) neu berechnet -> Padding aendert
+                        // sich wieder -> ... Das haengt den Hauptthread in
+                        // einer Dauerschleife fest (live beobachtet
+                        // 2026-09-10: App friert komplett ein, sobald man ins
+                        // Textfeld tippt - nur ueber Force-Quit wieder
+                        // loesbar). Bei geschlossener Tastatur ist maxY
+                        // stabil und darf normal uebernommen werden (z.B.
+                        // nach einer Drehung oder Dynamic-Type-Aenderung).
+                        guard keyboard.height == 0 else { return }
                         keyboard.viewMaxY = newValue
                     }
             }
@@ -361,8 +376,31 @@ struct ChatView: View {
             }
         }
 
+        // ChatGPT-Live-artige Zwischenansage (live gewuenscht 2026-09-09): wenn
+        // die Antwort nicht innerhalb kurzer Zeit da ist - meist, weil Jarvis
+        // gerade ein laengeres Werkzeug ausfuehrt (Mails durchsuchen,
+        // Kalender bearbeiten, Musik steuern) statt nur zu antworten - sagt
+        // Jarvis kurz von sich aus etwas wie "einen Moment, ich schau nach",
+        // statt die ganze Wartezeit ueber stumm zu bleiben. Rein
+        // client-seitige Heuristik (Stichwortabgleich auf die eigene
+        // Nachricht) - OpenClaw selbst meldet keine Zwischenstaende zurueck,
+        // da der Chat nicht gestreamt ist.
+        let fillerTask: Task<Void, Never>? = speakRepliesAloud ? Task {
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            guard !Task.isCancelled else { return }
+            await voice.speak(Self.fillerPhrase(for: text))
+        } : nil
+
         do {
             let response = try await APIClient().sendChat(text, history: history)
+            fillerTask?.cancel()
+            // Falls die Zwischenansage schon zu sprechen begonnen hat, erst zu
+            // Ende sprechen lassen statt sie mitten im Satz abzuwuergen - nur
+            // ein NICHT begonnener Timer laesst sich durch cancel() wirklich
+            // stoppen.
+            while voice.isSpeaking {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
             withAnimation { messages.append(ChatMessage(role: "assistant", content: response.answer)) }
             if speakRepliesAloud {
                 await voice.speak(response.answer)
@@ -376,8 +414,40 @@ struct ChatView: View {
                 await voice.startFollowUpListening()
             }
         } catch {
+            fillerTask?.cancel()
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// Stichwortabgleich auf die eigene Nachricht - rein clientseitige
+    /// Vermutung, WAS Jarvis wohl gerade tut, nicht auf OpenClaws
+    /// tatsaechliches Verhalten. Absichtlich grob statt praezise: eine
+    /// halbwegs passende Zwischenansage ist besser als stures Schweigen,
+    /// aber es lohnt sich nicht, das perfekt zu treffen.
+    private static func fillerPhrase(for text: String) -> String {
+        let lower = text.lowercased()
+        if lower.contains("mail") || lower.contains("e-mail") {
+            return "Einen Moment, ich schau in deinen Mails nach."
+        }
+        if lower.contains("kalender") || lower.contains("termin") {
+            return "Ich schau kurz in deinen Kalender."
+        }
+        if lower.contains("musik") || lower.contains("lied") || lower.contains("song") || lower.contains("playlist") || lower.contains("abspiel") {
+            return "Ich bin dran, einen Moment."
+        }
+        if lower.contains("foto") || lower.contains("bild") {
+            return "Ich durchsuche deine Fotos, einen Moment."
+        }
+        if lower.contains("datei") || lower.contains("dokument") {
+            return "Ich schau in deinen Dateien nach."
+        }
+        let generic = [
+            "Einen Moment, ich schau mal nach.",
+            "Ich bin gleich so weit.",
+            "Lass mich kurz nachdenken.",
+            "Ich kümmere mich darum, einen Augenblick.",
+        ]
+        return generic.randomElement() ?? generic[0]
     }
 }
 
