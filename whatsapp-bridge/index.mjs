@@ -77,10 +77,19 @@ NOTIZ_AN_LEON: <im Terminfall die kurze Info fuer Herrn Gruenthaler, sonst genau
 // Absender (live beobachtet 2026-09-09: Laura bekam "Termin eingetragen.
 // Antwort an Laura folgt." mit in ihrer eigentlichen Antwort zu lesen).
 function parseAgentResponse(raw) {
-  const replyMatch = raw.match(/ANTWORT_AN_ABSENDER:\s*([\s\S]*?)(?:\nNOTIZ_AN_LEON:|$)/)
-  const noteMatch = raw.match(/NOTIZ_AN_LEON:\s*([\s\S]*)$/)
-  const reply = (replyMatch?.[1] || raw).trim()
-  const noteRaw = (noteMatch?.[1] || '').trim()
+  // Das Modell haelt sich nicht immer exakt ans vorgegebene Format - z.B.
+  // wurden die Label schon mit Markdown-Sternchen umschlossen
+  // ("**NOTIZ_AN_LEON:**"), was eine striktere Regex zum Scheitern brachte
+  // (live beobachtet 2026-09-09: der komplette Rohtext inkl. Notiz landete
+  // bei der Absenderin). Deshalb erst Markdown-Betonung entfernen und die
+  // Labels nur noch case-insensitiv per Position suchen statt strikt zu
+  // parsen.
+  const clean = raw.replace(/\*\*/g, '')
+  const noteIdx = clean.search(/NOTIZ_AN_LEON:/i)
+  const replyPart = noteIdx === -1 ? clean : clean.slice(0, noteIdx)
+  const notePart = noteIdx === -1 ? '' : clean.slice(noteIdx).replace(/NOTIZ_AN_LEON:/i, '')
+  const reply = replyPart.replace(/ANTWORT_AN_ABSENDER:/i, '').trim()
+  const noteRaw = notePart.trim()
   const note = noteRaw && noteRaw.toUpperCase() !== 'LEER' ? noteRaw : null
   return { reply, note }
 }
