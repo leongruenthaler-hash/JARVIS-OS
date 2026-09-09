@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchAgent fuer die eigene Jarvis-WhatsApp-Bridge (Baileys) auf dem
+  Mac Mini. Siehe whatsapp-bridge/index.mjs und scripts/whatsapp_bridge_launch.sh.
+
+  Installation auf dem Mac Mini (einmalig):
+    cp scripts/com.leon.jarvis.whatsappbridge.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.leon.jarvis.whatsappbridge.plist
+
+  Neu starten nach einer Code-Aenderung:
+    launchctl unload ~/Library/LaunchAgents/com.leon.jarvis.whatsappbridge.plist
+    launchctl load ~/Library/LaunchAgents/com.leon.jarvis.whatsappbridge.plist
+
+  WICHTIG: der <string>-Pfad unter ProgramArguments unten muss auf den
+  tatsaechlichen Speicherort des geklonten Repos auf DIESEM Mac Mini zeigen -
+  beim Kopieren dieser Datei den Platzhalter ersetzen.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.leon.jarvis.whatsappbridge</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>REPO_ROOT_PLACEHOLDER/scripts/whatsapp_bridge_launch.sh</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/jarvis_whatsapp_bridge_launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/jarvis_whatsapp_bridge_launchd.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

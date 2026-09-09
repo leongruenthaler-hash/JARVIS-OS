@@ -1,0 +1,16 @@
+{
+  "name": "jarvis-whatsapp-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Eigener WhatsApp-Multi-Device-Client fuer Jarvis, auf Basis der aktiv gepflegten Baileys-Bibliothek - Ersatz fuer den ClawHub-Skill @0xs4m1337/openclaw-whatsapp, dessen Go-Binary nie eine echte WebSocket-Verbindung zu WhatsApp aufgebaut hat (siehe README.md).",
+  "main": "index.mjs",
+  "scripts": {
+    "start": "node index.mjs"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.9",
+    "pino": "^9.5.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
