@@ -118,7 +118,18 @@ async function handleMessage(sock, msg, startedAt) {
 async function start() {
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR)
   const { version } = await fetchLatestBaileysVersion()
-  const sock = makeWASocket({ version, auth: state, logger: pino({ level: 'warn' }) })
+  const sock = makeWASocket({
+    version,
+    auth: state,
+    logger: pino({ level: 'warn' }),
+    // Baileys' eigener "init queries"-Schritt (fetchProps: App-Konfiguration
+    // von WhatsApp abrufen) lief bei diesem Account zuverlaessig nach genau
+    // 60s in ein internes Timeout und riss danach die ganze Verbindung mit
+    // ab (live beobachtet 2026-09-09, reproduzierbar bei jedem Verbindungs-
+    // aufbau) - fuer reines Senden/Empfangen von Nachrichten wird dieser
+    // Schritt nicht gebraucht, siehe WhiskeySockets/Baileys SocketConfig.
+    fireInitQueries: false,
+  })
   const startedAt = Date.now()
 
   sock.ev.on('creds.update', saveCreds)
