@@ -131,9 +131,16 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    print(f"Jarvis TTS-Proxy laeuft auf 127.0.0.1:{PORT}")
+    # 0.0.0.0 statt 127.0.0.1 - JarvisMobile spricht diesen Port direkt ueber
+    # die Tailscale-IP an (RemoteSettings.ttsBaseURL), nicht ueber einen
+    # tailscale-serve-Reverse-Proxy wie urspruenglich hier dokumentiert. Mit
+    # 127.0.0.1 war der Proxy von keinem anderen Geraet aus erreichbar (live
+    # beobachtet 2026-09-10: "Connection refused" von einem anderen Mac aus,
+    # obwohl der Prozess lief). Der Bearer-Token bleibt der einzige Schutz -
+    # ausreichend, da nur ueber Tailscales privates Netz erreichbar.
+    print(f"Jarvis TTS-Proxy laeuft auf 0.0.0.0:{PORT}")
     print(f"Token (einmalig in JarvisMobile -> Verbindung eintragen): {TOKEN}")
-    server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     server.serve_forever()
 
 
