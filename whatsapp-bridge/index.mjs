@@ -31,6 +31,13 @@ const GATEWAY_URL = 'http://127.0.0.1:18789/v1/chat/completions'
 
 mkdirSync(AUTH_DIR, { recursive: true })
 
+// EINMALIG beim Prozessstart gesetzt, nicht pro Reconnect - sonst geht eine
+// Nachricht verloren, wenn sie genau waehrend eines Reconnects eintrifft
+// (Baileys liefert sie danach mit ihrem urspruenglichen, "alten" Zeitstempel
+// nach - ein pro-start() neu gesetztes startedAt haette sie faelschlich als
+// Verlauf-vor-dem-Start verworfen; live beobachtet 2026-09-09).
+const STARTED_AT = Date.now()
+
 // Wortlaut 1:1 wie vom Nutzer vorgegeben (2026-09-09) - bewusst nicht
 // umformuliert, damit die Standard-Antwort exakt dem entspricht, was
 // zugesagt wurde.
@@ -94,13 +101,13 @@ async function askJarvis(name, jid, text) {
   return (data.choices?.[0]?.message?.content || '').trim()
 }
 
-async function handleMessage(sock, msg, startedAt) {
+async function handleMessage(sock, msg) {
   if (!msg.message || msg.key.fromMe) return
   const jid = msg.key.remoteJid
   if (!jid || !jid.endsWith('@s.whatsapp.net')) return // nur Direktnachrichten, keine Gruppen/Broadcasts
 
   const ts = (Number(msg.messageTimestamp) || 0) * 1000
-  if (ts && ts < startedAt) return // beim Start keinen alten Verlauf erneut beantworten
+  if (ts && ts < STARTED_AT) return // beim Start keinen alten Verlauf erneut beantworten
 
   const text = extractText(msg.message)
   if (!text) return // Nicht-Text-Nachrichten (Bilder/Sprachnotizen/...) vorerst ignorieren
@@ -130,7 +137,6 @@ async function start() {
     // Schritt nicht gebraucht, siehe WhiskeySockets/Baileys SocketConfig.
     fireInitQueries: false,
   })
-  const startedAt = Date.now()
 
   sock.ev.on('creds.update', saveCreds)
 
@@ -157,7 +163,7 @@ async function start() {
     if (type !== 'notify') return
     for (const msg of messages) {
       try {
-        await handleMessage(sock, msg, startedAt)
+        await handleMessage(sock, msg)
       } catch (err) {
         console.error('[jarvis-whatsapp] Fehler bei Nachrichtenverarbeitung:', err)
       }
