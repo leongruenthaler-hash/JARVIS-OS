@@ -163,6 +163,24 @@ final class VoiceManager: NSObject, ObservableObject {
     override init() {
         super.init()
         synthesizer.delegate = self
+        warmUpEdgeTTSConnection()
+    }
+
+    /// Feuert einen billigen, ergebnisunabhaengigen Request an den TTS-Proxy
+    /// ab, sobald die App startet - rein damit die Tailscale-Route zu diesem
+    /// Port schon steht, BEVOR die erste echte Sprachausgabe (typischerweise
+    /// die Zwischenansage kurz nach dem Senden) sie braucht. Ohne das
+    /// scheiterte genau die allererste Anfrage pro Sitzung, waehrend sich die
+    /// Route gerade erst aufbaute, und fiel dann leise auf Piper zurueck
+    /// (live beobachtet 2026-09-10). Fehler hier sind irrelevant - es geht
+    /// nur ums "Anklopfen", nicht um eine echte Antwort.
+    private func warmUpEdgeTTSConnection() {
+        guard let baseURL = RemoteSettings.ttsBaseURL else { return }
+        Task {
+            var request = URLRequest(url: baseURL.appendingPathComponent("tts"))
+            request.timeoutInterval = 10
+            _ = try? await URLSession.shared.data(for: request)
+        }
     }
 
     func requestPermissions() async -> Bool {
