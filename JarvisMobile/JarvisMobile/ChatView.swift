@@ -202,6 +202,12 @@ struct ChatView: View {
             Spacer()
             Spacer()
         }
+        // Ohne contentShape faengt ein VStack ohne eigenen Hintergrund nur
+        // dort Taps ab, wo tatsaechlich Inhalt gerendert wird - die leeren
+        // Spacer-Flaechen (der Grossteil dieser Ansicht vor der ersten
+        // Nachricht) bleiben sonst tot fuers Tastatur-Schliessen-per-Tap.
+        .contentShape(Rectangle())
+        .onTapGesture { inputFocused = false }
     }
 
     private var messageList: some View {
@@ -226,6 +232,13 @@ struct ChatView: View {
             .onChange(of: isSending) { _, sending in
                 if sending { scrollToBottom(proxy, anchorID: "typing") }
             }
+            // Tastatur schliesst sich beim Antippen des Chatverlaufs (statt nur
+            // ueber den Zeilenumbruch-Button oder einen Tab-Wechsel, der bei
+            // offener Tastatur nicht zuverlaessig funktioniert - live gemeldet
+            // 2026-09-10) und zusaetzlich beim Scrollen, damit man ohne
+            // Umweg wieder an die unteren Tab-Symbole herankommt.
+            .scrollDismissesKeyboard(.immediately)
+            .onTapGesture { inputFocused = false }
         }
     }
 

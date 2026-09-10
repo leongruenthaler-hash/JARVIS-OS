@@ -42,11 +42,30 @@ struct APIClient {
         if let token = RemoteSettings.token {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
-        request.timeoutInterval = 90
+        // 300s statt 90s - ein agentischer OpenClaw-Auftrag mit mehreren
+        // Werkzeug-Aufrufen (z.B. Mails durchsuchen + Kalendereintraege
+        // anlegen) kann deutlich laenger dauern als eine einfache
+        // Chat-Antwort (live beobachtet 2026-09-09).
+        request.timeoutInterval = 300
         request.httpBody = try JSONEncoder().encode(body)
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try validate(response, data: data)
-        return try JSONDecoder().decode(T.self, from: data)
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validate(response, data: data)
+            return try JSONDecoder().decode(T.self, from: data)
+        } catch let error as URLError where error.code == .networkConnectionLost || error.code == .timedOut {
+            // Ein einmaliger stiller Retry - eine waehrend eines langen
+            // Auftrags abgerissene Verbindung (Tailscale-Hakler, kurzes
+            // Backgrounden) ist oft voruebergehend (live beobachtet
+            // 2026-09-09: "The network connection was lost" nach einer
+            // Mail+Kalender-Anfrage). Bleibt das Handy die GANZE Zeit
+            // gesperrt/im Hintergrund, killt iOS auch diesen Versuch - das
+            // ist eine Plattformgrenze, kein Bug, den ein Retry uebertuenchen
+            // koennte.
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validate(response, data: data)
+            return try JSONDecoder().decode(T.self, from: data)
+        }
     }
 
     private func makeURL(_ path: String) throws -> URL {
