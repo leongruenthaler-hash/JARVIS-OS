@@ -76,7 +76,6 @@ final class AppState: ObservableObject {
     /// `nil` means "not configured" - deliberately no built-in default, see ProductivityTracker.
     @Published private(set) var dailyUsageGoalMinutes: Double? = ProductivityTracker.dailyGoalMinutes()
     @Published var fastVoiceMode = UserDefaults.standard.object(forKey: "JarvisFastVoiceMode") as? Bool ?? true
-    @Published var selectedVoice = UserDefaults.standard.string(forKey: "JarvisEdgeVoice") ?? JarvisVoiceOption.killian.rawValue
     @Published var alwaysListenEnabled = UserDefaults.standard.object(forKey: "JarvisAlwaysListenEnabled") as? Bool ?? false
     // Sprecher-Verifikation beim Weckwort, siehe
     // plans/2026-08-10-jarvis-sprecher-verifikation-weckwort.md - nur wirksam,
@@ -91,8 +90,14 @@ final class AppState: ObservableObject {
     @Published var bootstrapStatus: String?
 
     let serverController = LocalServerController()
+    /// Chat/health talk to OpenClaw now instead of `serverController` (Phase 1
+    /// Meilenstein 1, "JarvisApp auf OpenClaw umstellen"-Plan, 2026-09-08).
+    /// `serverController` stays in place for now - TTS (Edge-TTS subprocess
+    /// bridge), live transcription, and the still-deferred domain features
+    /// (Mail/Photos/...) keep using it until their own milestones land.
+    let openClaw = OpenClawClient()
 
-    private lazy var ttsService = EdgeTTSService(controller: serverController)
+    private lazy var ttsService = OpenClawSpeechPlayer()
     private lazy var audioCaptureService = AudioCaptureService()
     private lazy var wakeWordListener = WakeWordListener()
     private var alwaysListenTask: Task<Void, Never>?
@@ -103,7 +108,7 @@ final class AppState: ObservableObject {
     private var keepListeningAfterGreeting = false
     @Published private(set) var autoListenEnabled = true
     private var isJarvisSpeaking = false
-    private var activeSpeechPlayer: StreamingSpeechPlayer?
+    private var activeSpeechPlayer: OpenClawSpeechPlayer?
     private var voicePerformanceMarks: [String: Date] = [:]
     private let voiceFeedbackSounds = VoiceFeedbackSoundPlayer()
     private var nextVoiceListenTask: Task<Void, Never>?
@@ -512,14 +517,6 @@ final class AppState: ObservableObject {
         }
     }
 
-    func saveSelectedVoiceToCore() async {
-        UserDefaults.standard.set(selectedVoice, forKey: "JarvisEdgeVoice")
-        do {
-            try await serverController.setVoice(selectedVoice)
-        } catch {
-            lastError = "Stimme wurde lokal gespeichert. Der Core übernimmt sie beim nächsten erfolgreichen Start."
-        }
-    }
 
     func applyAlwaysListenChange() async {
         if alwaysListenEnabled {
@@ -648,57 +645,21 @@ final class AppState: ObservableObject {
         composerDraft = ""
     }
 
+    /// Reduced to a simple health probe against OpenClaw (Phase 1 Meilenstein 1) - there
+    /// is no local process to bootstrap/spawn anymore, so the old venv/first-run-setup/
+    /// bootstrap-polling logic (previously most of this function) is gone entirely.
     func ensureServerConnected() async {
         guard !isBootstrapping else { return }
         isBootstrapping = true
         defer { isBootstrapping = false }
 
-        if await refreshStatus(startIfOffline: false) { return }
-
-        if let placeholderIssue = serverController.iCloudPlaceholderIssue() {
+        guard OpenClawSettings.isPaired else {
             status = .offline
-            lastError = placeholderIssue
+            lastError = "Noch nicht mit dem Mac Mini gekoppelt - bitte in den Einstellungen koppeln."
             return
         }
 
-        status = .offline
-        let isFirstTimeSetup = !serverController.venvPythonExists
-        if isFirstTimeSetup {
-            bootstrapStatus = "Einmalige Ersteinrichtung wird vorbereitet ..."
-        } else {
-            bootstrapStatus = "Ich starte den lokalen Core ..."
-        }
-        lastError = nil
-        _ = serverController.start()
-
-        // Non-first-time launches used to give up after 20s (40 x 500ms). That was too
-        // tight for the dependency-import check, which can legitimately take well past
-        // that under system load without being hung (see server-selfspawn-unreliable
-        // memory, Cause B) - 90s gives that room to finish while staying far short of
-        // first-time setup's own 15-minute budget for CLT/venv/pip work.
-        let maxAttempts = isFirstTimeSetup ? 1800 : 180
-        for _ in 0..<maxAttempts {
-            try? await Task.sleep(for: .milliseconds(500))
-            if let bootstrap = serverController.currentBootstrapStatus() {
-                bootstrapStatus = bootstrap.message
-                if bootstrap.stage == "error" {
-                    status = .offline
-                    lastError = bootstrap.message
-                    bootstrapStatus = nil
-                    return
-                }
-            }
-            if await refreshStatus(startIfOffline: false) {
-                lastError = nil
-                bootstrapStatus = nil
-                return
-            }
-        }
-
-        status = .offline
-        bootstrapStatus = nil
-        serverController.captureLaunchFailureDetail()
-        lastError = serverController.lastLaunchError ?? "Der lokale Core konnte nicht automatisch starten."
+        _ = await refreshStatus(startIfOffline: false)
     }
 
     private static let statusCallTimeFormatter: DateFormatter = {
@@ -722,18 +683,21 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// `models`/`privacyStatus`/`permissions` calls removed (Phase 1 Meilenstein 1) -
+    /// those are old-backend-only endpoints with no OpenClaw equivalent, backing views
+    /// (`ModelsView`/`PrivacyView`) that get hidden in Meilenstein 4. `includeScanStates`
+    /// similarly drops out once its only caller-features are hidden - kept as a no-op
+    /// parameter for now so call sites don't all need touching in this milestone.
     @discardableResult
     func refreshStatus(startIfOffline: Bool = true, includeScanStates: Bool = false) async -> Bool {
+        guard OpenClawSettings.isPaired else {
+            status = .offline
+            return false
+        }
         do {
-            let health = try await timedStatusCall("health") { try await serverController.health() }
+            let health = try await timedStatusCall("health") { try await openClaw.health() }
             status = health.ok ? .idle : .offline
-            modelStatus = try await timedStatusCall("models") { try await serverController.models() }
-            privacySummary = try await timedStatusCall("privacyStatus") { try await serverController.privacyStatus() }
-            permissions = try await timedStatusCall("permissions") { try await serverController.permissions() }
-            if includeScanStates {
-                try? await refreshScanStates()
-            }
-            lastError = nil
+            lastError = health.ok ? nil : "OpenClaw meldet einen Fehler."
             return health.ok
         } catch {
             status = .offline
@@ -763,13 +727,8 @@ final class AppState: ObservableObject {
 
         do {
             status = .responding
-            let answer = try await streamAndSpeakAnswer(question: trimmed, history: history, answerIndex: answerIndex)
-            let response = ChatResponse(
-                answer: answer,
-                source: modelStatus.provider,
-                model: modelStatus.activeModel
-            )
-            lastAnswerSource = modelLabel(from: response.source ?? modelStatus.provider, model: response.model ?? modelStatus.activeModel)
+            _ = try await streamAndSpeakAnswer(question: trimmed, history: history, answerIndex: answerIndex)
+            lastAnswerSource = modelLabel(from: "openclaw", model: "openclaw")
             keepListeningAfterGreeting = true
             status = .idle
         } catch {
@@ -998,7 +957,7 @@ final class AppState: ObservableObject {
         do {
             status = .responding
             markVoicePerformance("llmResponseStarted")
-            let answer = try await streamAndSpeakAnswer(
+            _ = try await streamAndSpeakAnswer(
                 question: finalUserText.isEmpty ? finalTranscript : finalUserText,
                 history: history,
                 answerIndex: answerIndex,
@@ -1010,12 +969,7 @@ final class AppState: ObservableObject {
                 }
             )
             markVoicePerformance("llmResponseFinished")
-            let response = ChatResponse(
-                answer: answer,
-                source: modelStatus.provider,
-                model: modelStatus.activeModel
-            )
-            lastAnswerSource = modelLabel(from: response.source ?? modelStatus.provider, model: response.model ?? modelStatus.activeModel)
+            lastAnswerSource = modelLabel(from: "openclaw", model: "openclaw")
             if !isAlwaysListenTurn {
                 keepListeningAfterGreeting = true
                 if shouldStopAfterThisTurn {
@@ -1803,6 +1757,13 @@ final class AppState: ObservableObject {
     /// upfront - e.g. command-handler responses that never stream text at all).
     /// `onTextChunk` mirrors any extra per-chunk bookkeeping the caller needs (e.g.
     /// `listenOnce`'s voice-state update while the assistant is still "thinking").
+    /// Chat call itself moved to OpenClaw (Phase 1 Meilenstein 1) - non-streaming, since
+    /// OpenClaw's `/v1/chat/completions` streaming support hasn't been verified (see
+    /// OpenClawClient.swift's doc comment). TTS still goes through the unchanged
+    /// `StreamingSpeechPlayer`/`serverController` Edge-TTS bridge (that's Meilenstein 2's
+    /// job) - the complete answer is fed through `IncrementalSentenceSplitter` in one
+    /// pass instead of incrementally per network chunk, so sentence-by-sentence speech
+    /// start still works, just no longer overlapping with network latency.
     private func streamAndSpeakAnswer(
         question: String,
         history: [[String: String]],
@@ -1816,41 +1777,34 @@ final class AppState: ObservableObject {
         }
 
         var sentenceSplitter = IncrementalSentenceSplitter()
-        let speechPlayer = StreamingSpeechPlayer(controller: serverController)
+        let speechPlayer = OpenClawSpeechPlayer()
         activeSpeechPlayer = speechPlayer
         speechPlayer.onEvent = { [weak self] event in self?.handleStreamingSpeechEvent(event) }
         var speechStarted = false
 
-        // Diskreter Modus (Phase E, Master-Plan 6.4): text-only, no TTS. Checked from
-        // the already-cached voiceMode (synced via refreshVoiceMode()/setVoiceMode())
-        // rather than waiting for the server's own voice_output_suppressed flag on the
-        // stream's final chunk - that only arrives after the full answer, too late to
-        // decide whether to start speaking the first sentence.
+        // Diskreter Modus (Phase E, Master-Plan 6.4): text-only, no TTS.
         let voiceOutputAllowed = voiceMode != "diskret"
 
-        let streamed = try await serverController.chatStream(question, history: history) { [weak self] chunk in
-            guard let self else { return }
-            self.messages[answerIndex].text.append(chunk)
-            onTextChunk?(chunk)
-            guard voiceOutputAllowed else { return }
-            for sentence in sentenceSplitter.feed(chunk) {
+        let response = try await openClaw.sendChat(question, history: history)
+        let answer = response.answer
+        messages[answerIndex].text = answer
+        onTextChunk?(answer)
+
+        if voiceOutputAllowed {
+            for sentence in sentenceSplitter.feed(answer) {
                 if !speechStarted {
                     speechStarted = true
-                    self.beginStreamingSpeech()
+                    beginStreamingSpeech()
                 }
                 speechPlayer.enqueue(sentence)
             }
-        }
-
-        if messages[answerIndex].text.isEmpty {
-            messages[answerIndex].text = streamed
-        }
-        if voiceOutputAllowed, let last = sentenceSplitter.flush() {
-            if !speechStarted {
-                speechStarted = true
-                beginStreamingSpeech()
+            if let last = sentenceSplitter.flush() {
+                if !speechStarted {
+                    speechStarted = true
+                    beginStreamingSpeech()
+                }
+                speechPlayer.enqueue(last)
             }
-            speechPlayer.enqueue(last)
         }
 
         if speechStarted {
@@ -2212,6 +2166,9 @@ final class AppState: ObservableObject {
 
     private func modelLabel(from provider: String, model: String) -> String {
         let normalized = provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized == "openclaw" {
+            return "Antwort über OpenClaw"
+        }
         if normalized == "openai" {
             return "Antwort über OpenAI • \(model)"
         }

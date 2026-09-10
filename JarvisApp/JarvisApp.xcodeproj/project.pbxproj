@@ -25,7 +25,6 @@
 		AFA7B1FEE1D440FDA11611BD /* WeatherService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BB589FFC6CB49BFB81F6B45 /* WeatherService.swift */; };
 		1D7B4FAEE7C845C595E694D7 /* ProductivityTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = D230151F7A564ED1A15C7540 /* ProductivityTracker.swift */; };
 		F92E41D4CED148F6BFE90541 /* IncrementalSentenceSplitter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12BA400734464153A152E833 /* IncrementalSentenceSplitter.swift */; };
-		040334C3C8D44C55B8438044 /* StreamingSpeechPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60732A47B2F44DF78EB935BF /* StreamingSpeechPlayer.swift */; };
 		61373F209BCE87C5BF20A705 /* JarvisVoiceState.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE444AB69D8A6A00DEE3C4E2 /* JarvisVoiceState.swift */; };
 		146B709D49504797B41164F8 /* WakeWordListener.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DA1257E9ED4C1297042F47 /* WakeWordListener.swift */; };
 		5FF6C3B78EF98E864A767111 /* MailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A2C1DABFBACBB2472B6D363 /* MailView.swift */; };
@@ -37,6 +36,11 @@
 		7565F6938579AAC278653159 /* JarvisAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B46CBAFAF3DB457C442D8FD3 /* JarvisAPIClient.swift */; };
 		B4566CA9F17C4309A5145759 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D4D9F07ACC146A7AA290861 /* KeychainStore.swift */; };
 		C615B91CFDEC42E6A636DB84 /* RemoteConnectionSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4E8E0B77E2241F9A6422944 /* RemoteConnectionSettings.swift */; };
+		CBBEF2D38990432EA2C623DA /* OpenClawSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 537414BDC8214724B7CD7B0A /* OpenClawSettings.swift */; };
+		DE50A5B7D5624A3FBAC4AEA5 /* OpenClawClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 094C3D22CF7841649CF6E8B5 /* OpenClawClient.swift */; };
+		50D618127E66F07F415753DB /* OpenClawTTSClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45A453D5E2CB7F9507E5162E /* OpenClawTTSClient.swift */; };
+		F9A2F194F880CA97B38364EF /* OpenClawSpeechPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AA413904806CF0BCB71A5BB /* OpenClawSpeechPlayer.swift */; };
+		F1674172B98247CC9389C2F5 /* PairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C20A2ABBCD74CBB994D3FC1 /* PairingView.swift */; };
 		9B3222560E60EFA286A779D5 /* PrivacyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85002DF6FCD359EC134EC4F9 /* PrivacyView.swift */; };
 		A967EE67784809B6D279BE80 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 992C4FC6091295CB38DABD5C /* AppState.swift */; };
 		AC88AFFB19BB65617496152F /* LocalServerController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30E64A9827D02FDF81834A79 /* LocalServerController.swift */; };
@@ -83,7 +87,6 @@
 		7BB589FFC6CB49BFB81F6B45 /* WeatherService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/JarvisApp/Core/WeatherService.swift; sourceTree = SOURCE_ROOT; };
 		D230151F7A564ED1A15C7540 /* ProductivityTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/JarvisApp/Core/ProductivityTracker.swift; sourceTree = SOURCE_ROOT; };
 		12BA400734464153A152E833 /* IncrementalSentenceSplitter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/JarvisApp/Core/IncrementalSentenceSplitter.swift; sourceTree = SOURCE_ROOT; };
-		60732A47B2F44DF78EB935BF /* StreamingSpeechPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/JarvisApp/Core/StreamingSpeechPlayer.swift; sourceTree = SOURCE_ROOT; };
 		AE444AB69D8A6A00DEE3C4E2 /* JarvisVoiceState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/JarvisApp/Core/JarvisVoiceState.swift; sourceTree = SOURCE_ROOT; };
 		C0DA1257E9ED4C1297042F47 /* WakeWordListener.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/JarvisApp/Core/WakeWordListener.swift; sourceTree = SOURCE_ROOT; };
 		6A2C1DABFBACBB2472B6D363 /* MailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MailView.swift; sourceTree = "<group>"; };
@@ -101,6 +104,11 @@
 		B46CBAFAF3DB457C442D8FD3 /* JarvisAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisAPIClient.swift; sourceTree = "<group>"; };
 		6D4D9F07ACC146A7AA290861 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		A4E8E0B77E2241F9A6422944 /* RemoteConnectionSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteConnectionSettings.swift; sourceTree = "<group>"; };
+		537414BDC8214724B7CD7B0A /* OpenClawSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawSettings.swift; sourceTree = "<group>"; };
+		094C3D22CF7841649CF6E8B5 /* OpenClawClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawClient.swift; sourceTree = "<group>"; };
+		45A453D5E2CB7F9507E5162E /* OpenClawTTSClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawTTSClient.swift; sourceTree = "<group>"; };
+		2AA413904806CF0BCB71A5BB /* OpenClawSpeechPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawSpeechPlayer.swift; sourceTree = "<group>"; };
+		6C20A2ABBCD74CBB994D3FC1 /* PairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingView.swift; sourceTree = "<group>"; };
 		CD87D845E1639C0D7F9C10A3 /* ModelsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelsView.swift; sourceTree = "<group>"; };
 		CE436B2B3FAF9DED68E8828A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		ECD6CEA34720D0375415009B /* ServerStatusCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerStatusCard.swift; sourceTree = "<group>"; };
@@ -188,6 +196,7 @@
 				FED92BDBA779BC8A1F4138B2 /* RootView.swift */,
 				760C71EFC090439CB0914410 /* DashboardView.swift */,
 				CE436B2B3FAF9DED68E8828A /* SettingsView.swift */,
+				6C20A2ABBCD74CBB994D3FC1 /* PairingView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -221,6 +230,10 @@
 				B46CBAFAF3DB457C442D8FD3 /* JarvisAPIClient.swift */,
 				6D4D9F07ACC146A7AA290861 /* KeychainStore.swift */,
 				A4E8E0B77E2241F9A6422944 /* RemoteConnectionSettings.swift */,
+				537414BDC8214724B7CD7B0A /* OpenClawSettings.swift */,
+				094C3D22CF7841649CF6E8B5 /* OpenClawClient.swift */,
+				45A453D5E2CB7F9507E5162E /* OpenClawTTSClient.swift */,
+				2AA413904806CF0BCB71A5BB /* OpenClawSpeechPlayer.swift */,
 				2805D3602E78FDB8A2D88F3B /* JarvisModels.swift */,
 					3F96930612F747DFA5C63B67 /* MemoryCoreLayout.swift */,
 					370756B3665D46F78BA83C51 /* MemorySynapsePulse.swift */,
@@ -231,7 +244,6 @@
 				AE444AB69D8A6A00DEE3C4E2 /* JarvisVoiceState.swift */,
 				C0DA1257E9ED4C1297042F47 /* WakeWordListener.swift */,
 				12BA400734464153A152E833 /* IncrementalSentenceSplitter.swift */,
-				60732A47B2F44DF78EB935BF /* StreamingSpeechPlayer.swift */,
 				380F1B7481894FA3941E51D4 /* SystemMonitor.swift */,
 				7BB589FFC6CB49BFB81F6B45 /* WeatherService.swift */,
 				D230151F7A564ED1A15C7540 /* ProductivityTracker.swift */,
@@ -395,6 +407,11 @@
 				7565F6938579AAC278653159 /* JarvisAPIClient.swift in Sources */,
 				B4566CA9F17C4309A5145759 /* KeychainStore.swift in Sources */,
 				C615B91CFDEC42E6A636DB84 /* RemoteConnectionSettings.swift in Sources */,
+				CBBEF2D38990432EA2C623DA /* OpenClawSettings.swift in Sources */,
+				DE50A5B7D5624A3FBAC4AEA5 /* OpenClawClient.swift in Sources */,
+				50D618127E66F07F415753DB /* OpenClawTTSClient.swift in Sources */,
+				F9A2F194F880CA97B38364EF /* OpenClawSpeechPlayer.swift in Sources */,
+				F1674172B98247CC9389C2F5 /* PairingView.swift in Sources */,
 				C4B7BAE04211F925F46CE89E /* JarvisModels.swift in Sources */,
 				AC88AFFB19BB65617496152F /* LocalServerController.swift in Sources */,
 				90890DC4E684B2478412645D /* JarvisVoiceOrb.swift in Sources */,
@@ -403,7 +420,6 @@
 				AFA7B1FEE1D440FDA11611BD /* WeatherService.swift in Sources */,
 				1D7B4FAEE7C845C595E694D7 /* ProductivityTracker.swift in Sources */,
 				F92E41D4CED148F6BFE90541 /* IncrementalSentenceSplitter.swift in Sources */,
-				040334C3C8D44C55B8438044 /* StreamingSpeechPlayer.swift in Sources */,
 				61373F209BCE87C5BF20A705 /* JarvisVoiceState.swift in Sources */,
 				146B709D49504797B41164F8 /* WakeWordListener.swift in Sources */,
 				D68C167C2C437B05A54BC24C /* ChatView.swift in Sources */,

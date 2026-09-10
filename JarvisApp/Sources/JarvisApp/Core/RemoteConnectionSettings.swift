@@ -16,9 +16,18 @@ enum RemoteConnectionSettings {
     private static let keychainService = "com.leon.jarvis.remote"
     private static let keychainAccount = "remote-token"
 
-    static var isEnabled: Bool {
-        UserDefaults.standard.bool(forKey: enabledKey)
-    }
+    /// Hardcoded `false` (Phase 1 Meilenstein 1, "JarvisApp auf OpenClaw
+    /// umstellen"-Plan, 2026-09-08): the local/remote toggle is retired -
+    /// JarvisApp always talks to OpenClaw now (see OpenClawSettings.swift).
+    /// Kept as a computed override instead of deleting this type outright so
+    /// any still-untouched call site (there are a few, cleaned up in
+    /// Meilenstein 4/5) reliably falls through to the harmless local-token-
+    /// file branch in JarvisAPIClient.loadToken() instead of reading a
+    /// leftover Keychain entry from earlier remote-mode testing - that used
+    /// to trigger an unprompted macOS Keychain password dialog on every
+    /// launch once remote mode had ever been turned on, with no UI left to
+    /// turn it back off (live-caught 2026-09-08).
+    static var isEnabled: Bool { false }
 
     /// Tailscale-IP oder MagicDNS-Name des Mac Mini, z.B. "100.115.128.74" - ohne
     /// Schema und ohne Port.

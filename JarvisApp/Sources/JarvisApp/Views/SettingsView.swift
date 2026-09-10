@@ -10,11 +10,7 @@ struct SettingsView: View {
     @State private var weatherCityDraft = ""
     @State private var usageGoalDraft = ""
     @State private var voiceEnrollmentPrompt = ""
-    @AppStorage(RemoteConnectionSettings.enabledKey) private var remoteModeEnabled = false
-    @AppStorage(RemoteConnectionSettings.hostKey) private var remoteHost = ""
-    @State private var remoteTokenDraft = ""
-    @State private var remoteTokenSaved = false
-    @State private var remoteTestResult: (ok: Bool, message: String)?
+    @State private var showPairingSheet = false
 
     var body: some View {
         ScrollView {
@@ -26,8 +22,7 @@ struct SettingsView: View {
                 designSection
                 voiceSection
                 openAISection
-                remoteSection
-                coreSection
+                connectionSection
                 licensesSection
             }
             .padding(28)
@@ -36,6 +31,9 @@ struct SettingsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(LiquidGlassBackground())
         .navigationTitle("Einstellungen")
+        .sheet(isPresented: $showPairingSheet) {
+            NavigationStack { PairingView() }
+        }
         .onAppear {
             if weatherCityDraft.isEmpty {
                 weatherCityDraft = appState.weatherCityName
@@ -487,17 +485,9 @@ struct SettingsView: View {
 
     private var voiceSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            sectionHeader("Stimme", subtitle: "Kostenlose Edge-TTS-Stimmen, live verglichen und ausgewählt - kein API-Schlüssel nötig.")
-
-            Picker("Stimme", selection: $appState.selectedVoice) {
-                ForEach(JarvisVoiceOption.allCases) { option in
-                    Text(option.title).tag(option.rawValue)
-                }
-            }
-            .pickerStyle(.segmented)
-            .onChange(of: appState.selectedVoice) { _, _ in
-                Task { await appState.saveSelectedVoiceToCore() }
-            }
+            sectionHeader("Stimme", subtitle: "Kostenlose Edge-TTS-Stimme über den Mac-Mini-Proxy - kein API-Schlüssel nötig.")
+            Label("Killian", systemImage: "waveform")
+                .font(.headline)
         }
         .liquidGlassPanel(tint: .cyan)
     }
@@ -567,137 +557,40 @@ struct SettingsView: View {
         .liquidGlassPanel(tint: .orange)
     }
 
-    private var remoteSection: some View {
+    private var connectionSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             sectionHeader(
-                "Fernbetrieb (Mac Mini)",
-                subtitle: "Statt eines eigenen lokalen Cores kann dieser Mac sich zu einem 24/7 laufenden Jarvis-Server verbinden (z. B. dem Mac Mini, erreichbar über Tailscale). Kamera, Bildschirm und Live-Mikrofon bleiben trotzdem an diesem Mac."
+                "Verbindung (OpenClaw)",
+                subtitle: "Jarvis läuft 24/7 auf dem Mac Mini (OpenClaw), erreichbar über Tailscale - dieser Mac ist nur noch die Oberfläche, kein eigener lokaler Core mehr."
             )
-
-            Toggle(isOn: $remoteModeEnabled) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Fernbetrieb statt eigenem lokalen Core")
-                        .font(.headline)
-                    Text("Gedächtnis, Gespräch und Modell-Routing laufen dann auf dem Fernserver statt auf diesem Mac.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .onChange(of: remoteModeEnabled) { _, _ in
-                remoteTestResult = nil
-                Task { await reconnectAfterRemoteModeChange() }
-            }
-
-            Divider().opacity(0.4)
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Mac-Mini-Adresse")
-                    .font(.headline)
-                Text("Tailscale-IP oder MagicDNS-Name, ohne \"http://\" und ohne Port.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                TextField("z. B. 100.115.128.74", text: $remoteHost)
-                    .textFieldStyle(.roundedBorder)
-                    .disabled(!remoteModeEnabled)
-                    .frame(maxWidth: 320)
-            }
-
-            Divider().opacity(0.4)
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Token")
-                    .font(.headline)
-                Text(remoteTokenSaved ? "Token ist in der macOS-Keychain gespeichert." : "Noch kein Token gespeichert.")
-                    .font(.callout)
-                    .foregroundStyle(remoteTokenSaved ? Color.secondary : Color.orange)
-                Text("Auf dem Mac Mini per Terminal auslesen: cat local_server.token (im Repo-Ordner).")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                SecureField("Token vom Mac Mini", text: $remoteTokenDraft)
-                    .textFieldStyle(.roundedBorder)
-                    .disabled(!remoteModeEnabled)
-                    .frame(maxWidth: 320)
-
-                HStack(spacing: 10) {
-                    Button("Token speichern") {
-                        RemoteConnectionSettings.token = remoteTokenDraft
-                        remoteTokenDraft = ""
-                        remoteTokenSaved = RemoteConnectionSettings.token != nil
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!remoteModeEnabled || remoteTokenDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                    if remoteTokenSaved {
-                        Button(role: .destructive) {
-                            RemoteConnectionSettings.token = nil
-                            remoteTokenSaved = false
-                        } label: {
-                            Label("Token löschen", systemImage: "trash")
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                }
-            }
-
-            Divider().opacity(0.4)
-
-            HStack(spacing: 10) {
-                Button {
-                    Task { await testRemoteConnection() }
-                } label: {
-                    Label("Verbindung testen", systemImage: "network")
-                }
-                .buttonStyle(.bordered)
-                .disabled(!remoteModeEnabled)
-
-                if let remoteTestResult {
-                    Label(remoteTestResult.message, systemImage: remoteTestResult.ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                        .font(.callout)
-                        .foregroundStyle(remoteTestResult.ok ? .green : .orange)
-                }
-            }
-        }
-        .onAppear {
-            remoteTokenSaved = RemoteConnectionSettings.token != nil
-        }
-        .liquidGlassPanel(tint: .indigo)
-    }
-
-    private var coreSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            sectionHeader("Lokaler Jarvis-Core", subtitle: "Verbindung zum Python-Core und lokalen Modell.")
 
             HStack(spacing: 12) {
                 statusBadge(
-                    title: "Verbindung",
-                    value: appState.serverController.isRunning ? "Verbunden" : "Nicht verbunden",
-                    symbol: appState.serverController.isRunning ? "checkmark.circle.fill" : "exclamationmark.triangle.fill",
-                    tint: appState.serverController.isRunning ? .green : .orange
+                    title: "Kopplung",
+                    value: OpenClawSettings.isPaired ? "Gekoppelt" : "Nicht gekoppelt",
+                    symbol: OpenClawSettings.isPaired ? "checkmark.circle.fill" : "exclamationmark.triangle.fill",
+                    tint: OpenClawSettings.isPaired ? .green : .orange
                 )
                 statusBadge(
-                    title: "Modell",
-                    value: appState.modelStatus.activeModel,
-                    symbol: "cpu.fill",
-                    tint: .indigo
+                    title: "Verbindung",
+                    value: appState.status == .offline ? "Nicht verbunden" : "Verbunden",
+                    symbol: appState.status == .offline ? "exclamationmark.triangle.fill" : "checkmark.circle.fill",
+                    tint: appState.status == .offline ? .orange : .green
                 )
             }
 
             HStack(spacing: 10) {
                 Button {
-                    Task { await appState.ensureServerConnected() }
+                    showPairingSheet = true
                 } label: {
-                    Label("Verbindung neu aufbauen", systemImage: "arrow.clockwise")
+                    Label(OpenClawSettings.isPaired ? "Kopplung bearbeiten" : "Jetzt koppeln", systemImage: "link")
                 }
                 .buttonStyle(.borderedProminent)
 
                 Button {
-                    Task {
-                        await appState.serverController.stop()
-                        await appState.ensureServerConnected()
-                    }
+                    Task { await appState.ensureServerConnected() }
                 } label: {
-                    Label("Core neu starten", systemImage: "power")
+                    Label("Verbindung neu aufbauen", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.bordered)
             }
@@ -753,20 +646,6 @@ struct SettingsView: View {
         let trimmed = usageGoalDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let value = Double(trimmed), value > 0 else { return }
         appState.updateDailyUsageGoal(value)
-    }
-
-    private func testRemoteConnection() async {
-        do {
-            let health = try await appState.serverController.health()
-            remoteTestResult = (true, "Verbunden: Provider \(health.provider), Modell \(health.activeModel)")
-        } catch {
-            remoteTestResult = (false, "Fehlgeschlagen: \(error.localizedDescription)")
-        }
-    }
-
-    private func reconnectAfterRemoteModeChange() async {
-        appState.serverController.stopServerProcessOnly()
-        await appState.ensureServerConnected()
     }
 
     private func runVoiceEnrollment() async {
