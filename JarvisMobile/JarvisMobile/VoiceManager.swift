@@ -580,24 +580,11 @@ final class VoiceManager: NSObject, ObservableObject {
 
         // Edge-TTS (de-DE-KillianNeural) ist die gewuenschte Stimme - Apples
         // Stimme bleibt reiner Rueckfall, falls der Mac-Mini-Proxy nicht
-        // erreichbar ist, nicht die bevorzugte Wahl.
-        do {
-            try await speakEdgeTTSPipelined(trimmed)
-        } catch {
-            // Die allererste Anfrage an einen frisch benutzten Port ueber
-            // Tailscale kann noch scheitern, waehrend die Route sich
-            // aufbaut (live beobachtet 2026-09-10, betraf nur die
-            // Zwischenansage direkt nach App-/Gespraechsstart) - deshalb
-            // still auf Piper zurueckfallen statt das jedes Mal als Fehler
-            // anzuzeigen; nur wenn AUCH Piper scheitert, ist das wirklich
-            // meldenswert.
-            if let piperAudio = await synthesizePiperAudio(trimmed) {
-                await playAudioData(piperAudio)
-            } else {
-                errorMessage = "Edge-TTS fehlgeschlagen (\(error)) - nutze Apple-Stimme."
-                await speakWithAppleVoice(trimmed)
-            }
-        }
+        // erreichbar ist, nicht die bevorzugte Wahl. Fehler pro Satz werden
+        // INNERHALB von speakEdgeTTSPipelined behandelt (nur der jeweils
+        // NOCH NICHT gesprochene Rest faellt auf Piper zurueck), deshalb
+        // kein Catch mehr hier noetig.
+        await speakEdgeTTSPipelined(trimmed)
 
         isSpeaking = false
     }
@@ -614,7 +601,7 @@ final class VoiceManager: NSObject, ObservableObject {
     /// die komplette Antwort auf Piper zurueck (nimmt in Kauf, dass bereits
     /// gesprochene Saetze dann nochmal kommen - seltener Fall, nicht die
     /// Komplexitaet eines Teil-Resumes wert).
-    private func speakEdgeTTSPipelined(_ text: String) async throws {
+    private func speakEdgeTTSPipelined(_ text: String) async {
         let sentences = Self.splitIntoSentences(text)
         guard !sentences.isEmpty else { return }
 
@@ -622,7 +609,27 @@ final class VoiceManager: NSObject, ObservableObject {
             try await EdgeTTS.synthesize(text: sentences[0], voice: Self.edgeVoiceName)
         }
         for index in sentences.indices {
-            let audioData = try await nextSynthesis!.value
+            let audioData: Data
+            do {
+                audioData = try await nextSynthesis!.value
+            } catch {
+                // NUR der ab hier noch nicht gesprochene Rest faellt auf
+                // Piper zurueck - vorher fiel bei einem Fehler mitten in
+                // einer laengeren Antwort die GESAMTE Antwort zurueck, was
+                // sich wie ein Sprung von Killian mitten im Satz zurueck
+                // zur alten Stimme UND ein Neuanfang von vorne anhoerte
+                // (live gemeldet 2026-09-10). Piper-Fehler selbst werden
+                // hier bewusst verschluckt (still auf Apples Stimme
+                // zurueckfallen) statt eine Fehlermeldung zu zeigen -
+                // gleiche Begruendung wie beim allerersten Satz oben.
+                let remaining = sentences[index...].joined(separator: " ")
+                if let piperAudio = await synthesizePiperAudio(remaining) {
+                    await playAudioData(piperAudio)
+                } else {
+                    await speakWithAppleVoice(remaining)
+                }
+                return
+            }
             if index + 1 < sentences.count {
                 let nextSentence = sentences[index + 1]
                 nextSynthesis = Task {
