@@ -526,15 +526,17 @@ final class VoiceManager: NSObject, ObservableObject {
     private static let edgeVoiceName = "de-DE-KillianNeural"
 
     /// Speaks Jarvis's reply aloud - tries three tiers in order:
-    /// 1. PiperVoiceEngine (on-device, no network at all - the reliable
-    ///    default per the user's explicit request 2026-09-08, after the
-    ///    direct-to-Microsoft and Mac-Mini-proxy Edge-TTS paths both proved
-    ///    too fragile: Microsoft's bot detection blocked the former, the
-    ///    latter kept failing over Tailscale despite real debugging effort -
-    ///    macOS firewall permissions, buffered logs, etc.).
-    /// 2. Edge-TTS via the Mac Mini proxy (kept as a safety net - should
-    ///    essentially never be reached, since PiperVoiceEngine only returns
-    ///    nil if the bundled model resources are somehow missing).
+    /// 1. Edge-TTS via the Mac Mini proxy (de-DE-KillianNeural) - promoted
+    ///    back to first choice 2026-09-10 after the user explicitly found
+    ///    the on-device Piper voice too robotic and confirmed network
+    ///    dependency is an acceptable tradeoff for better sound quality.
+    ///    (Earlier, 2026-09-08, this was demoted below Piper because both
+    ///    the direct-to-Microsoft and Mac-Mini-proxy paths were failing at
+    ///    the time - bot detection blocked the former, Tailscale
+    ///    reachability issues broke the latter. The proxy is confirmed
+    ///    working again now.)
+    /// 2. PiperVoiceEngine (on-device, no network - fallback if the Mac
+    ///    Mini/proxy isn't reachable).
     /// 3. Apple's on-device synthesizer (always available, worst-sounding
     ///    but never fails outright).
     /// Awaits real completion (see `speakContinuation`/`edgePlaybackContinuation`
@@ -558,13 +560,23 @@ final class VoiceManager: NSObject, ObservableObject {
         try? AVAudioSession.sharedInstance().setActive(true)
         isSpeaking = true
 
-        if let piperAudio = await synthesizePiperAudio(trimmed) {
-            await playAudioData(piperAudio)
-        } else {
-            do {
-                let audioData = try await EdgeTTS.synthesize(text: trimmed, voice: Self.edgeVoiceName)
-                await playAudioData(audioData)
-            } catch {
+        // Edge-TTS (de-DE-KillianNeural) ist die gewuenschte Stimme - Apples
+        // Stimme bleibt reiner Rueckfall, falls der Mac-Mini-Proxy nicht
+        // erreichbar ist, nicht die bevorzugte Wahl.
+        do {
+            let audioData = try await EdgeTTS.synthesize(text: trimmed, voice: Self.edgeVoiceName)
+            await playAudioData(audioData)
+        } catch {
+            // Die allererste Anfrage an einen frisch benutzten Port ueber
+            // Tailscale kann noch scheitern, waehrend die Route sich
+            // aufbaut (live beobachtet 2026-09-10, betraf nur die
+            // Zwischenansage direkt nach App-/Gespraechsstart) - deshalb
+            // still auf Piper zurueckfallen statt das jedes Mal als Fehler
+            // anzuzeigen; nur wenn AUCH Piper scheitert, ist das wirklich
+            // meldenswert.
+            if let piperAudio = await synthesizePiperAudio(trimmed) {
+                await playAudioData(piperAudio)
+            } else {
                 errorMessage = "Edge-TTS fehlgeschlagen (\(error)) - nutze Apple-Stimme."
                 await speakWithAppleVoice(trimmed)
             }
