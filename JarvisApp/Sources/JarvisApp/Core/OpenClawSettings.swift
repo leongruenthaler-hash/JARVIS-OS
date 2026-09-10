@@ -67,4 +67,27 @@ enum OpenClawSettings {
         guard !trimmedHost.isEmpty else { return nil }
         return URL(string: "http://\(trimmedHost):18790")
     }
+
+    /// Separate token for the Mac Mini's standalone file-search proxy
+    /// (scripts/files_proxy_server.py, port 18792) - replaces the old backend's
+    /// /api/files/* endpoints (2026-09-10, "Dateien" Fachbereich Migration).
+    static var filesToken: String? {
+        get { KeychainStore.read(service: keychainService, account: filesKeychainAccount) }
+        set {
+            if let newValue, !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                KeychainStore.save(newValue, service: keychainService, account: filesKeychainAccount)
+            } else {
+                KeychainStore.delete(service: keychainService, account: filesKeychainAccount)
+            }
+        }
+    }
+    private static let filesKeychainAccount = "files-proxy-token"
+
+    /// Same Mac Mini host as `baseURL`, different port - see
+    /// scripts/files_proxy_server.py::PORT.
+    static var filesBaseURL: URL? {
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedHost.isEmpty else { return nil }
+        return URL(string: "http://\(trimmedHost):18792")
+    }
 }

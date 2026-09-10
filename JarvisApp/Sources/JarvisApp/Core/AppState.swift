@@ -1042,8 +1042,12 @@ final class AppState: ObservableObject {
         mailBackgroundProgress = bundle.mailBackground
         photoScanProgress = bundle.photos
         photoVisionProgress = bundle.photoVision
-        fileScanProgress = bundle.files
         modelPullProgress = bundle.modelPull
+        // Dateien kommen jetzt vom eigenen Proxy (scripts/files_proxy_server.py,
+        // 2026-09-10), nicht mehr aus dem gemeinsamen Bundle des alten Backends -
+        // try? statt throws, damit ein (noch) nicht gekoppelter Datei-Proxy nicht
+        // das Polling fuer Mail/Fotos/Modell-Download mit abreissen laesst.
+        fileScanProgress = (try? await OpenClawFilesClient().status()) ?? fileScanProgress
     }
 
     func pullModel(_ model: String) async {
@@ -1316,13 +1320,12 @@ final class AppState: ObservableObject {
     }
 
     func startFileIndexScan() async {
-        await ensureServerConnected()
         fileIsLoading = true
         fileScanProgress.status = .preparing
         fileScanProgress.currentLabel = "Dateiindex wird vorbereitet."
         defer { fileIsLoading = false }
         do {
-            fileScanProgress = try await serverController.startFileIndexScan()
+            fileScanProgress = try await OpenClawFilesClient().startScan()
             startScanPolling()
             fileResult = fileSummary(from: fileScanProgress)
         } catch {
@@ -1338,16 +1341,15 @@ final class AppState: ObservableObject {
             fileResult = "Wonach soll Jarvis suchen?"
             return
         }
-        await ensureServerConnected()
         fileIsLoading = true
         defer { fileIsLoading = false }
         do {
-            let payload = try await serverController.searchFiles(query: cleanQuery)
+            let payload = try await OpenClawFilesClient().search(query: cleanQuery)
             lastFileSearchQuery = payload.query
             fileSearchText = payload.query
             fileSearchResults = payload.results
             fileResult = payload.message
-            await refreshScanStatesSafely()
+            fileScanProgress = (try? await OpenClawFilesClient().status()) ?? fileScanProgress
         } catch {
             fileResult = "Dateisuche fehlgeschlagen. Die Ordnersuche war bockig."
         }
@@ -1361,25 +1363,22 @@ final class AppState: ObservableObject {
             fileResult = "Suchbegriff oder Zielordner fehlt. Ohne das wird's schwierig."
             return
         }
-        await ensureServerConnected()
         fileIsLoading = true
         defer { fileIsLoading = false }
         do {
-            let message = try await serverController.moveFileSearchResults(query: cleanQuery, targetFolder: cleanTarget)
+            let message = try await OpenClawFilesClient().moveSearchResults(query: cleanQuery, targetFolder: cleanTarget)
             fileResult = message
             await searchFilesInIndex(cleanQuery)
-            await refreshScanStatesSafely()
         } catch {
             fileResult = "Dateien konnten nicht verschoben werden. Sie wollten wohl bleiben."
         }
     }
 
     func resetFileIndex() async {
-        await ensureServerConnected()
         fileIsLoading = true
         defer { fileIsLoading = false }
         do {
-            fileScanProgress = try await serverController.resetFileIndex()
+            fileScanProgress = try await OpenClawFilesClient().resetIndex()
             fileResult = "Dateiindex zurückgesetzt."
             fileSearchResults = []
             lastFileSearchQuery = ""

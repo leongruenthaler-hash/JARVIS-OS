@@ -14,6 +14,8 @@ struct PairingView: View {
     @State private var isTesting = false
     @State private var ttsTokenDraft = ""
     @State private var ttsTokenSaved = OpenClawSettings.ttsToken != nil
+    @State private var filesTokenDraft = ""
+    @State private var filesTokenSaved = OpenClawSettings.filesToken != nil
 
     var body: some View {
         ScrollView {
@@ -101,6 +103,43 @@ struct PairingView: View {
                                 Button(role: .destructive) {
                                     OpenClawSettings.ttsToken = nil
                                     ttsTokenSaved = false
+                                } label: {
+                                    Label("Token löschen", systemImage: "trash")
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                    }
+
+                    Divider().opacity(0.4)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Datei-Proxy")
+                            .font(.headline)
+                        Text(filesTokenSaved ? "Token ist in der macOS-Keychain gespeichert." : "Noch kein Token gespeichert - Dateisuche in JarvisApp bleibt solange offline.")
+                            .font(.callout)
+                            .foregroundStyle(filesTokenSaved ? Color.secondary : Color.orange)
+                        Text("Auf dem Mac Mini im Terminal ausgegeben, sobald scripts/files_proxy_server.py läuft.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        SecureField("Datei-Proxy-Token vom Mac Mini", text: $filesTokenDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 320)
+
+                        HStack(spacing: 10) {
+                            Button("Token speichern") {
+                                OpenClawSettings.filesToken = filesTokenDraft
+                                filesTokenDraft = ""
+                                filesTokenSaved = OpenClawSettings.filesToken != nil
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(filesTokenDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                            if filesTokenSaved {
+                                Button(role: .destructive) {
+                                    OpenClawSettings.filesToken = nil
+                                    filesTokenSaved = false
                                 } label: {
                                     Label("Token löschen", systemImage: "trash")
                                 }
