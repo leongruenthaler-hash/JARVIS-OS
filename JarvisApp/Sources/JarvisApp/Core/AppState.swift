@@ -1037,17 +1037,21 @@ final class AppState: ObservableObject {
     }
 
     func refreshScanStates() async throws {
+        // Dateien ZUERST und unabhaengig vom alten Bundle abrufen - sonst wuerde
+        // ein (auf diesem Mac aktuell unerreichbarer) altes Backend das gesamte
+        // Polling inklusive der Datei-Fortschrittsanzeige mit sich reissen, noch
+        // bevor der eigene Datei-Proxy ueberhaupt gefragt wird (live beobachtet
+        // 2026-09-10: die Dateisuche funktionierte, aber "Scan-Status konnte
+        // nicht geladen werden" erschien trotzdem bei jedem Poll, weil diese
+        // Funktion vorher schon beim alten `serverController.scanStatus()` warf).
+        fileScanProgress = (try? await OpenClawFilesClient().status()) ?? fileScanProgress
+
         let bundle = try await serverController.scanStatus()
         mailScanProgress = bundle.mailScan
         mailBackgroundProgress = bundle.mailBackground
         photoScanProgress = bundle.photos
         photoVisionProgress = bundle.photoVision
         modelPullProgress = bundle.modelPull
-        // Dateien kommen jetzt vom eigenen Proxy (scripts/files_proxy_server.py,
-        // 2026-09-10), nicht mehr aus dem gemeinsamen Bundle des alten Backends -
-        // try? statt throws, damit ein (noch) nicht gekoppelter Datei-Proxy nicht
-        // das Polling fuer Mail/Fotos/Modell-Download mit abreissen laesst.
-        fileScanProgress = (try? await OpenClawFilesClient().status()) ?? fileScanProgress
     }
 
     func pullModel(_ model: String) async {

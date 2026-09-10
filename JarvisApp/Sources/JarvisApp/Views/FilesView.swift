@@ -17,8 +17,15 @@ struct FilesView: View {
         ("Sonstiges", "tray.full.fill")
     ]
 
+    /// War frueher an appState.permissions["files"] gebunden (ein
+    /// eigenstaendiger Consent-Schalter, der ueber den alten Backend
+    /// verwaltet wurde). Seit der Migration auf den eigenen Datei-Proxy
+    /// (2026-09-10) ist das Eintragen des Proxy-Tokens selbst der
+    /// Zustimmungs-Schritt - der alte Schalter blieb sonst permanent
+    /// "blockiert", weil er einen inzwischen unerreichbaren alten Backend
+    /// braucht, unabhaengig davon, ob der Datei-Proxy laengst laeuft.
     private var filesAllowed: Bool {
-        appState.permissions["files"]?.allowed ?? false
+        OpenClawSettings.filesToken != nil
     }
 
     var body: some View {
@@ -78,13 +85,13 @@ struct FilesView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(filesAllowed ? "Datei-Berechtigung aktiv" : "Datei-Berechtigung ist blockiert")
                     .font(.headline)
-                Text(filesAllowed ? "Jarvis darf erlaubte lokale Ordner lesen. Verschieben, Kopieren oder Löschen wird vorher bestätigt." : "Aktiviere Dateien in der Datenschutz-Seite, bevor Jarvis lokale Ordner scannt oder Dateiaktionen vorbereitet.")
+                Text(filesAllowed ? "Jarvis darf erlaubte lokale Ordner lesen. Verschieben, Kopieren oder Löschen wird vorher bestätigt." : "Trag das Datei-Proxy-Token in den Einstellungen ein, bevor Jarvis lokale Ordner scannt oder Dateiaktionen vorbereitet.")
                     .foregroundStyle(.secondary)
             }
             Spacer()
             if !filesAllowed {
-                Button("Datenschutz öffnen") {
-                    appState.selectedSection = .privacy
+                Button("Einstellungen öffnen") {
+                    appState.selectedSection = .settings
                 }
                 .buttonStyle(.borderedProminent)
             }
