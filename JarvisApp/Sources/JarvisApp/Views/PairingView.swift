@@ -16,6 +16,8 @@ struct PairingView: View {
     @State private var ttsTokenSaved = OpenClawSettings.ttsToken != nil
     @State private var filesTokenDraft = ""
     @State private var filesTokenSaved = OpenClawSettings.filesToken != nil
+    @State private var remoteTokenDraft = ""
+    @State private var remoteTokenSaved = RemoteConnectionSettings.token != nil
 
     var body: some View {
         ScrollView {
@@ -103,6 +105,43 @@ struct PairingView: View {
                                 Button(role: .destructive) {
                                     OpenClawSettings.ttsToken = nil
                                     ttsTokenSaved = false
+                                } label: {
+                                    Label("Token löschen", systemImage: "trash")
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                    }
+
+                    Divider().opacity(0.4)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Alter Backend (Fernbetrieb)")
+                            .font(.headline)
+                        Text(remoteTokenSaved ? "Token ist in der macOS-Keychain gespeichert." : "Ohne Token bleiben noch nicht migrierte Bereiche (Mail, Kalender, Fotos, Modell-Download) auf diesem Mac unerreichbar, solange JarvisApp nicht auf dem Mac Mini selbst laeuft.")
+                            .font(.callout)
+                            .foregroundStyle(remoteTokenSaved ? Color.secondary : Color.orange)
+                        Text("Auf dem Mac Mini in der Datei local_server.token im Projektordner zu finden (alter Backend, nicht OpenClaw).")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        SecureField("Fernbetrieb-Token vom Mac Mini", text: $remoteTokenDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 320)
+
+                        HStack(spacing: 10) {
+                            Button("Token speichern") {
+                                RemoteConnectionSettings.token = remoteTokenDraft
+                                remoteTokenDraft = ""
+                                remoteTokenSaved = RemoteConnectionSettings.token != nil
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(remoteTokenDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                            if remoteTokenSaved {
+                                Button(role: .destructive) {
+                                    RemoteConnectionSettings.token = nil
+                                    remoteTokenSaved = false
                                 } label: {
                                     Label("Token löschen", systemImage: "trash")
                                 }

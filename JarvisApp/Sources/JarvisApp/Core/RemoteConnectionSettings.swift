@@ -11,28 +11,30 @@ import Foundation
 /// macOS Keychain - never in UserDefaults/config.json, same reasoning as
 /// push_notify.py's ntfy-topic-in-its-own-file pattern on the backend side.
 enum RemoteConnectionSettings {
-    static let enabledKey = "JarvisRemoteModeEnabled"
-    static let hostKey = "JarvisRemoteHost"
     private static let keychainService = "com.leon.jarvis.remote"
     private static let keychainAccount = "remote-token"
 
-    /// Hardcoded `false` (Phase 1 Meilenstein 1, "JarvisApp auf OpenClaw
-    /// umstellen"-Plan, 2026-09-08): the local/remote toggle is retired -
-    /// JarvisApp always talks to OpenClaw now (see OpenClawSettings.swift).
-    /// Kept as a computed override instead of deleting this type outright so
-    /// any still-untouched call site (there are a few, cleaned up in
-    /// Meilenstein 4/5) reliably falls through to the harmless local-token-
-    /// file branch in JarvisAPIClient.loadToken() instead of reading a
-    /// leftover Keychain entry from earlier remote-mode testing - that used
-    /// to trigger an unprompted macOS Keychain password dialog on every
-    /// launch once remote mode had ever been turned on, with no UI left to
-    /// turn it back off (live-caught 2026-09-08).
-    static var isEnabled: Bool { false }
+    /// Kein eigenes Bool-Flag mehr (Phase 1 Meilenstein 1 hatte es hart auf
+    /// `false` gesetzt, weil ein STALES `true` in UserDefaults - ohne
+    /// zugehoerige gueltige Host/Token-Konfiguration, da die alte
+    /// Umschalter-UI schon entfernt war - bei jedem Start einen
+    /// unaufgeforderten Keychain-Passwort-Dialog ausloeste, mit keiner
+    /// Moeglichkeit mehr, es abzuschalten; live-caught 2026-09-08).
+    /// Stattdessen 2026-09-10 wiederhergestellt, aber diesmal strukturell
+    /// robust: "aktiv" ist einfach "Host + Token sind beide gesetzt" - ganz
+    /// ohne separates Flag kann es keinen stale-true-ohne-Konfiguration-
+    /// Zustand mehr geben, der diesen Bug erneut ausloesen koennte. Noetig,
+    /// weil JarvisApp beim Testen von einem anderen Mac (Air) aus den alten
+    /// Backend auf dem Mac Mini sonst gar nicht mehr erreichen kann, seit
+    /// kein lokal gespawnter Prozess mehr existiert.
+    static var isEnabled: Bool {
+        !host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && token != nil
+    }
 
-    /// Tailscale-IP oder MagicDNS-Name des Mac Mini, z.B. "100.115.128.74" - ohne
-    /// Schema und ohne Port.
+    /// Derselbe Mac Mini wie fuer OpenClaw (OpenClawSettings.host) - eine
+    /// gemeinsame Adresse statt eines zweiten, separat zu pflegenden Feldes.
     static var host: String {
-        UserDefaults.standard.string(forKey: hostKey) ?? ""
+        OpenClawSettings.host
     }
 
     static var token: String? {
