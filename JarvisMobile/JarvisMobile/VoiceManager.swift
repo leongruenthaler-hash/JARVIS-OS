@@ -582,8 +582,7 @@ final class VoiceManager: NSObject, ObservableObject {
         // Stimme bleibt reiner Rueckfall, falls der Mac-Mini-Proxy nicht
         // erreichbar ist, nicht die bevorzugte Wahl.
         do {
-            let audioData = try await EdgeTTS.synthesize(text: trimmed, voice: Self.edgeVoiceName)
-            await playAudioData(audioData)
+            try await speakEdgeTTSPipelined(trimmed)
         } catch {
             // Die allererste Anfrage an einen frisch benutzten Port ueber
             // Tailscale kann noch scheitern, waehrend die Route sich
@@ -601,6 +600,53 @@ final class VoiceManager: NSObject, ObservableObject {
         }
 
         isSpeaking = false
+    }
+
+    /// Spricht Edge-TTS satzweise statt den kompletten Text auf einmal zu
+    /// synthetisieren - vorher wartete Jarvis bei einer laengeren Antwort
+    /// spuerbar lange (man konnte den Text schon zu Ende lesen), bevor
+    /// ueberhaupt der erste Ton kam, weil die GESAMTE Antwort erst
+    /// vollstaendig synthetisiert werden musste (live gemeldet 2026-09-10).
+    /// Jetzt beginnt die Wiedergabe, sobald der ERSTE Satz fertig ist,
+    /// waehrend der naechste Satz parallel im Hintergrund synthetisiert
+    /// wird (kein hoerbares Warten zwischen den Saetzen). Wirft, sobald
+    /// IRGENDEIN Satz scheitert - der Aufrufer faengt das ab und faellt fuer
+    /// die komplette Antwort auf Piper zurueck (nimmt in Kauf, dass bereits
+    /// gesprochene Saetze dann nochmal kommen - seltener Fall, nicht die
+    /// Komplexitaet eines Teil-Resumes wert).
+    private func speakEdgeTTSPipelined(_ text: String) async throws {
+        let sentences = Self.splitIntoSentences(text)
+        guard !sentences.isEmpty else { return }
+
+        var nextSynthesis: Task<Data, Error>? = Task {
+            try await EdgeTTS.synthesize(text: sentences[0], voice: Self.edgeVoiceName)
+        }
+        for index in sentences.indices {
+            let audioData = try await nextSynthesis!.value
+            if index + 1 < sentences.count {
+                let nextSentence = sentences[index + 1]
+                nextSynthesis = Task {
+                    try await EdgeTTS.synthesize(text: nextSentence, voice: Self.edgeVoiceName)
+                }
+            }
+            await playAudioData(audioData)
+        }
+    }
+
+    /// Zerlegt einen fertigen (nicht gestreamten) Text in Saetze - gleiches
+    /// Trennmuster wie JarvisApp's IncrementalSentenceSplitter, nur ohne
+    /// dessen Streaming-Zustand, da hier der volle Text schon vorliegt.
+    private static func splitIntoSentences(_ text: String) -> [String] {
+        var sentences: [String] = []
+        var buffer = text
+        while let range = buffer.range(of: #"[.!?]+[\"'”’)]?\s+"#, options: .regularExpression) {
+            let sentence = String(buffer[..<range.upperBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+            buffer.removeSubrange(buffer.startIndex..<range.upperBound)
+            if !sentence.isEmpty { sentences.append(sentence) }
+        }
+        let remaining = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !remaining.isEmpty { sentences.append(remaining) }
+        return sentences
     }
 
     /// PiperVoiceEngine's synthesis is synchronous, CPU-bound work - runs it
