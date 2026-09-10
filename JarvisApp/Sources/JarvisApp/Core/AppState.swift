@@ -1010,8 +1010,14 @@ final class AppState: ObservableObject {
 
 
     func performMailCommand(_ command: String) async {
+        // Laeuft jetzt ueber OpenClaw statt den alten Backend-Chat (2026-09-10)
+        // - dessen LLM-gestuetzte handle_mail_command()-Texterkennung faellt
+        // damit weg, OpenClaws eigener Agent uebernimmt das direkt ueber den
+        // bereits installierten "apple-mail-macos"-Skill (siehe
+        // ~/.openclaw/workspace/skills/apple-mail-macos auf dem Mac Mini -
+        // deckt Lesen/Suchen/Entwuerfe bereits vollstaendig ab, kein eigener
+        // Jarvis-Mail-Skill noetig).
         await stopCurrentSpeech()
-        await ensureServerConnected()
         let history = conversationPayload()
         mailIsLoading = true
         status = .thinking
@@ -1019,20 +1025,18 @@ final class AppState: ObservableObject {
         defer { mailIsLoading = false }
 
         do {
-            let response = try await serverController.chat(command, history: history)
+            let response = try await openClaw.sendChat(command, history: history)
             mailResult = response.answer
             messages.append(ChatMessage(role: .user, text: command))
             messages.append(ChatMessage(role: .jarvis, text: response.answer))
-            lastAnswerSource = modelLabel(from: response.source ?? modelStatus.provider, model: response.model ?? modelStatus.activeModel)
+            lastAnswerSource = modelLabel(from: "openclaw", model: "openclaw")
             keepListeningAfterGreeting = true
             await speakAnswer(response.answer)
             status = .idle
-            await refreshStatus(startIfOffline: false)
         } catch {
             mailResult = "Mail-Aktion fehlgeschlagen. Jarvis zieht kurz die Augenbraue hoch."
             status = .offline
             setVoiceState(.error, reason: "mail_command_failed")
-            await ensureServerConnected()
         }
     }
 
