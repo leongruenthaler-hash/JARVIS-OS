@@ -18,6 +18,8 @@ struct PairingView: View {
     @State private var filesTokenSaved = OpenClawSettings.filesToken != nil
     @State private var photosTokenDraft = ""
     @State private var photosTokenSaved = OpenClawSettings.photosToken != nil
+    @State private var mailTokenDraft = ""
+    @State private var mailTokenSaved = OpenClawSettings.mailToken != nil
     @State private var memoryTokenDraft = ""
     @State private var memoryTokenSaved = OpenClawSettings.memoryToken != nil
     @State private var gatewayActivityTokenDraft = ""
@@ -222,6 +224,43 @@ struct PairingView: View {
                                 Button(role: .destructive) {
                                     OpenClawSettings.photosToken = nil
                                     photosTokenSaved = false
+                                } label: {
+                                    Label("Token löschen", systemImage: "trash")
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                    }
+
+                    Divider().opacity(0.4)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Mail-Proxy")
+                            .font(.headline)
+                        Text(mailTokenSaved ? "Token ist in der macOS-Keychain gespeichert." : "Noch kein Token gespeichert - Mail-Fachbereich bleibt solange offline.")
+                            .font(.callout)
+                            .foregroundStyle(mailTokenSaved ? Color.secondary : Color.orange)
+                        Text("Auf dem Mac Mini im Terminal ausgegeben, sobald scripts/mail_proxy_server.py läuft.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        SecureField("Mail-Proxy-Token vom Mac Mini", text: $mailTokenDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 320)
+
+                        HStack(spacing: 10) {
+                            Button("Token speichern") {
+                                OpenClawSettings.mailToken = mailTokenDraft
+                                mailTokenDraft = ""
+                                mailTokenSaved = OpenClawSettings.mailToken != nil
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(mailTokenDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                            if mailTokenSaved {
+                                Button(role: .destructive) {
+                                    OpenClawSettings.mailToken = nil
+                                    mailTokenSaved = false
                                 } label: {
                                     Label("Token löschen", systemImage: "trash")
                                 }

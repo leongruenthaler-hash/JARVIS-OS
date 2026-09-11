@@ -89,7 +89,6 @@ struct MemoryView: View {
 
             VStack {
                 legend
-                debugStatusLine
                 if let memoryError {
                     Text(memoryError).font(.caption).foregroundStyle(.orange).padding(.top, 4)
                 }
@@ -151,37 +150,6 @@ struct MemoryView: View {
             }
             .padding(.top, 6)
         }
-    }
-
-    /// TEMPORAER (2026-09-11): sichtbarer Debug-Status fuer die Live-Gateway-
-    /// Verbindung, um live pruefen zu koennen, ob das Aufblitzen aus Verbindungsgruenden
-    /// nicht funktioniert. Wieder entfernen, sobald das Aufblitzen bestaetigt zuverlaessig
-    /// laeuft.
-    private var debugStatusLine: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(gateway.isConnected ? Color.green : Color.red)
-                    .frame(width: 6, height: 6)
-                Text(gateway.isConnected ? "verbunden" : "NICHT verbunden")
-                Circle()
-                    .fill(gateway.isSubscribed ? Color.green : Color.red)
-                    .frame(width: 6, height: 6)
-                Text(gateway.isSubscribed ? "abonniert" : "NICHT abonniert")
-                if let error = gateway.connectionError {
-                    Text("· \(error)")
-                }
-            }
-            ForEach(Array(gateway.recentEventLog.suffix(8).enumerated()), id: \.offset) { _, line in
-                Text(line)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .font(.system(size: 9, design: .monospaced))
-        .foregroundStyle(.white.opacity(0.7))
-        .padding(.top, 4)
-        .padding(.horizontal, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func loadActivity() async {

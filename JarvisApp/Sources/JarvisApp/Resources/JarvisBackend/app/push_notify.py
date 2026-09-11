@@ -18,6 +18,7 @@ blockieren. Ein Push ist immer nur ein Zusatzkanal, nie der garantierte Weg.
 """
 
 import ipaddress
+import json
 import os
 import secrets
 import urllib.error
@@ -88,6 +89,13 @@ def _default_scheme(host: str) -> str:
         return "https"
 
 
+_PRIORITY_TO_INT = {"min": 1, "low": 2, "default": 3, "high": 4, "urgent": 5, "max": 5}
+
+
+def _priority_to_int(priority: str) -> int:
+    return _PRIORITY_TO_INT.get(priority.strip().lower(), 3)
+
+
 def send_push(
     config: dict[str, Any],
     title: str,
@@ -122,15 +130,23 @@ def send_push(
         port = int(config.get("ntfy_port", 443 if scheme == "https" else 80))
         default_port = 443 if scheme == "https" else 80
         netloc = host if port == default_port else f"{host}:{port}"
-        target = f"{scheme}://{netloc}/{topic}"
-
-        headers = {"Title": title, "Priority": priority}
+        # JSON-Publish statt Title/Tags als rohe HTTP-Header (2026-09-11-Fix): ntfy
+        # unterstuetzt UTF-8 in Headern laut eigener Doku nicht in jeder
+        # Bibliothek/Sprache zuverlaessig - live beobachtet genau dieses Problem mit
+        # deutschen Umlauten im Titel (siehe whatsapp-bridge/index.mjs::sendNtfyPush
+        # fuer denselben Fix). POST an die Basis-URL statt /<topic>, topic als Feld
+        # im JSON-Body - der ganze Payload ist dann regulaeres UTF-8-JSON, kein Header.
+        target = f"{scheme}://{netloc}/"
+        payload: dict[str, Any] = {"topic": topic, "message": message, "title": title, "priority": _priority_to_int(priority)}
         if url:
-            headers["Click"] = url
+            payload["click"] = url
         if tags:
-            headers["Tags"] = tags
+            payload["tags"] = [t.strip() for t in tags.split(",") if t.strip()]
 
-        request = urllib.request.Request(target, data=message.encode("utf-8"), headers=headers, method="POST")
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        request = urllib.request.Request(
+            target, data=body, headers={"Content-Type": "application/json; charset=utf-8"}, method="POST"
+        )
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return 200 <= response.status < 300
     except (urllib.error.URLError, TimeoutError, ConnectionError, OSError, ValueError, TypeError):

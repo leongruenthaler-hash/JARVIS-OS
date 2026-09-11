@@ -15,6 +15,7 @@ struct MailView: View {
                 permissionNotice
                 scanStatusSection
                 actionGrid
+                summariesSection
                 resultPanel
             }
             .padding(28)
@@ -36,6 +37,7 @@ struct MailView: View {
         .task {
             await appState.refreshPermissions()
             await appState.refreshScanStatesSafely()
+            await appState.loadMailSummaries()
         }
     }
 
@@ -127,10 +129,10 @@ struct MailView: View {
                 command: "Jarvis, fasse mir die Mails aus Archiv zusammen."
             )
             mailActionCard(
-                title: "Hintergrundscan starten",
-                subtitle: "Bereitet ein Mail-Update im Hintergrund vor.",
+                title: "Zusammenfassungen aktualisieren",
+                subtitle: "Läuft automatisch im Hintergrund - hier nur neu laden.",
                 symbol: "moon.stars.fill",
-                command: "Jarvis, scanne meine Mails im Hintergrund.",
+                command: "",
                 action: { await appState.startMailBackgroundScan() }
             )
             mailActionCard(
@@ -157,21 +159,65 @@ struct MailView: View {
                     ("Letzter Scan", stat(appState.mailScanProgress, "last_successful_scan"))
                 ]
             )
-
-            ScanProgressCard(
-                title: "Mail-Hintergrundscan",
-                symbol: "clock.arrow.2.circlepath",
-                progress: appState.mailBackgroundProgress,
-                stats: [
-                    ("Status", stat(appState.mailBackgroundProgress, "background_active")),
-                    ("Letzter Scan", stat(appState.mailBackgroundProgress, "last_scan")),
-                    ("Nächste Aktualisierung", stat(appState.mailBackgroundProgress, "next_update")),
-                    ("Neue Mails", stat(appState.mailBackgroundProgress, "new_mails")),
-                    ("Indexierte Mails", stat(appState.mailBackgroundProgress, "mails_indexed")),
-                    ("Fehler", stat(appState.mailBackgroundProgress, "last_error"))
-                ]
-            )
         }
+    }
+
+    /// Ersetzt die alte, gebuendelte "Mail-Hintergrundscan"-Statuskarte
+    /// (2026-09-12): jede von der "mail-summary-watch"-Automation zusammengefasste
+    /// Mail bekommt hier ihre eigene, einzeln sichtbare Karte statt einem
+    /// gemeinsamen Fortschrittsbalken.
+    @ViewBuilder
+    private var summariesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Mail-Zusammenfassungen", systemImage: "list.bullet.rectangle.portrait")
+                    .font(.title3.bold())
+                Spacer()
+                Button {
+                    Task { await appState.loadMailSummaries() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.plain)
+            }
+
+            if appState.mailSummaries.isEmpty {
+                Text("Noch keine Zusammenfassungen - Jarvis fasst neue Mails automatisch im Hintergrund zusammen.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(appState.mailSummaries) { entry in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(entry.subject.isEmpty ? "(ohne Betreff)" : entry.subject)
+                                    .font(.headline)
+                                    .lineLimit(1)
+                                Spacer()
+                                Text(entry.received)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text(entry.sender)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                            Text(entry.summary)
+                                .font(.callout)
+                                .lineSpacing(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    }
+                }
+            }
+        }
+        .liquidGlassPanel(tint: .blue)
     }
 
     private func mailActionCard(

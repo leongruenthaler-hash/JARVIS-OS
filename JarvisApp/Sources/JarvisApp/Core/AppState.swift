@@ -55,6 +55,9 @@ final class AppState: ObservableObject {
         reminders: CalendarOverviewSection(items: [], count: 0, message: "Noch nicht geladen.", error: "")
     )
     @Published var mailOverview = MailOverviewPayload(unreadCount: 0, messages: [], message: "Noch nicht geladen.", error: "")
+    /// Einzelne Mail-Zusammenfassungen von der "mail-summary-watch"-Automation
+    /// (2026-09-12) - ersetzt den alten, gebuendelten MailBackgroundWorker-Text.
+    @Published var mailSummaries: [MailSummary] = []
     @Published var musicOverview = MusicOverviewPayload(track: nil, message: "Noch nicht geladen.", error: "")
     @Published var dailyBriefingText = "Noch kein Tagesbriefing geladen."
     @Published var conversationHistory = ConversationHistoryPayload(recordingEnabled: false, turns: [])
@@ -1051,10 +1054,9 @@ final class AppState: ObservableObject {
         fileScanProgress = (try? await OpenClawFilesClient().status()) ?? fileScanProgress
         photoScanProgress = (try? await OpenClawPhotosClient().status()) ?? photoScanProgress
         photoVisionProgress = (try? await OpenClawPhotosClient().visionProgress()) ?? photoVisionProgress
+        mailScanProgress = (try? await OpenClawMailClient().scanStatus()) ?? mailScanProgress
 
         let bundle = try await serverController.scanStatus()
-        mailScanProgress = bundle.mailScan
-        mailBackgroundProgress = bundle.mailBackground
         modelPullProgress = bundle.modelPull
     }
 
@@ -1081,14 +1083,15 @@ final class AppState: ObservableObject {
     }
 
     func startMailFolderScan() async {
-        await ensureServerConnected()
+        // Laeuft jetzt ueber den Mail-Proxy statt das alte Backend (2026-09-12,
+        // "Mail" Fachbereich Migration) - scripts/mail_proxy_server.py portiert
+        // dieselbe Ordner-Scan-Logik direkt aus app/local_server.py.
         mailIsLoading = true
         mailScanProgress.status = .preparing
         mailScanProgress.currentLabel = "Mail-Scan wird vorbereitet."
         defer { mailIsLoading = false }
         do {
-            mailScanProgress = try await serverController.startMailFolderScan()
-            startScanPolling()
+            mailScanProgress = try await OpenClawMailClient().startFolderScan()
             mailResult = mailScanSummary(from: mailScanProgress)
         } catch {
             mailScanProgress.status = .failed
@@ -1097,20 +1100,26 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Ersetzt den alten, gebuendelten Hintergrundscan (2026-09-12): statt selbst
+    /// einen LLM-gestuetzten Scan anzustossen, laedt dies nur die bereits von der
+    /// "mail-summary-watch"-OpenClaw-Automation abgelegten Einzel-Zusammenfassungen
+    /// neu - jede Mail hat dort ihren eigenen Eintrag statt eines Sammel-Texts.
     func startMailBackgroundScan() async {
-        await ensureServerConnected()
         mailIsLoading = true
-        mailBackgroundProgress.status = .scanning
-        mailBackgroundProgress.currentLabel = "Mail-Hintergrundscan startet."
         defer { mailIsLoading = false }
+        await loadMailSummaries()
+        mailResult = mailSummaries.isEmpty
+            ? "Noch keine Mail-Zusammenfassungen vorhanden."
+            : "\(mailSummaries.count) Mail-Zusammenfassungen geladen."
+    }
+
+    func loadMailSummaries() async {
         do {
-            mailBackgroundProgress = try await serverController.startMailBackgroundScan()
-            startScanPolling()
-            mailResult = mailBackgroundSummary(from: mailBackgroundProgress)
+            mailSummaries = try await OpenClawMailClient().summaries(limit: 30)
         } catch {
-            mailBackgroundProgress.status = .failed
-            mailBackgroundProgress.errorMessage = error.localizedDescription
-            mailResult = "Mail-Hintergrundscan fehlgeschlagen. Der Posteingang spielt Theater."
+            // Stiller Fehlschlag wie bei den anderen Proxy-Ladefunktionen (z.B.
+            // loadActivity() in MemoryView) - kein blockierender Fehlerzustand fuer
+            // eine rein informative Liste.
         }
     }
 
@@ -1212,9 +1221,10 @@ final class AppState: ObservableObject {
     }
 
     func refreshMailOverview() async {
-        await ensureServerConnected()
+        // Laeuft jetzt ueber den Mail-Proxy statt das alte Backend (2026-09-12,
+        // "Mail" Fachbereich Migration).
         do {
-            mailOverview = try await serverController.mailOverview()
+            mailOverview = try await OpenClawMailClient().overview()
         } catch {
             lastError = "Mailübersicht konnte nicht geladen werden."
         }

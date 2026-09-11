@@ -190,4 +190,33 @@ enum OpenClawSettings {
         guard !trimmedHost.isEmpty else { return nil }
         return URL(string: "http://\(trimmedHost):18795")
     }
+
+    /// Separate token for the Mac Mini's standalone Mail-Proxy
+    /// (scripts/mail_proxy_server.py, port 18796) - replaces the old backend's
+    /// /api/mail/overview|scan-folders endpoints (2026-09-12, "Mail" Fachbereich
+    /// Migration). Freitextchat/Antwort-Entwuerfe laufen weiterhin ueber
+    /// OpenClaw-Chat (performMailCommand + der bereits installierte
+    /// apple-mail-macos-Skill). Zusaetzlich liefert dieser Proxy /api/mail/
+    /// summaries|unsummarized fuer die neue "mail-summary-watch"-Automation
+    /// (jede Mail bekommt eine eigene, einzeln sichtbare Zusammenfassung statt
+    /// eines gebuendelten Hintergrundscan-Texts wie im alten Backend).
+    static var mailToken: String? {
+        get { KeychainStore.read(service: keychainService, account: mailKeychainAccount) }
+        set {
+            if let newValue, !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                KeychainStore.save(newValue, service: keychainService, account: mailKeychainAccount)
+            } else {
+                KeychainStore.delete(service: keychainService, account: mailKeychainAccount)
+            }
+        }
+    }
+    private static let mailKeychainAccount = "mail-proxy-token"
+
+    /// Same Mac Mini host as `baseURL`, different port - see
+    /// scripts/mail_proxy_server.py::PORT.
+    static var mailBaseURL: URL? {
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedHost.isEmpty else { return nil }
+        return URL(string: "http://\(trimmedHost):18796")
+    }
 }

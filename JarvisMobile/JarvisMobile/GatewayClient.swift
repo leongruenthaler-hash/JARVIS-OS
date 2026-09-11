@@ -32,8 +32,6 @@ final class GatewayClient: NSObject, ObservableObject {
     @Published private(set) var currentActivity: String?
     @Published private(set) var activeTools: [ActiveTool] = []
     @Published var connectionError: String?
-    /// TEMPORAER (2026-09-11): kurzes, persistentes Protokoll der letzten Ereignisse.
-    @Published private(set) var recentEventLog: [String] = []
 
     private struct ActivityResponse: Decodable {
         let connected: Bool
@@ -65,12 +63,6 @@ final class GatewayClient: NSObject, ObservableObject {
         activeTools = []
     }
 
-    private func log(_ line: String) {
-        let timestamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
-        recentEventLog.append("\(timestamp) \(line)")
-        if recentEventLog.count > 25 { recentEventLog.removeFirst(recentEventLog.count - 25) }
-    }
-
     private func pollOnce() async {
         guard let sessionUser else { return }
         guard let baseURL = RemoteSettings.gatewayActivityBaseURL, let token = RemoteSettings.gatewayActivityToken else {
@@ -92,19 +84,12 @@ final class GatewayClient: NSObject, ObservableObject {
                 return
             }
             let decoded = try JSONDecoder().decode(ActivityResponse.self, from: data)
-            if !isConnected { log("Proxy erreichbar") }
             isConnected = true
             isSubscribed = decoded.connected
-            if decoded.currentActivity != currentActivity { log("activity: \(decoded.currentActivity ?? "-")") }
-            if decoded.activeTools.map(\.id) != activeTools.map(\.id) {
-                for tool in decoded.activeTools where !activeTools.contains(tool) { log("tool start: \(tool.title)") }
-                for tool in activeTools where !decoded.activeTools.contains(tool) { log("tool end: \(tool.title)") }
-            }
             currentActivity = decoded.currentActivity
             activeTools = decoded.activeTools
             connectionError = nil
         } catch {
-            if isConnected { log("Proxy nicht erreichbar: \(error.localizedDescription)") }
             isConnected = false
         }
     }
