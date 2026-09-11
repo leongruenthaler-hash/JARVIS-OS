@@ -4,8 +4,14 @@ struct PhotosView: View {
     @EnvironmentObject private var appState: AppState
     @State private var photoSearchText = ""
 
+    // War bisher an appState.permissions["photos"] gekoppelt - eine Datenschutz-
+    // Zustimmung, die ueber den alten, seit der Fotos-Migration (2026-09-11) nicht
+    // mehr angesprochenen Backend verwaltet wurde und deshalb permanent "false"
+    // blieb, sobald JarvisApp nicht auf dem Mac Mini selbst laeuft (derselbe Fehler,
+    // der zuvor bei FilesView.filesAllowed gefunden wurde). Der Fotos-Proxy-Token
+    // IST jetzt der eigentliche Freischalt-Schritt.
     private var photosAllowed: Bool {
-        appState.permissions["photos"]?.allowed ?? false
+        OpenClawSettings.photosToken != nil
     }
 
     var body: some View {

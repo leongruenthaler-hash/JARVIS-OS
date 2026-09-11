@@ -1,44 +1,62 @@
 import SwiftUI
 import SceneKit
 
-/// Echte, frei drehbare 3D-Speicher-Kugel (2026-09-07, dritte Version):
-/// jeder Punkt ist jetzt ein ECHTER Eintrag aus Jarvis' MEMORY.md, nicht mehr
-/// eine feste Platzhalter-Anzahl - wird bei jedem Oeffnen des Tabs frisch
-/// abgefragt, damit neue Erinnerungen tatsaechlich als neue Punkte
-/// erscheinen. OpenClaw speichert Erinnerungen als Fliesstext ohne
-/// Kategorie-Metadaten, daher ist die Farb-Zuordnung pro Zeile eine
-/// Stichwort-Schaetzung (siehe categorize()), kein zuverlaessiges
-/// Kategoriesystem - Eintraege ohne erkanntes Stichwort werden neutral
-/// (weiss) dargestellt statt falsch einsortiert.
+/// Echte, frei drehbare 3D-Speicher-Kugel (2026-09-11, vierte Version): jeder Punkt ist
+/// jetzt ein ECHTER Eintrag von Jarvis' Speicher-Proxy (scripts/memory_proxy_server.py) -
+/// OpenClaws eigene USER.md (Nutzer-Direktiven), MEMORY.md (kuratierte Langzeitfakten,
+/// anfangs evtl. leer) UND, neu, jeder installierte Skill als eigener "Faehigkeit"-Punkt.
+/// Vorherige Version fragte Jarvis per Chat, seine MEMORY.md als Freitext aufzulisten,
+/// und riet die Kategorie pro Zeile anhand von Stichwoertern - zeigte dadurch nie
+/// USER.md oder Jarvis' eigenes Werkzeug-Wissen, genau die Luecke, die hier geschlossen
+/// wird. Kategorien kommen jetzt direkt vom Proxy (echt, kein Rateschema mehr), und es
+/// gibt keine festen Deko-Basispunkte mehr - die Kugel zeigt nur noch, was wirklich da
+/// ist, und waechst dadurch ehrlich mit jeder neuen echten Erinnerung/jedem neuen Skill.
 struct MemoryView: View {
     fileprivate struct Category {
         let name: String
         let color: Color
-        let keywords: [String]
-        /// Feste "Faehigkeit ist vorhanden"-Basis-Punkte - unabhaengig von
-        /// echten Erinnerungen, illustrativ (siehe Datei-Kommentar). Echte
-        /// MEMORY.md-Eintraege kommen zusaetzlich obendrauf, ersetzen diese
-        /// Basis nicht (live gewuenscht 2026-09-07: "beides zusammen").
-        let baselinePoints: Int
     }
 
     fileprivate static let categories: [Category] = [
-        Category(name: "Mail", color: .blue, keywords: ["mail", "email", "e-mail", "posteingang", "nachricht von"], baselinePoints: 22),
-        Category(name: "Kalender", color: .orange, keywords: ["kalender", "termin", "meeting", "uhrzeit"], baselinePoints: 18),
-        Category(name: "Kontakte", color: .purple, keywords: ["kontakt", "telefonnummer", "adresse von"], baselinePoints: 14),
-        Category(name: "Notizen", color: .yellow, keywords: ["notiz"], baselinePoints: 20),
-        Category(name: "Erinnerungen", color: .green, keywords: ["erinnerung", "reminder"], baselinePoints: 16),
-        Category(name: "Kamera", color: .pink, keywords: ["foto", "kamera", "bild von"], baselinePoints: 8),
-        Category(name: "Bildschirm", color: .teal, keywords: ["screenshot", "bildschirm"], baselinePoints: 8),
-        Category(name: "Web-Suche", color: .indigo, keywords: ["such", "recherch", "internet"], baselinePoints: 12),
-        Category(name: "Wetter", color: .cyan, keywords: ["wetter", "temperatur", "regen"], baselinePoints: 6),
-        Category(name: "Aufgaben", color: .red, keywords: ["aufgabe", "projekt", "todo", "to-do"], baselinePoints: 18),
+        Category(name: "Profil", color: .blue),
+        Category(name: "Langzeit", color: .green),
+        Category(name: "Fähigkeiten", color: .mint),
     ]
     fileprivate static let generalColor = Color.white
 
-    @State private var memoryItems: [String] = []
+    fileprivate struct MemoryPoint {
+        let content: String
+        let category: String
+    }
+
+    private struct MemoryProxyFact: Decodable {
+        let content: String
+        let category: String
+    }
+
+    private struct MemoryProxyFactsResponse: Decodable {
+        let facts: [MemoryProxyFact]
+    }
+
+    /// "Was Jarvis im Hintergrund macht" (2026-09-11) - die zuletzt gelaufenen echten
+    /// OpenClaw-Automationen (Mail-/Kalender-Checks etc.), vom selben Speicher-Proxy wie
+    /// die Kugel-Fakten. Kein Live-Stream laufender Werkzeug-Aufrufe (siehe
+    /// scripts/memory_proxy_server.py::recent_activity() fuer die Begruendung).
+    private struct MemoryProxyActivityEvent: Decodable, Identifiable {
+        let label: String
+        let reference: String?
+        let at: TimeInterval
+        var id: String { "\(label)-\(at)" }
+    }
+
+    private struct MemoryProxyActivityResponse: Decodable {
+        let events: [MemoryProxyActivityEvent]
+    }
+
+    @State private var memoryItems: [MemoryPoint] = []
     @State private var isLoadingMemory = true
     @State private var memoryError: String?
+    @State private var activityEvents: [MemoryProxyActivityEvent] = []
 
     @State private var testMessage = "Was liegt heute an?"
     @State private var isProcessing = false
@@ -64,6 +82,7 @@ struct MemoryView: View {
                 if let memoryError {
                     Text(memoryError).font(.caption).foregroundStyle(.orange).padding(.top, 4)
                 }
+                activityPanel
                 Spacer()
                 bottomPanel
             }
@@ -74,16 +93,66 @@ struct MemoryView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    Task { await loadMemory() }
+                    Task {
+                        await loadMemory()
+                        await loadActivity()
+                    }
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
                 .disabled(isLoadingMemory)
             }
         }
-        .task { await loadMemory() }
+        .task {
+            await loadMemory()
+            await loadActivity()
+        }
         .onChange(of: isProcessing) { _, processing in
             if processing { pulseTrigger += 1 }
+        }
+    }
+
+    @ViewBuilder
+    private var activityPanel: some View {
+        if !activityEvents.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(activityEvents.prefix(6)) { event in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(event.label)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                            if let reference = event.reference, !reference.isEmpty {
+                                Text(reference)
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(JarvisTheme.textSecondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: 160, alignment: .leading)
+                        .background(JarvisTheme.cardFill, in: RoundedRectangle(cornerRadius: 10))
+                    }
+                }
+                .padding(.horizontal, 12)
+            }
+            .padding(.top, 6)
+        }
+    }
+
+    private func loadActivity() async {
+        do {
+            guard let baseURL = RemoteSettings.memoryBaseURL, let token = RemoteSettings.memoryToken else { return }
+            var request = URLRequest(url: baseURL.appendingPathComponent("/api/memory/activity"))
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            let (data, _) = try await URLSession.shared.data(for: request)
+            let response = try JSONDecoder().decode(MemoryProxyActivityResponse.self, from: data)
+            activityEvents = response.events
+        } catch {
+            // Stumm fehlschlagen - die Aktivitaets-Leiste ist ein Zusatz, kein
+            // kritischer Teil der Ansicht.
         }
     }
 
@@ -163,30 +232,23 @@ struct MemoryView: View {
     private func loadMemory() async {
         isLoadingMemory = memoryItems.isEmpty
         memoryError = nil
-        let instruction = """
-        Lies deine MEMORY.md und liste JEDEN Eintrag als eigene Zeile auf - keine Nummerierung, keine Überschriften, keine Markdown-Formatierung, keine Erklärung davor oder danach. Genau eine Erinnerung pro Zeile, so kurz wie im Original. Falls MEMORY.md leer ist oder nicht existiert, antworte NUR mit LEER.
-        """
         do {
-            let response = try await APIClient().sendChat(instruction, history: [])
-            let lines = response.answer
-                .split(whereSeparator: \.isNewline)
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty && $0.uppercased() != "LEER" }
-            memoryItems = lines
+            guard let baseURL = RemoteSettings.memoryBaseURL, let token = RemoteSettings.memoryToken else {
+                throw PairingError.notPaired
+            }
+            var request = URLRequest(url: baseURL.appendingPathComponent("/api/memory/facts"))
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            let (data, _) = try await URLSession.shared.data(for: request)
+            let response = try JSONDecoder().decode(MemoryProxyFactsResponse.self, from: data)
+            memoryItems = response.facts.map { MemoryPoint(content: $0.content, category: $0.category) }
         } catch {
             memoryError = "Konnte Erinnerungen nicht laden: \(error.localizedDescription)"
         }
         isLoadingMemory = false
     }
 
-    fileprivate static func categorize(_ text: String) -> Int? {
-        let lower = text.lowercased()
-        for (index, category) in categories.enumerated() {
-            if category.keywords.contains(where: { lower.contains($0) }) {
-                return index
-            }
-        }
-        return nil
+    fileprivate static func categoryIndex(_ name: String) -> Int? {
+        categories.firstIndex(where: { $0.name == name })
     }
 }
 
@@ -194,7 +256,7 @@ struct MemoryView: View {
 /// fertig mit (Ein-Finger-Drehen, Zwei-Finger-Zoom/Pan um die Kugel), das
 /// spart eine eigene Touch-zu-Quaternion-Rotationslogik.
 private struct SphereView: UIViewRepresentable {
-    let items: [String]
+    let items: [MemoryView.MemoryPoint]
     let pulseTrigger: Int
 
     func makeUIView(context: Context) -> SCNView {
@@ -216,7 +278,7 @@ private struct SphereView: UIViewRepresentable {
         sphereNode.runAction(.sequence([up, down]))
     }
 
-    static func buildScene(items: [String]) -> SCNScene {
+    static func buildScene(items: [MemoryView.MemoryPoint]) -> SCNScene {
         let scene = SCNScene()
 
         let cameraNode = SCNNode()
@@ -247,24 +309,13 @@ private struct SphereView: UIViewRepresentable {
             colors.append(color)
         }
 
-        // Basis-Punkte: "diese Faehigkeit ist eingerichtet", ein eigener
-        // Laengengrad-Sektor pro Kategorie - unabhaengig von echten
-        // Erinnerungen, bleibt immer sichtbar (live gewuenscht 2026-09-07).
-        for (index, category) in MemoryView.categories.enumerated() {
-            let sliceStart = Double(index) / Double(MemoryView.categories.count) * 2 * .pi
-            let sliceEnd = Double(index + 1) / Double(MemoryView.categories.count) * 2 * .pi
-            let uiColor = UIColor(category.color)
-            for _ in 0..<category.baselinePoints {
-                addPoint(theta: Double.random(in: sliceStart...sliceEnd), phi: Double.random(in: 0.05...(.pi - 0.05)), color: uiColor)
-            }
-        }
-
-        // ZUSAETZLICH ein Punkt pro ECHTEM MEMORY.md-Eintrag, frei verteilt
-        // (nicht auf den Kategorie-Sektor beschraenkt) - waechst mit neuen
-        // Erinnerungen. Ohne erkanntes Stichwort (siehe categorize()) neutral
-        // weiss statt falsch einsortiert.
-        for text in items {
-            let color = MemoryView.categorize(text).map { UIColor(MemoryView.categories[$0].color) } ?? UIColor(MemoryView.generalColor)
+        // Ein Punkt pro ECHTEM Speicher-Fakt (Profil/Langzeit/Faehigkeiten, vom
+        // Speicher-Proxy geliefert) - keine Deko-Basispunkte mehr (2026-09-11):
+        // die Kugel zeigt jetzt ehrlich nur, was wirklich da ist, und waechst
+        // dadurch tatsaechlich mit jeder neuen echten Erinnerung/jedem neuen Skill,
+        // statt eine feste Anzahl vorzutaeuschen.
+        for item in items {
+            let color = MemoryView.categoryIndex(item.category).map { UIColor(MemoryView.categories[$0].color) } ?? UIColor(MemoryView.generalColor)
             addPoint(theta: Double.random(in: 0...(2 * .pi)), phi: Double.random(in: 0.05...(.pi - 0.05)), color: color)
         }
 

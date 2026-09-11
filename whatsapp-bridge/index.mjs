@@ -172,7 +172,13 @@ async function askJarvis(name, jid, text) {
   const res = await fetch(GATEWAY_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ model: 'openclaw', messages: [{ role: 'user', content: prompt }] }),
+    // `user` = stabile Konversations-Identitaet pro WhatsApp-Kontakt (2026-09-11,
+    // gleicher Fix wie JarvisMobile/JarvisApp: OpenClaw haelt Session-/Gedaechtnis-
+    // Kontinuitaet ueber genau dieses Feld fest - live verifiziert per curl-Test,
+    // zwei Aufrufe mit demselben `user`-Wert teilen sich den vollen Kontext, ganz
+    // ohne mitgeschickte History. Ohne dieses Feld bekam JEDER eingehende
+    // WhatsApp-Chat bisher eine neue Wegwerf-Session).
+    body: JSON.stringify({ model: 'openclaw', messages: [{ role: 'user', content: prompt }], user: `jarvis-whatsapp-${jid}` }),
   })
   if (!res.ok) {
     throw new Error(`OpenClaw-Gateway antwortete mit ${res.status}: ${await res.text()}`)

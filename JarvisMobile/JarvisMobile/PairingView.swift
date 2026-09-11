@@ -8,6 +8,8 @@ struct PairingView: View {
     @State private var isTesting = false
     @State private var ttsTokenDraft = ""
     @State private var ttsTokenSaved = RemoteSettings.ttsToken != nil
+    @State private var memoryTokenDraft = ""
+    @State private var memoryTokenSaved = RemoteSettings.memoryToken != nil
 
     var body: some View {
         Form {
@@ -76,6 +78,34 @@ struct PairingView: View {
                     Button("Token löschen", role: .destructive) {
                         RemoteSettings.ttsToken = nil
                         ttsTokenSaved = false
+                    }
+                }
+            }
+
+            Section("Gedächtnis-Proxy") {
+                if memoryTokenSaved {
+                    Label("Token ist in der Keychain gespeichert.", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                } else {
+                    Label("Noch kein Token gespeichert - Speicher-Ansicht bleibt solange offline.", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
+                Text("Auf dem Mac Mini im Terminal ausgegeben, sobald scripts/memory_proxy_server.py läuft.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                SecureField("Gedächtnis-Proxy-Token vom Mac Mini", text: $memoryTokenDraft)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button("Token speichern") {
+                    RemoteSettings.memoryToken = memoryTokenDraft
+                    memoryTokenDraft = ""
+                    memoryTokenSaved = RemoteSettings.memoryToken != nil
+                }
+                .disabled(memoryTokenDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                if memoryTokenSaved {
+                    Button("Token löschen", role: .destructive) {
+                        RemoteSettings.memoryToken = nil
+                        memoryTokenSaved = false
                     }
                 }
             }

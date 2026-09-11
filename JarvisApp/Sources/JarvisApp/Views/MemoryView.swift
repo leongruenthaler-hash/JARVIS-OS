@@ -53,14 +53,59 @@ struct MemoryView: View {
         VStack(alignment: .leading, spacing: 16) {
             header
             filterBar.padding(.horizontal, 28)
-            MemoryCoreView(
-                facts: appState.memoryFacts,
-                activityEvents: appState.recentActivity,
-                onSelect: { selectedFact = $0 }
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            HStack(alignment: .top, spacing: 0) {
+                MemorySphereView(
+                    facts: appState.memoryFacts,
+                    onSelect: { selectedFact = $0 }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                activityPanel
+                    .frame(width: 280)
+                    .padding(.trailing, 28)
+                    .padding(.bottom, 28)
+            }
         }
         .padding(.top, 28)
+    }
+
+    /// "Was Jarvis im Hintergrund macht" - echte, zuletzt gelaufene OpenClaw-
+    /// Automationen (Mail-/Kalender-Checks etc.), kein Live-Stream laufender
+    /// Werkzeug-Aufrufe (siehe AppState.pollRecentActivity()).
+    private var activityPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Zuletzt im Hintergrund")
+                .font(.headline)
+            if appState.recentActivity.isEmpty {
+                Text("Noch keine Automation gelaufen.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(appState.recentActivity) { event in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(event.label)
+                                    .font(.caption.weight(.semibold))
+                                if let reference = event.reference, !reference.isEmpty {
+                                    Text(reference)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
+                                Text(Date(timeIntervalSince1970: event.at), style: .relative)
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .padding(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private var listContent: some View {

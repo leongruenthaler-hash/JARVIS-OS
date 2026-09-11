@@ -40,6 +40,8 @@
 		DE50A5B7D5624A3FBAC4AEA5 /* OpenClawClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 094C3D22CF7841649CF6E8B5 /* OpenClawClient.swift */; };
 		50D618127E66F07F415753DB /* OpenClawTTSClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45A453D5E2CB7F9507E5162E /* OpenClawTTSClient.swift */; };
 		C8B644FD33943FBFDA71A5EB /* OpenClawFilesClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A674C3227981262F5CB92C1 /* OpenClawFilesClient.swift */; };
+		05D8790E1A006E743B4D8A2C /* OpenClawPhotosClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DA025A460428B7898056BE4 /* OpenClawPhotosClient.swift */; };
+		4838CBC987EB4044E4B55AC1 /* OpenClawMemoryClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 103172ABBA903DB4A277EF48 /* OpenClawMemoryClient.swift */; };
 		F9A2F194F880CA97B38364EF /* OpenClawSpeechPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AA413904806CF0BCB71A5BB /* OpenClawSpeechPlayer.swift */; };
 		F1674172B98247CC9389C2F5 /* PairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C20A2ABBCD74CBB994D3FC1 /* PairingView.swift */; };
 		9B3222560E60EFA286A779D5 /* PrivacyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85002DF6FCD359EC134EC4F9 /* PrivacyView.swift */; };
@@ -64,6 +66,7 @@
 		C16D1BD16AFC989DE48E7456 /* LicensesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D045C8D752CE886EE4E99A82 /* LicensesView.swift */; };
 		67DAFB2C1E34610FA774B0F5 /* MemoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F86BBCEB6081834A36B5557 /* MemoryView.swift */; };
 		B27C0AACDE904572955A2BE1 /* MemoryCoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27E3C0CF365B47FDA6BF0DE8 /* MemoryCoreView.swift */; };
+		8DCA085EBD99C390337EED92 /* MemorySphereView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56F11ECD2388E5D062E3C7E2 /* MemorySphereView.swift */; };
 		2D43490B9A7F4580A6FD7F40 /* MemoryCoreLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F96930612F747DFA5C63B67 /* MemoryCoreLayout.swift */; };
 		CC0164A2A24942679A08104A /* MemorySynapsePulse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 370756B3665D46F78BA83C51 /* MemorySynapsePulse.swift */; };
 		07B13397348C35736E6A71D5 /* TasksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1902F7BCD2DFE59543751E53 /* TasksView.swift */; };
@@ -109,6 +112,8 @@
 		094C3D22CF7841649CF6E8B5 /* OpenClawClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawClient.swift; sourceTree = "<group>"; };
 		45A453D5E2CB7F9507E5162E /* OpenClawTTSClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawTTSClient.swift; sourceTree = "<group>"; };
 		7A674C3227981262F5CB92C1 /* OpenClawFilesClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawFilesClient.swift; sourceTree = "<group>"; };
+		4DA025A460428B7898056BE4 /* OpenClawPhotosClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawPhotosClient.swift; sourceTree = "<group>"; };
+		103172ABBA903DB4A277EF48 /* OpenClawMemoryClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawMemoryClient.swift; sourceTree = "<group>"; };
 		2AA413904806CF0BCB71A5BB /* OpenClawSpeechPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawSpeechPlayer.swift; sourceTree = "<group>"; };
 		6C20A2ABBCD74CBB994D3FC1 /* PairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingView.swift; sourceTree = "<group>"; };
 		CD87D845E1639C0D7F9C10A3 /* ModelsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelsView.swift; sourceTree = "<group>"; };
@@ -128,6 +133,7 @@
 		D045C8D752CE886EE4E99A82 /* LicensesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LicensesView.swift; sourceTree = "<group>"; };
 		5F86BBCEB6081834A36B5557 /* MemoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryView.swift; sourceTree = "<group>"; };
 		27E3C0CF365B47FDA6BF0DE8 /* MemoryCoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryCoreView.swift; sourceTree = "<group>"; };
+		56F11ECD2388E5D062E3C7E2 /* MemorySphereView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemorySphereView.swift; sourceTree = "<group>"; };
 		3F96930612F747DFA5C63B67 /* MemoryCoreLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryCoreLayout.swift; sourceTree = "<group>"; };
 		370756B3665D46F78BA83C51 /* MemorySynapsePulse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemorySynapsePulse.swift; sourceTree = "<group>"; };
 		1902F7BCD2DFE59543751E53 /* TasksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TasksView.swift; sourceTree = "<group>"; };
@@ -193,6 +199,7 @@
 					1A2B3C4D5E6F708192A3B4C8 /* PhotosView.swift */,
 					5F86BBCEB6081834A36B5557 /* MemoryView.swift */,
 					27E3C0CF365B47FDA6BF0DE8 /* MemoryCoreView.swift */,
+					56F11ECD2388E5D062E3C7E2 /* MemorySphereView.swift */,
 					1902F7BCD2DFE59543751E53 /* TasksView.swift */,
 					85002DF6FCD359EC134EC4F9 /* PrivacyView.swift */,
 				FED92BDBA779BC8A1F4138B2 /* RootView.swift */,
@@ -236,6 +243,8 @@
 				094C3D22CF7841649CF6E8B5 /* OpenClawClient.swift */,
 				45A453D5E2CB7F9507E5162E /* OpenClawTTSClient.swift */,
 				7A674C3227981262F5CB92C1 /* OpenClawFilesClient.swift */,
+				4DA025A460428B7898056BE4 /* OpenClawPhotosClient.swift */,
+				103172ABBA903DB4A277EF48 /* OpenClawMemoryClient.swift */,
 				2AA413904806CF0BCB71A5BB /* OpenClawSpeechPlayer.swift */,
 				2805D3602E78FDB8A2D88F3B /* JarvisModels.swift */,
 					3F96930612F747DFA5C63B67 /* MemoryCoreLayout.swift */,
@@ -390,6 +399,7 @@
 				1A2B3C4D5E6F708192A3B4C9 /* PhotosView.swift in Sources */,
 				67DAFB2C1E34610FA774B0F5 /* MemoryView.swift in Sources */,
 				B27C0AACDE904572955A2BE1 /* MemoryCoreView.swift in Sources */,
+				8DCA085EBD99C390337EED92 /* MemorySphereView.swift in Sources */,
 				2D43490B9A7F4580A6FD7F40 /* MemoryCoreLayout.swift in Sources */,
 				CC0164A2A24942679A08104A /* MemorySynapsePulse.swift in Sources */,
 				07B13397348C35736E6A71D5 /* TasksView.swift in Sources */,
@@ -414,6 +424,8 @@
 				DE50A5B7D5624A3FBAC4AEA5 /* OpenClawClient.swift in Sources */,
 				50D618127E66F07F415753DB /* OpenClawTTSClient.swift in Sources */,
 				C8B644FD33943FBFDA71A5EB /* OpenClawFilesClient.swift in Sources */,
+				05D8790E1A006E743B4D8A2C /* OpenClawPhotosClient.swift in Sources */,
+				4838CBC987EB4044E4B55AC1 /* OpenClawMemoryClient.swift in Sources */,
 				F9A2F194F880CA97B38364EF /* OpenClawSpeechPlayer.swift in Sources */,
 				F1674172B98247CC9389C2F5 /* PairingView.swift in Sources */,
 				C4B7BAE04211F925F46CE89E /* JarvisModels.swift in Sources */,

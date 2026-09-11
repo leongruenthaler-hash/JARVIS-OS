@@ -1049,12 +1049,12 @@ final class AppState: ObservableObject {
         // nicht geladen werden" erschien trotzdem bei jedem Poll, weil diese
         // Funktion vorher schon beim alten `serverController.scanStatus()` warf).
         fileScanProgress = (try? await OpenClawFilesClient().status()) ?? fileScanProgress
+        photoScanProgress = (try? await OpenClawPhotosClient().status()) ?? photoScanProgress
+        photoVisionProgress = (try? await OpenClawPhotosClient().visionProgress()) ?? photoVisionProgress
 
         let bundle = try await serverController.scanStatus()
         mailScanProgress = bundle.mailScan
         mailBackgroundProgress = bundle.mailBackground
-        photoScanProgress = bundle.photos
-        photoVisionProgress = bundle.photoVision
         modelPullProgress = bundle.modelPull
     }
 
@@ -1115,21 +1115,19 @@ final class AppState: ObservableObject {
     }
 
     func refreshPhotoPermissionStatus() async {
-        await ensureServerConnected()
         do {
-            photoPermissionStatus = try await serverController.photoPermissionStatus()
-            localVisionStatus = try await serverController.localPhotoVisionStatus()
+            photoPermissionStatus = try await OpenClawPhotosClient().permissionStatus()
+            localVisionStatus = try await OpenClawPhotosClient().localVisionStatus()
         } catch {
             photoPermissionStatus = "nicht lesbar"
         }
     }
 
     func requestPhotoPermission() async {
-        await ensureServerConnected()
         photoIsLoading = true
         defer { photoIsLoading = false }
         do {
-            photoResult = try await serverController.requestPhotoPermission()
+            photoResult = try await OpenClawPhotosClient().requestPermission()
             await refreshPhotoPermissionStatus()
             try? await refreshScanStates()
         } catch {
@@ -1138,13 +1136,12 @@ final class AppState: ObservableObject {
     }
 
     func startPhotoIndexScan() async {
-        await ensureServerConnected()
         photoIsLoading = true
         photoScanProgress.status = .preparing
         photoScanProgress.currentLabel = "Fotoindex wird vorbereitet."
         defer { photoIsLoading = false }
         do {
-            photoScanProgress = try await serverController.startPhotoIndexScan()
+            photoScanProgress = try await OpenClawPhotosClient().startScan()
             startScanPolling()
             photoResult = photoSummary(from: photoScanProgress)
         } catch {
@@ -1159,11 +1156,10 @@ final class AppState: ObservableObject {
     }
 
     func resetPhotoIndex() async {
-        await ensureServerConnected()
         photoIsLoading = true
         defer { photoIsLoading = false }
         do {
-            photoScanProgress = try await serverController.resetPhotoIndex()
+            photoScanProgress = try await OpenClawPhotosClient().resetIndex()
             photoResult = "Fotoindex zurückgesetzt. Frischer Start."
         } catch {
             photoResult = "Fotoindex konnte nicht zurückgesetzt werden."
@@ -1198,9 +1194,8 @@ final class AppState: ObservableObject {
     }
 
     func refreshLocalVisionStatus() async {
-        await ensureServerConnected()
         do {
-            localVisionStatus = try await serverController.localPhotoVisionStatus()
+            localVisionStatus = try await OpenClawPhotosClient().localVisionStatus()
             photoResult = localVisionStatus.message
         } catch {
             photoResult = "Vision-Modell nicht geprüft. Keine Lust auf Raterei."
@@ -1269,14 +1264,13 @@ final class AppState: ObservableObject {
     }
 
     func startLocalPhotoVisionAnalysis() async {
-        await ensureServerConnected()
         photoIsLoading = true
         photoVisionProgress.status = .preparing
         photoVisionProgress.currentLabel = "Lokale Fotoanalyse wird vorbereitet."
         defer { photoIsLoading = false }
         do {
-            localVisionStatus = try await serverController.localPhotoVisionStatus()
-            photoVisionProgress = try await serverController.startLocalPhotoVisionAnalysis()
+            localVisionStatus = try await OpenClawPhotosClient().localVisionStatus()
+            photoVisionProgress = try await OpenClawPhotosClient().startLocalVisionAnalysis()
             startScanPolling()
             photoResult = localVisionStatus.available
                 ? "Lokale Fotoanalyse läuft: \(localVisionStatus.model)."
@@ -1289,11 +1283,10 @@ final class AppState: ObservableObject {
     }
 
     func resetLocalPhotoVisionDescriptions() async {
-        await ensureServerConnected()
         photoIsLoading = true
         defer { photoIsLoading = false }
         do {
-            photoVisionProgress = try await serverController.resetLocalPhotoVisionDescriptions()
+            photoVisionProgress = try await OpenClawPhotosClient().resetLocalVisionDescriptions()
             photoResult = "Lokale KI-Beschreibungen gelöscht. Sauber gemacht."
         } catch {
             photoResult = "Lokale KI-Beschreibungen nicht gelöscht. Widerstand zwecklos, offenbar."
@@ -1470,30 +1463,26 @@ final class AppState: ObservableObject {
         activityPollingTask = nil
     }
 
+    /// Ersetzt den alten Backend-Live-Feed (app/core/activity_log.py, feuerte bei jedem
+    /// einzelnen Fakt-/Datei-/Foto-Zugriff) durch OpenClaws echten Automation-Aktivitaets-
+    /// feed (scripts/memory_proxy_server.py::recent_activity(), 2026-09-11) - zeigt jetzt
+    /// die letzten Laeufe realer Hintergrund-Automationen (Mail-/Kalender-Checks etc.)
+    /// statt kurzlebiger Zugriffs-Funken. Ersetzt die Liste komplett statt nur Neues
+    /// anzuhaengen, da der Proxy bereits die aktuellen letzten Laeufe insgesamt liefert.
     private func pollRecentActivity() async {
         guard status != .offline else { return }
         do {
-            let events = try await serverController.recentActivity(since: lastActivityPollAt)
-            if let latest = events.map(\.at).max() {
-                lastActivityPollAt = latest
-            }
-            if !events.isEmpty {
-                recentActivity.append(contentsOf: events)
-            }
-            let cutoff = Date().timeIntervalSince1970 - 3
-            recentActivity.removeAll { $0.at < cutoff }
+            recentActivity = try await OpenClawMemoryClient().recentActivity()
         } catch {
-            // Stumm fehlschlagen - ein verpasster Zugriffs-Poll ist rein kosmetisch
-            // (die Kern-Ansicht bleibt sonst voll funktionsfaehig), kein lastError-Wert.
+            // Stumm fehlschlagen - ein verpasster Aktivitaets-Poll ist rein kosmetisch.
         }
     }
 
     func refreshMemoryFacts(search: String = "", category: String = "") async {
-        await ensureServerConnected()
         memoryIsLoading = true
         defer { memoryIsLoading = false }
         do {
-            let response = try await serverController.memoryFacts(search: search, category: category)
+            let response = try await OpenClawMemoryClient().facts(search: search, category: category)
             memoryFacts = response.facts
             memoryFactsTotal = response.total
             lastError = nil
@@ -1502,40 +1491,25 @@ final class AppState: ObservableObject {
         }
     }
 
-    func updateMemoryFact(_ fact: MemoryFact, fields: [String: String]) async {
-        await ensureServerConnected()
-        do {
-            try await serverController.updateMemoryFact(id: fact.id, fields: fields)
-            await refreshMemoryFacts()
-        } catch {
-            lastError = "Erinnerung konnte nicht geändert werden."
-        }
-    }
+    /// Bearbeiten (`updateMemoryFact`) gibt es fuer die neue Speicherquelle bewusst
+    /// nicht mehr - USER.md/MEMORY.md sind OpenClaws eigene kuratierte Dateien mit
+    /// einem festen Format; ein direkter Inhalts-Edit von aussen waere ein zweiter,
+    /// unkoordinierter Schreibzugriff, der leicht mit OpenClaws eigenen Aktualisierungen
+    /// kollidieren koennte. Korrektur laeuft stattdessen ueber Loeschen (siehe unten) -
+    /// Jarvis merkt sich einen korrigierten Fakt im naechsten Gespraech neu.
 
-    func confirmMemoryFact(_ fact: MemoryFact) async {
-        await ensureServerConnected()
-        do {
-            try await serverController.confirmMemoryFact(id: fact.id)
-            await refreshMemoryFacts()
-        } catch {
-            lastError = "Erinnerung konnte nicht bestätigt werden."
-        }
-    }
-
-    func rejectMemoryFact(_ fact: MemoryFact) async {
-        await ensureServerConnected()
-        do {
-            try await serverController.rejectMemoryFact(id: fact.id)
-            await refreshMemoryFacts()
-        } catch {
-            lastError = "Erinnerung konnte nicht abgelehnt werden."
-        }
-    }
+    /// "Bestaetigen"/"Ablehnen" gibt es fuer die neue Speicherquelle nicht mehr als
+    /// echtes Konzept - alles von OpenClawMemoryClient kommt bereits als "confirmed"
+    /// zurueck, MemoryView.swift blendet die Knoepfe dafuer also von selbst aus (siehe
+    /// deren "if fact.status != confirmed"-Bedingung). Diese Methoden bleiben als
+    /// harmlose No-ops stehen, nur damit MemoryView.swift/MemoryFactDetailSheet ohne
+    /// Aenderung weiter kompilieren - sie werden zur Laufzeit nie erreicht.
+    func confirmMemoryFact(_ fact: MemoryFact) async {}
+    func rejectMemoryFact(_ fact: MemoryFact) async {}
 
     func deleteMemoryFact(_ fact: MemoryFact) async {
-        await ensureServerConnected()
         do {
-            try await serverController.deleteMemoryFact(id: fact.id)
+            try await OpenClawMemoryClient().deleteFact(id: fact.id)
             memoryFacts.removeAll { $0.id == fact.id }
             memoryFactsTotal = max(0, memoryFactsTotal - 1)
         } catch {

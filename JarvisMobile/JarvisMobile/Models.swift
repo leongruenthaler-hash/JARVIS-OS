@@ -13,6 +13,7 @@ struct ServerHealth: Decodable {
 struct ChatCompletionRequest: Encodable {
     let model: String
     let messages: [ChatCompletionMessage]
+    let user: String
 }
 
 struct ChatCompletionMessage: Codable {

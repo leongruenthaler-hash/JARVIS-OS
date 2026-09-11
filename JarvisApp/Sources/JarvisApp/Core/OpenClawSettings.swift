@@ -90,4 +90,72 @@ enum OpenClawSettings {
         guard !trimmedHost.isEmpty else { return nil }
         return URL(string: "http://\(trimmedHost):18792")
     }
+
+    /// Separate token for the Mac Mini's standalone Fotos-Proxy
+    /// (scripts/photos_proxy_server.py, port 18793) - replaces the old backend's
+    /// /api/photos/permission-status|permission|scan|reset|vision-status|
+    /// vision/analyze|vision/reset endpoints (2026-09-11, "Fotos" Fachbereich
+    /// Migration). Freitextsuche/Album/Export laufen weiterhin ueber OpenClaw-Chat
+    /// (performPhotoCommand + der bereits installierte jarvis-photos-Skill).
+    static var photosToken: String? {
+        get { KeychainStore.read(service: keychainService, account: photosKeychainAccount) }
+        set {
+            if let newValue, !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                KeychainStore.save(newValue, service: keychainService, account: photosKeychainAccount)
+            } else {
+                KeychainStore.delete(service: keychainService, account: photosKeychainAccount)
+            }
+        }
+    }
+    private static let photosKeychainAccount = "photos-proxy-token"
+
+    /// Same Mac Mini host as `baseURL`, different port - see
+    /// scripts/photos_proxy_server.py::PORT.
+    static var photosBaseURL: URL? {
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedHost.isEmpty else { return nil }
+        return URL(string: "http://\(trimmedHost):18793")
+    }
+
+    /// Stable per-install identity sent as the OpenAI-compat `user` field on every
+    /// /v1/chat/completions call (2026-09-11, "Jarvis vergisst alles beim Neustart"-Fix,
+    /// same fix as JarvisMobile's RemoteSettings.sessionUser - see there for the full,
+    /// live-verified finding: OpenClaw's Gateway keys server-side session/memory
+    /// continuity off this field, and every call previously omitted it entirely, so each
+    /// request got a brand-new throwaway session). Generated once, kept in the Keychain so
+    /// it never changes across future launches on this Mac.
+    static var sessionUser: String {
+        if let existing = KeychainStore.read(service: keychainService, account: sessionUserKeychainAccount) {
+            return existing
+        }
+        let generated = "jarvis-mac-\(UUID().uuidString)"
+        KeychainStore.save(generated, service: keychainService, account: sessionUserKeychainAccount)
+        return generated
+    }
+    private static let sessionUserKeychainAccount = "session-user-id"
+
+    /// Separate token for the Mac Mini's standalone memory proxy
+    /// (scripts/memory_proxy_server.py, port 18794) - replaces the old backend's
+    /// /api/memory/facts* endpoints (2026-09-11, "Gedaechtnis"-Fachbereich Migration).
+    /// Serves OpenClaw's own USER.md/MEMORY.md instead of the now-irrelevant
+    /// app/memory.py long_memory.json.
+    static var memoryToken: String? {
+        get { KeychainStore.read(service: keychainService, account: memoryKeychainAccount) }
+        set {
+            if let newValue, !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                KeychainStore.save(newValue, service: keychainService, account: memoryKeychainAccount)
+            } else {
+                KeychainStore.delete(service: keychainService, account: memoryKeychainAccount)
+            }
+        }
+    }
+    private static let memoryKeychainAccount = "memory-proxy-token"
+
+    /// Same Mac Mini host as `baseURL`, different port - see
+    /// scripts/memory_proxy_server.py::PORT.
+    static var memoryBaseURL: URL? {
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedHost.isEmpty else { return nil }
+        return URL(string: "http://\(trimmedHost):18794")
+    }
 }

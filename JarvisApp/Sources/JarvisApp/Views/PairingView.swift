@@ -16,6 +16,10 @@ struct PairingView: View {
     @State private var ttsTokenSaved = OpenClawSettings.ttsToken != nil
     @State private var filesTokenDraft = ""
     @State private var filesTokenSaved = OpenClawSettings.filesToken != nil
+    @State private var photosTokenDraft = ""
+    @State private var photosTokenSaved = OpenClawSettings.photosToken != nil
+    @State private var memoryTokenDraft = ""
+    @State private var memoryTokenSaved = OpenClawSettings.memoryToken != nil
     @State private var remoteTokenDraft = ""
     @State private var remoteTokenSaved = RemoteConnectionSettings.token != nil
 
@@ -179,6 +183,80 @@ struct PairingView: View {
                                 Button(role: .destructive) {
                                     OpenClawSettings.filesToken = nil
                                     filesTokenSaved = false
+                                } label: {
+                                    Label("Token löschen", systemImage: "trash")
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                    }
+
+                    Divider().opacity(0.4)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Fotos-Proxy")
+                            .font(.headline)
+                        Text(photosTokenSaved ? "Token ist in der macOS-Keychain gespeichert." : "Noch kein Token gespeichert - Fotos-Fachbereich bleibt solange offline.")
+                            .font(.callout)
+                            .foregroundStyle(photosTokenSaved ? Color.secondary : Color.orange)
+                        Text("Auf dem Mac Mini im Terminal ausgegeben, sobald scripts/photos_proxy_server.py läuft.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        SecureField("Fotos-Proxy-Token vom Mac Mini", text: $photosTokenDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 320)
+
+                        HStack(spacing: 10) {
+                            Button("Token speichern") {
+                                OpenClawSettings.photosToken = photosTokenDraft
+                                photosTokenDraft = ""
+                                photosTokenSaved = OpenClawSettings.photosToken != nil
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(photosTokenDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                            if photosTokenSaved {
+                                Button(role: .destructive) {
+                                    OpenClawSettings.photosToken = nil
+                                    photosTokenSaved = false
+                                } label: {
+                                    Label("Token löschen", systemImage: "trash")
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                    }
+
+                    Divider().opacity(0.4)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Gedächtnis-Proxy")
+                            .font(.headline)
+                        Text(memoryTokenSaved ? "Token ist in der macOS-Keychain gespeichert." : "Noch kein Token gespeichert - Gedächtnis-Ansicht bleibt solange offline.")
+                            .font(.callout)
+                            .foregroundStyle(memoryTokenSaved ? Color.secondary : Color.orange)
+                        Text("Auf dem Mac Mini im Terminal ausgegeben, sobald scripts/memory_proxy_server.py läuft.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        SecureField("Gedächtnis-Proxy-Token vom Mac Mini", text: $memoryTokenDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 320)
+
+                        HStack(spacing: 10) {
+                            Button("Token speichern") {
+                                OpenClawSettings.memoryToken = memoryTokenDraft
+                                memoryTokenDraft = ""
+                                memoryTokenSaved = OpenClawSettings.memoryToken != nil
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(memoryTokenDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                            if memoryTokenSaved {
+                                Button(role: .destructive) {
+                                    OpenClawSettings.memoryToken = nil
+                                    memoryTokenSaved = false
                                 } label: {
                                     Label("Token löschen", systemImage: "trash")
                                 }

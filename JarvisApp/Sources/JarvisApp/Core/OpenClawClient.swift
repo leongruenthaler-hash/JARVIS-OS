@@ -20,19 +20,21 @@ struct OpenClawClient {
         try await get("/health")
     }
 
-    /// history/message are converted into the OpenAI messages array; OpenClaw's agent
-    /// itself keeps session memory server-side (SOUL.md/MEMORY.md), so the history array
-    /// here is mainly for a fresh/stateless call context. Returns JarvisApp's existing
-    /// `ChatResponse` type (JarvisAPIClient.swift) so `AppState.swift`'s call sites don't
-    /// need their own response-handling logic duplicated - `source`/`model` are filled
-    /// with a fixed "openclaw" label since OpenClaw doesn't report per-reply
-    /// provider/model info the way the old backend did.
+    /// history/message are converted into the OpenAI messages array. OpenClaw's agent
+    /// keeps session memory server-side (SOUL.md/MEMORY.md) keyed off the `user` field
+    /// (OpenClawSettings.sessionUser, a stable per-install id) - without it every call got
+    /// a fresh throwaway session, which was the actual cause of Jarvis "forgetting
+    /// everything" on app relaunch (see OpenClawSettings.sessionUser for the verified
+    /// finding). Returns JarvisApp's existing `ChatResponse` type (JarvisAPIClient.swift)
+    /// so `AppState.swift`'s call sites don't need their own response-handling logic
+    /// duplicated - `source`/`model` are filled with a fixed "openclaw" label since
+    /// OpenClaw doesn't report per-reply provider/model info the way the old backend did.
     func sendChat(_ message: String, history: [[String: String]] = []) async throws -> ChatResponse {
         var messages = history.map { entry in
             ChatCompletionMessage(role: entry["role"] ?? "user", content: entry["content"] ?? "")
         }
         messages.append(ChatCompletionMessage(role: "user", content: message))
-        let request = ChatCompletionRequest(model: "openclaw", messages: messages)
+        let request = ChatCompletionRequest(model: "openclaw", messages: messages, user: OpenClawSettings.sessionUser)
         let response: ChatCompletionResponse = try await post("/v1/chat/completions", body: request)
         let answer = response.choices.first?.message.content ?? ""
         return ChatResponse(answer: answer, source: "openclaw", model: "openclaw")
@@ -91,6 +93,7 @@ struct OpenClawHealth: Decodable {
 private struct ChatCompletionRequest: Encodable {
     let model: String
     let messages: [ChatCompletionMessage]
+    let user: String
 }
 
 private struct ChatCompletionMessage: Codable {

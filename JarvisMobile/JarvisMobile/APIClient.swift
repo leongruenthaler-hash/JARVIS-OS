@@ -11,15 +11,19 @@ struct APIClient {
         try await get("/health")
     }
 
-    /// history/message are converted into the OpenAI messages array; OpenClaw's
-    /// agent itself keeps session memory server-side (SOUL.md/MEMORY.md), so
-    /// the history array here is mainly for a fresh/stateless call context.
+    /// history/message are converted into the OpenAI messages array. OpenClaw's agent
+    /// keeps session memory server-side (SOUL.md/MEMORY.md) keyed off the `user` field
+    /// (RemoteSettings.sessionUser, a stable per-install id) - without it every call got a
+    /// fresh throwaway session, which was the actual cause of Jarvis "forgetting
+    /// everything" on app relaunch (see RemoteSettings.sessionUser for the verified
+    /// finding). The history array is still sent for the current chat screen's own
+    /// context, on top of whatever the Gateway retains server-side.
     func sendChat(_ message: String, history: [[String: String]] = []) async throws -> ChatResponse {
         var messages = history.map { entry in
             ChatCompletionMessage(role: entry["role"] ?? "user", content: entry["content"] ?? "")
         }
         messages.append(ChatCompletionMessage(role: "user", content: message))
-        let request = ChatCompletionRequest(model: "openclaw", messages: messages)
+        let request = ChatCompletionRequest(model: "openclaw", messages: messages, user: RemoteSettings.sessionUser)
         let response: ChatCompletionResponse = try await post("/v1/chat/completions", body: request)
         let answer = response.choices.first?.message.content ?? ""
         return ChatResponse(answer: answer)

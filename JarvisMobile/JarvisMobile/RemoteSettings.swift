@@ -65,4 +65,53 @@ enum RemoteSettings {
         guard !trimmedHost.isEmpty else { return nil }
         return URL(string: "http://\(trimmedHost):18790")
     }
+
+    /// Stable per-install identity sent as the OpenAI-compat `user` field on every
+    /// /v1/chat/completions call (2026-09-11, "Jarvis vergisst alles beim Neustart"-Fix).
+    /// Verified live: OpenClaw's Gateway keys its server-side session/memory continuity
+    /// off this field - two calls with the SAME `user` value share full context (a fact
+    /// stated in call 1 with no history array was correctly recalled in call 2), while a
+    /// different `user` value sees none of it. Without this, every call previously omitted
+    /// `user` entirely, so the Gateway spun up a brand-new throwaway session per request -
+    /// the actual root cause of Jarvis appearing to forget everything on app relaunch
+    /// (its own long-term memory/MEMORY.md pipeline was fine all along, just never reached
+    /// by these apps). Generated once, kept in the Keychain (survives reinstalls the same
+    /// way the pairing token does) so it never changes and Jarvis keeps the same
+    /// conversation identity across every future launch of this app on this device.
+    static var sessionUser: String {
+        if let existing = KeychainStore.read(service: keychainService, account: sessionUserKeychainAccount) {
+            return existing
+        }
+        let generated = "jarvis-mobile-\(UUID().uuidString)"
+        KeychainStore.save(generated, service: keychainService, account: sessionUserKeychainAccount)
+        return generated
+    }
+    private static let sessionUserKeychainAccount = "session-user-id"
+
+    /// Separate token for the Mac Mini's standalone memory proxy
+    /// (scripts/memory_proxy_server.py, port 18794) - same proxy JarvisApp uses.
+    /// Serves OpenClaw's own USER.md/MEMORY.md/installed-skills list as structured
+    /// facts, replacing the previous "ask Jarvis via chat to dump MEMORY.md as
+    /// plain text" hack in MemoryView.swift (fragile, and only ever showed
+    /// MEMORY.md - never USER.md or Jarvis's own tool/skill inventory, which is
+    /// exactly what was missing here, 2026-09-11).
+    static var memoryToken: String? {
+        get { KeychainStore.read(service: keychainService, account: memoryKeychainAccount) }
+        set {
+            if let newValue, !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                KeychainStore.save(newValue, service: keychainService, account: memoryKeychainAccount)
+            } else {
+                KeychainStore.delete(service: keychainService, account: memoryKeychainAccount)
+            }
+        }
+    }
+    private static let memoryKeychainAccount = "memory-proxy-token"
+
+    /// Same Mac Mini host as `baseURL`, different port - see
+    /// scripts/memory_proxy_server.py::PORT.
+    static var memoryBaseURL: URL? {
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedHost.isEmpty else { return nil }
+        return URL(string: "http://\(trimmedHost):18794")
+    }
 }
