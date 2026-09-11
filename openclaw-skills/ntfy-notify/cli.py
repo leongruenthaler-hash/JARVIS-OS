@@ -122,16 +122,29 @@ def cmd_send(args: argparse.Namespace) -> None:
     port = int(config.get("ntfy_port", 443 if scheme == "https" else 80))
     default_port = 443 if scheme == "https" else 80
     netloc = host if port == default_port else f"{host}:{port}"
-    target = f"{scheme}://{netloc}/{topic}"
-
-    headers = {"Title": args.title, "Priority": args.priority}
+    # JSON-Publish statt Title/Tags als rohe HTTP-Header (2026-09-11-Fix): ntfy
+    # unterstuetzt UTF-8 in Headern laut eigener Doku nicht in jeder
+    # Bibliothek/Sprache zuverlaessig - live beobachtet genau dieses Problem mit
+    # deutschen Umlauten im Titel. POST an die Basis-URL statt /<topic>, topic als
+    # Feld im JSON-Body - der ganze Payload ist dann regulaeres UTF-8-JSON.
+    target = f"{scheme}://{netloc}/"
+    priority_map = {"min": 1, "low": 2, "default": 3, "high": 4, "urgent": 5}
+    payload: dict[str, Any] = {
+        "topic": topic,
+        "message": args.message,
+        "title": args.title,
+        "priority": priority_map.get(args.priority, 3),
+    }
     if args.url:
-        headers["Click"] = args.url
+        payload["click"] = args.url
     if args.tags:
-        headers["Tags"] = args.tags
+        payload["tags"] = [t.strip() for t in args.tags.split(",") if t.strip()]
 
     try:
-        request = urllib.request.Request(target, data=args.message.encode("utf-8"), headers=headers, method="POST")
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        request = urllib.request.Request(
+            target, data=body, headers={"Content-Type": "application/json; charset=utf-8"}, method="POST"
+        )
         with urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as response:
             ok = 200 <= response.status < 300
     except (urllib.error.URLError, TimeoutError, ConnectionError, OSError, ValueError, TypeError) as exc:

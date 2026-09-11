@@ -10,6 +10,8 @@ struct PairingView: View {
     @State private var ttsTokenSaved = RemoteSettings.ttsToken != nil
     @State private var memoryTokenDraft = ""
     @State private var memoryTokenSaved = RemoteSettings.memoryToken != nil
+    @State private var gatewayActivityTokenDraft = ""
+    @State private var gatewayActivityTokenSaved = RemoteSettings.gatewayActivityToken != nil
 
     var body: some View {
         Form {
@@ -106,6 +108,34 @@ struct PairingView: View {
                     Button("Token löschen", role: .destructive) {
                         RemoteSettings.memoryToken = nil
                         memoryTokenSaved = false
+                    }
+                }
+            }
+
+            Section("Gateway-Aktivitäts-Proxy") {
+                if gatewayActivityTokenSaved {
+                    Label("Token ist in der Keychain gespeichert.", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                } else {
+                    Label("Noch kein Token gespeichert - Live-Status während Jarvis arbeitet bleibt solange aus.", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
+                Text("Auf dem Mac Mini im Terminal ausgegeben, sobald scripts/gateway_activity_proxy.mjs läuft.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                SecureField("Gateway-Aktivitäts-Proxy-Token vom Mac Mini", text: $gatewayActivityTokenDraft)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button("Token speichern") {
+                    RemoteSettings.gatewayActivityToken = gatewayActivityTokenDraft
+                    gatewayActivityTokenDraft = ""
+                    gatewayActivityTokenSaved = RemoteSettings.gatewayActivityToken != nil
+                }
+                .disabled(gatewayActivityTokenDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                if gatewayActivityTokenSaved {
+                    Button("Token löschen", role: .destructive) {
+                        RemoteSettings.gatewayActivityToken = nil
+                        gatewayActivityTokenSaved = false
                     }
                 }
             }

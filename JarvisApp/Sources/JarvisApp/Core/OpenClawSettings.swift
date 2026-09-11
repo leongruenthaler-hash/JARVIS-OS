@@ -124,11 +124,16 @@ enum OpenClawSettings {
     /// continuity off this field, and every call previously omitted it entirely, so each
     /// request got a brand-new throwaway session). Generated once, kept in the Keychain so
     /// it never changes across future launches on this Mac.
+    /// Immer klein geschrieben (2026-09-11-Nachtrag) - siehe JarvisMobile's
+    /// RemoteSettings.sessionUser fuer die volle, live bestaetigte Begruendung: OpenClaw
+    /// legt die Session serverseitig klein geschrieben an, UUID().uuidString liefert aber
+    /// Grossbuchstaben - ohne diese Normalisierung abonnierten GatewayClient/der
+    /// Aktivitaets-Proxy nachweislich die falsche, nie existierende Session.
     static var sessionUser: String {
         if let existing = KeychainStore.read(service: keychainService, account: sessionUserKeychainAccount) {
-            return existing
+            return existing.lowercased()
         }
-        let generated = "jarvis-mac-\(UUID().uuidString)"
+        let generated = "jarvis-mac-\(UUID().uuidString)".lowercased()
         KeychainStore.save(generated, service: keychainService, account: sessionUserKeychainAccount)
         return generated
     }
@@ -157,5 +162,32 @@ enum OpenClawSettings {
         let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedHost.isEmpty else { return nil }
         return URL(string: "http://\(trimmedHost):18794")
+    }
+
+    /// Token fuer den Mac Mini's Gateway-Aktivitaets-Proxy (scripts/gateway_activity_
+    /// proxy.mjs, Port 18795, 2026-09-11) - loest das "role operator + scopes
+    /// [operator.read] wird fuer Remote-WebSocket-Verbindungen verweigert"-Problem
+    /// (live verifiziert: funktioniert nur ueber Loopback, echte Remote-Scopes
+    /// braeuchten volles kryptographisches Geraete-Pairing). Dieser Proxy haelt die
+    /// (funktionierende) Loopback-Verbindung zum Gateway und reicht den Live-Status
+    /// per normalem HTTP-Polling weiter, wie jeder andere Proxy hier auch.
+    static var gatewayActivityToken: String? {
+        get { KeychainStore.read(service: keychainService, account: gatewayActivityKeychainAccount) }
+        set {
+            if let newValue, !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                KeychainStore.save(newValue, service: keychainService, account: gatewayActivityKeychainAccount)
+            } else {
+                KeychainStore.delete(service: keychainService, account: gatewayActivityKeychainAccount)
+            }
+        }
+    }
+    private static let gatewayActivityKeychainAccount = "gateway-activity-proxy-token"
+
+    /// Same Mac Mini host as `baseURL`, different port - see
+    /// scripts/gateway_activity_proxy.mjs::PORT.
+    static var gatewayActivityBaseURL: URL? {
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedHost.isEmpty else { return nil }
+        return URL(string: "http://\(trimmedHost):18795")
     }
 }

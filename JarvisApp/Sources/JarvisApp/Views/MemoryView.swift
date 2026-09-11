@@ -10,11 +10,18 @@ private enum MemoryDisplayMode {
 
 struct MemoryView: View {
     @EnvironmentObject private var appState: AppState
+    /// Live "was Jarvis gerade tut"-Feed (2026-09-11) - geteilte Instanz von
+    /// JarvisMacApp.swift, treibt das Aufblitzen passender Kugel-Punkte.
+    @EnvironmentObject private var gateway: GatewayClient
     @State private var searchText = ""
     @State private var selectedCategory = ""
     @State private var factPendingDeletion: MemoryFact?
     @State private var displayMode: MemoryDisplayMode = .core
     @State private var selectedFact: MemoryFact?
+
+    private var activeCategories: Set<String> {
+        Set(gateway.activeTools.compactMap { MemorySphereCategory.category(forToolName: $0.name, title: $0.title) })
+    }
 
     private var categories: [String] {
         Array(Set(appState.memoryFacts.map(\.category))).sorted()
@@ -56,6 +63,7 @@ struct MemoryView: View {
             HStack(alignment: .top, spacing: 0) {
                 MemorySphereView(
                     facts: appState.memoryFacts,
+                    activeCategories: activeCategories,
                     onSelect: { selectedFact = $0 }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

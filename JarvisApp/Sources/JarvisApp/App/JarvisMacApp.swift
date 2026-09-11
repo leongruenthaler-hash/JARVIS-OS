@@ -6,6 +6,12 @@ import UserNotifications
 struct JarvisMacApp: App {
     @NSApplicationDelegateAdaptor(JarvisAppDelegate.self) private var appDelegate
     @StateObject private var appState = AppState()
+    /// Eine gemeinsame Instanz fuer ChatView UND MemoryView (2026-09-11) - damit das
+    /// Kugel-Aufblitzen in der Speicher-Ansicht dieselbe Live-Verbindung nutzt, die auch
+    /// den Text-Status im Chat speist, statt jede View ihre eigene, unabhaengige
+    /// Verbindung aufzumachen (die dann getrennt verbinden/trennen wuerden, je nachdem
+    /// welcher Tab gerade offen ist).
+    @StateObject private var gatewayClient = GatewayClient()
     @AppStorage("JarvisActiveTheme") private var activeThemeRaw = JarvisTheme.signal.rawValue
     // Nicht direkt gelesen, aber noetig: JarvisTheme.primaryAccent liest den Farbton per
     // UserDefaults.standard direkt (kein @AppStorage), da es eine reine enum-Property ist.
@@ -24,6 +30,7 @@ struct JarvisMacApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(appState)
+                .environmentObject(gatewayClient)
                 .environment(\.jarvisTheme, activeTheme)
                 .onAppear {
                     JarvisAppDelegate.activateJarvisWindow()
@@ -31,6 +38,10 @@ struct JarvisMacApp: App {
                 }
                 .task {
                     await appState.bootstrap()
+                }
+                .task {
+                    guard OpenClawSettings.isPaired else { return }
+                    gatewayClient.connect(sessionUser: OpenClawSettings.sessionUser)
                 }
         }
 

@@ -55,10 +55,17 @@ Du gibst dich NIE als Herr Gruenthaler selbst aus - mach in JEDER Antwort
 klar erkennbar, dass du sein Assistent Jarvis bist.
 
 STANDARDFALL (kein konkreter Terminvorschlag mit Tag UND Uhrzeit erkennbar):
-Antworte NUR mit exakt diesem Satz, sonst nichts:
-"Guten Tag, hier ist Jarvis, der persoenliche Assistent von Herrn
-Gruenthaler. Ich werde ihm ueber Ihre Nachricht Bescheid geben, und er
-wird sich in Kuerze bei Ihnen melden."
+Schreib eine eigene, individuelle Antwort, die WIRKLICH auf den konkreten
+Inhalt der eingehenden Nachricht eingeht (worum es geht, welche Frage
+gestellt wurde, welcher Ton angeschlagen wird) - keine feste Textbaustein-
+Antwort, jede Antwort soll spuerbar zu genau dieser Nachricht passen.
+Behalte dabei IMMER zwei feste Bestandteile bei:
+1. Mach klar erkennbar, dass hier Jarvis (Assistent) schreibt, nicht Herr
+   Gruenthaler selbst.
+2. Mach klar, dass du die Nachricht an Herrn Gruenthaler weiterleitest/ihm
+   Bescheid gibst und er sich selbst meldet - du beantwortest inhaltliche
+   Fragen nicht eigenstaendig, sondern nur die Weiterleitung.
+Kurz, hoeflich, ein bis zwei Saetze reichen meist.
 
 TERMINFALL (die Nachricht nennt einen konkreten Tag UND eine konkrete
 Uhrzeit als Terminvorschlag):
@@ -286,10 +293,16 @@ async function sendNtfyPush(title, message) {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 5000)
     try {
-      const res = await fetch(`${scheme}://${host}/${topic}`, {
+      // JSON-Publish statt Title als rohem HTTP-Header (2026-09-11-Fix): ntfy
+      // unterstuetzt UTF-8 in Headern zwar laut eigener Doku, aber "nicht jede
+      // Bibliothek/Sprache" - live beobachtet genau dieses Problem mit deutschen
+      // Umlauten im Titel. Der JSON-Body-Weg (POST an die Basis-URL statt
+      // /<topic>, topic als Feld im Body) umgeht das Encoding-Problem komplett,
+      // da der ganze Payload reguläres UTF-8-JSON ist, kein Header.
+      const res = await fetch(`${scheme}://${host}/`, {
         method: 'POST',
-        headers: { Title: title, Priority: 'default' },
-        body: message,
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify({ topic, title, message, priority: 3 }),
         signal: controller.signal,
       })
       return res.ok

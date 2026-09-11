@@ -20,6 +20,8 @@ struct PairingView: View {
     @State private var photosTokenSaved = OpenClawSettings.photosToken != nil
     @State private var memoryTokenDraft = ""
     @State private var memoryTokenSaved = OpenClawSettings.memoryToken != nil
+    @State private var gatewayActivityTokenDraft = ""
+    @State private var gatewayActivityTokenSaved = OpenClawSettings.gatewayActivityToken != nil
     @State private var remoteTokenDraft = ""
     @State private var remoteTokenSaved = RemoteConnectionSettings.token != nil
 
@@ -257,6 +259,43 @@ struct PairingView: View {
                                 Button(role: .destructive) {
                                     OpenClawSettings.memoryToken = nil
                                     memoryTokenSaved = false
+                                } label: {
+                                    Label("Token löschen", systemImage: "trash")
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                    }
+
+                    Divider().opacity(0.4)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Gateway-Aktivitäts-Proxy")
+                            .font(.headline)
+                        Text(gatewayActivityTokenSaved ? "Token ist in der macOS-Keychain gespeichert." : "Noch kein Token gespeichert - Live-Status während Jarvis arbeitet bleibt solange aus.")
+                            .font(.callout)
+                            .foregroundStyle(gatewayActivityTokenSaved ? Color.secondary : Color.orange)
+                        Text("Auf dem Mac Mini im Terminal ausgegeben, sobald scripts/gateway_activity_proxy.mjs läuft.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        SecureField("Gateway-Aktivitäts-Proxy-Token vom Mac Mini", text: $gatewayActivityTokenDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 320)
+
+                        HStack(spacing: 10) {
+                            Button("Token speichern") {
+                                OpenClawSettings.gatewayActivityToken = gatewayActivityTokenDraft
+                                gatewayActivityTokenDraft = ""
+                                gatewayActivityTokenSaved = OpenClawSettings.gatewayActivityToken != nil
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(gatewayActivityTokenDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                            if gatewayActivityTokenSaved {
+                                Button(role: .destructive) {
+                                    OpenClawSettings.gatewayActivityToken = nil
+                                    gatewayActivityTokenSaved = false
                                 } label: {
                                     Label("Token löschen", systemImage: "trash")
                                 }

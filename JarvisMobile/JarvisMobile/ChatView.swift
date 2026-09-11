@@ -15,6 +15,10 @@ struct ChatView: View {
     @FocusState private var inputFocused: Bool
     @StateObject private var voice = VoiceManager()
     @StateObject private var keyboard = KeyboardObserver()
+    /// Live "was Jarvis gerade tut"-Feed (2026-09-11) - geteilte Instanz von
+    /// JarvisMobileApp.swift, siehe GatewayClient.swift. Ersetzt die bisherige reine
+    /// Rate-Heuristik (Self.fillerPhrase) durch echte Server-Ereignisse, wo verfuegbar.
+    @EnvironmentObject private var gateway: GatewayClient
     @AppStorage(VoiceManager.speakRepliesKey) private var speakRepliesAloud = true
     @AppStorage(VoiceManager.wakeListeningEnabledKey) private var wakeListeningEnabled = false
 
@@ -219,7 +223,7 @@ struct ChatView: View {
                             .id(message.id)
                     }
                     if isSending {
-                        TypingIndicator()
+                        TypingIndicator(activity: gateway.currentActivity, tools: gateway.activeTools)
                             .id("typing")
                     }
                 }
@@ -503,8 +507,13 @@ private struct ChatBubble: View {
 }
 
 /// Animated three-dot indicator shown while waiting for Jarvis's response -
-/// makes the wait feel alive instead of a frozen UI (ChatGPT-style).
+/// makes the wait feel alive instead of a frozen UI (ChatGPT-style). When live
+/// Gateway events are available (2026-09-11, GatewayClient.swift), shows what Jarvis is
+/// actually doing (session.observer headline + running tool names) instead of just dots.
 private struct TypingIndicator: View {
+    let activity: String?
+    let tools: [GatewayClient.ActiveTool]
+
     @State private var phase = 0
 
     var body: some View {
@@ -512,12 +521,27 @@ private struct TypingIndicator: View {
             Text("🤖")
                 .font(.system(size: 20))
                 .frame(width: 28, height: 28)
-            HStack(spacing: 4) {
-                ForEach(0..<3, id: \.self) { index in
-                    Circle()
-                        .frame(width: 7, height: 7)
-                        .foregroundStyle(JarvisTheme.textSecondary)
-                        .opacity(phase == index ? 1 : 0.3)
+            VStack(alignment: .leading, spacing: 4) {
+                if let activity {
+                    Text(activity)
+                        .font(.callout)
+                        .foregroundStyle(.white)
+                }
+                if !tools.isEmpty {
+                    Text(tools.map(\.title).joined(separator: " · "))
+                        .font(.caption2)
+                        .foregroundStyle(JarvisTheme.accent)
+                        .lineLimit(1)
+                }
+                if activity == nil && tools.isEmpty {
+                    HStack(spacing: 4) {
+                        ForEach(0..<3, id: \.self) { index in
+                            Circle()
+                                .frame(width: 7, height: 7)
+                                .foregroundStyle(JarvisTheme.textSecondary)
+                                .opacity(phase == index ? 1 : 0.3)
+                        }
+                    }
                 }
             }
             .padding(.horizontal, 14)
@@ -527,6 +551,8 @@ private struct TypingIndicator: View {
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             Spacer(minLength: 48)
         }
+        .animation(.easeOut(duration: 0.2), value: activity)
+        .animation(.easeOut(duration: 0.2), value: tools)
         .onAppear {
             Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { timer in
                 guard isSendingStillRelevant else { timer.invalidate(); return }

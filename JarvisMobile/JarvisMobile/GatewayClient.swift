@@ -1,215 +1,113 @@
 import Foundation
 
-/// Direct WebSocket client for OpenClaw's Gateway protocol (docs.openclaw.ai/
-/// gateway/protocol) - used instead of the simpler REST /v1/chat/completions
-/// specifically to get LIVE tool-execution events while a message is being
-/// answered (2026-09-07: user wants to see, in real time, which skill/memory
-/// Jarvis is actually using - REST has no equivalent, only WS's per-session
-/// event subscription does).
+/// Live "was Jarvis gerade tut"-Feed (2026-09-11, dritte Version) - fragt periodisch
+/// scripts/gateway_activity_proxy.mjs (Port 18795) per normalem HTTP ab, statt selbst
+/// eine WebSocket-Verbindung zum Gateway zu halten.
 ///
-/// The exact field names for tool-lifecycle events are only partially
-/// documented upstream, so every parsed event ALSO republishes its raw JSON
-/// via `rawEvents` - if `toolEvents`/`messageEvents` come out empty or wrong
-/// while `rawEvents` clearly shows tool activity, that's the signal the
-/// field-name guesses below need adjusting, not that nothing is happening.
+/// Grund fuer diesen Umweg: ein direkter WS-Connect von diesem Geraet aus (role
+/// "operator", scopes ["operator.read"]) verbindet zwar problemlos, aber das
+/// anschliessende Session-Subscribe scheitert live reproduzierbar mit "FORBIDDEN:
+/// missing scope: operator.read" - dieser Scope wird nur fuer Loopback-Verbindungen
+/// automatisch gewaehrt, nicht fuer Remote-/Tailscale-Clients (bestaetigt sowohl direkt
+/// vom iPhone als auch per Test-Skript vom Air aus ueber dieselbe Tailscale-Route).
+/// Echte Remote-Scopes braeuchten volles kryptographisches Geraete-Pairing (signierte
+/// Challenge, v3-Payload-Schema laut OpenClaw-Doku) - ein eigenes, deutlich groesseres
+/// Feature. Der Proxy loest das eleganter: er laeuft direkt auf dem Mac Mini, haelt dort
+/// die (funktionierende) Loopback-WS-Verbindung, und reicht den Live-Status per HTTP
+/// weiter - dasselbe Muster wie jeder andere scripts/*_proxy Dienst hier.
 @MainActor
 final class GatewayClient: NSObject, ObservableObject {
-    struct ToolEvent: Identifiable, Equatable {
-        let id = UUID()
-        let toolName: String
-        let state: String
-        let detail: String?
-        let date = Date()
+    struct ActiveTool: Identifiable, Equatable {
+        let id: String
+        let name: String
+        let title: String
     }
 
+    /// Ob der Proxy selbst per HTTP erreichbar ist.
     @Published private(set) var isConnected = false
-    @Published private(set) var toolEvents: [ToolEvent] = []
-    @Published private(set) var lastAssistantText: String?
+    /// Ob der Proxy seinerseits erfolgreich mit dem Gateway verbunden ist (aus der
+    /// "connected"-Antwort des Proxys) - getrennt von isConnected, falls der Proxy zwar
+    /// erreichbar ist, aber seine eigene Gateway-Verbindung gerade neu aufbaut.
+    @Published private(set) var isSubscribed = false
+    @Published private(set) var currentActivity: String?
+    @Published private(set) var activeTools: [ActiveTool] = []
     @Published var connectionError: String?
-    /// Last few raw server frames, newest last - diagnostic escape hatch
-    /// described above.
-    @Published private(set) var rawEvents: [String] = []
+    /// TEMPORAER (2026-09-11): kurzes, persistentes Protokoll der letzten Ereignisse.
+    @Published private(set) var recentEventLog: [String] = []
 
-    private var task: URLSessionWebSocketTask?
-    private var requestCounter = 0
-    private let sessionKey = "agent:main:main"
+    private struct ActivityResponse: Decodable {
+        let connected: Bool
+        let currentActivity: String?
+        let activeTools: [ActiveTool]
+    }
 
-    func connect() {
-        guard let host = GatewayClient.wsHost() else {
-            connectionError = "Keine Mac-Mini-Adresse konfiguriert."
-            return
+    private var pollTask: Task<Void, Never>?
+    private var sessionUser: String?
+
+    func connect(sessionUser: String) {
+        guard pollTask == nil || self.sessionUser != sessionUser else { return }
+        disconnect()
+        self.sessionUser = sessionUser
+        pollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.pollOnce()
+                try? await Task.sleep(nanoseconds: 700_000_000)
+            }
         }
-        guard let token = RemoteSettings.token else {
-            connectionError = "Kein Token konfiguriert."
-            return
-        }
-        guard let url = URL(string: "ws://\(host):18789") else { return }
-
-        let request = URLRequest(url: url)
-        let session = URLSession(configuration: .default, delegate: nil, delegateQueue: nil)
-        let task = session.webSocketTask(with: request)
-        self.task = task
-        task.resume()
-        receiveLoop()
-        sendConnectRequest(token: token)
     }
 
     func disconnect() {
-        task?.cancel(with: .goingAway, reason: nil)
-        task = nil
+        pollTask?.cancel()
+        pollTask = nil
         isConnected = false
+        isSubscribed = false
+        currentActivity = nil
+        activeTools = []
     }
 
-    /// Sends a chat message over the SAME connection whose tool events we
-    /// subscribe to, so activity can actually be attributed to this request
-    /// (a message sent via the separate REST endpoint has no guaranteed
-    /// relationship to this session's event stream).
-    func send(message: String) {
-        toolEvents.removeAll()
-        lastAssistantText = nil
-        // "channel":"webchat" aenderte NICHTS am SESSION_MUTATION_TARGET_
-        // REQUIRED-Fehler - das war der falsche Ansatz. Der health-Event
-        // zeigte an anderer Stelle "target":"owner" (im Heartbeat-Config) -
-        // Versuch: ein eigenes "target"-Feld statt/neben "channel".
-        sendRequest(method: "chat.send", params: [
-            "key": sessionKey,
-            "message": message,
-            "queueMode": "followup",
-            "target": "owner",
-        ])
+    private func log(_ line: String) {
+        let timestamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
+        recentEventLog.append("\(timestamp) \(line)")
+        if recentEventLog.count > 25 { recentEventLog.removeFirst(recentEventLog.count - 25) }
     }
 
-    private static func wsHost() -> String? {
-        let trimmed = RemoteSettings.host.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
-    private func nextID() -> String {
-        requestCounter += 1
-        return "req-\(requestCounter)"
-    }
-
-    private func sendConnectRequest(token: String) {
-        sendRequest(method: "connect", params: [
-            "minProtocol": 4,
-            "maxProtocol": 4,
-            // "gateway-client"/"backend" ist ein in der OpenClaw-Doku
-            // bestaetigtes gueltiges Paar fuer vertrauenswuerdige Clients mit
-            // geteiltem Gateway-Token (statt eigener Geraete-Identitaet) -
-            // unser urspruenglich geratenes "jarvis-mobile"/"operator" wurde
-            // vom Server mit INVALID_REQUEST abgelehnt (siehe rawEvents).
-            "client": [
-                "id": "gateway-client",
-                "version": "1.0.0",
-                "platform": "ios",
-                "mode": "backend",
-            ],
-            // role "operator" liess sich verbinden + abonnieren, aber
-            // chat.send (Schreiben) scheiterte mit SESSION_MUTATION_TARGET_
-            // REQUIRED - laut Doku brauchen SCHREIBENDE Aktionen von einem
-            // Remote-Client (wir sind ueber Tailscale, nicht Loopback) eine
-            // echte, genehmigte Geraete-Identitaet. role "node" + "device"
-            // loest eine Pairing-Anfrage aus, die per autoApproveCidrs fuer
-            // unseren Tailscale-Bereich (100.64.0.0/10) automatisch
-            // genehmigt werden sollte (bereits auf dem Mac Mini konfiguriert).
-            "role": "node",
-            "device": [
-                "id": "jarvis-mobile-leon-iphone",
-                "name": "iPhone von Leon (JarvisMobile)",
-                "platform": "ios",
-            ],
-            "scopes": ["operator.read", "operator.write"],
-            "caps": [],
-            "auth": ["token": token],
-            "locale": "de-DE",
-            "userAgent": "JarvisMobile/1.0",
-        ])
-    }
-
-    private func subscribeToSession() {
-        // Feld heisst "key" nicht "sessionKey" (Server-Fehler #1).
-        // includeApprovals lehnte sowohl true (fehlendes Scope
-        // operator.approvals) als auch false ("must be equal to constant")
-        // ab - ein Optional-mit-Konstante-Feld, das offenbar nur gueltig
-        // ist, wenn es GANZ WEGGELASSEN wird, statt explizit false zu
-        // setzen.
-        sendRequest(method: "sessions.messages.subscribe", params: [
-            "key": sessionKey,
-        ])
-    }
-
-    private func sendRequest(method: String, params: [String: Any]) {
-        let payload: [String: Any] = ["type": "req", "id": nextID(), "method": method, "params": params]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              let text = String(data: data, encoding: .utf8) else { return }
-        task?.send(.string(text)) { [weak self] error in
-            if let error {
-                Task { @MainActor in self?.connectionError = "Senden fehlgeschlagen: \(error.localizedDescription)" }
-            }
-        }
-    }
-
-    private func receiveLoop() {
-        task?.receive { [weak self] result in
-            guard let self else { return }
-            Task { @MainActor in
-                switch result {
-                case .failure(let error):
-                    self.connectionError = "Verbindung verloren: \(error.localizedDescription)"
-                    self.isConnected = false
-                case .success(let message):
-                    if case .string(let text) = message {
-                        self.handleIncoming(text)
-                    }
-                    self.receiveLoop()
-                }
-            }
-        }
-    }
-
-    private func handleIncoming(_ text: String) {
-        appendRaw(text)
-        guard let data = text.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return }
-
-        let type = json["type"] as? String
-
-        if type == "res" {
-            // A "connect" response success implies the handshake worked -
-            // move straight to subscribing so tool events start flowing.
-            if !isConnected, (json["ok"] as? Bool) == true {
-                isConnected = true
-                subscribeToSession()
-            }
+    private func pollOnce() async {
+        guard let sessionUser else { return }
+        guard let baseURL = RemoteSettings.gatewayActivityBaseURL, let token = RemoteSettings.gatewayActivityToken else {
+            connectionError = "Kein Gateway-Aktivitaets-Proxy-Token konfiguriert."
             return
         }
+        var components = URLComponents(url: baseURL.appendingPathComponent("/api/gateway/activity"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [URLQueryItem(name: "sessionUser", value: sessionUser)]
+        guard let url = components?.url else { return }
 
-        guard type == "event", let event = json["event"] as? String,
-              let payload = json["payload"] as? [String: Any] else { return }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 5
 
-        switch event {
-        case "connect.challenge":
-            // Token-based auth (already proven to work over REST with the
-            // same token) doesn't need the signed-nonce device-identity
-            // path - the plain "connect" request above is sent either way.
-            break
-        case "session.tool", "agent.tool", "tool", "session.tool_call":
-            let toolName = (payload["toolName"] as? String) ?? (payload["tool"] as? String) ?? (payload["name"] as? String) ?? "unbekannt"
-            let state = (payload["state"] as? String) ?? (payload["status"] as? String) ?? "unbekannt"
-            let detail = (payload["output"] as? String) ?? (payload["summary"] as? String)
-            toolEvents.append(ToolEvent(toolName: toolName, state: state, detail: detail))
-        case "session.message", "agent.message", "chat":
-            if let text = (payload["text"] as? String) ?? (payload["content"] as? String) {
-                lastAssistantText = text
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                isConnected = false
+                return
             }
-        default:
-            break
+            let decoded = try JSONDecoder().decode(ActivityResponse.self, from: data)
+            if !isConnected { log("Proxy erreichbar") }
+            isConnected = true
+            isSubscribed = decoded.connected
+            if decoded.currentActivity != currentActivity { log("activity: \(decoded.currentActivity ?? "-")") }
+            if decoded.activeTools.map(\.id) != activeTools.map(\.id) {
+                for tool in decoded.activeTools where !activeTools.contains(tool) { log("tool start: \(tool.title)") }
+                for tool in activeTools where !decoded.activeTools.contains(tool) { log("tool end: \(tool.title)") }
+            }
+            currentActivity = decoded.currentActivity
+            activeTools = decoded.activeTools
+            connectionError = nil
+        } catch {
+            if isConnected { log("Proxy nicht erreichbar: \(error.localizedDescription)") }
+            isConnected = false
         }
     }
-
-    private func appendRaw(_ text: String) {
-        rawEvents.append(text)
-        if rawEvents.count > 40 { rawEvents.removeFirst(rawEvents.count - 40) }
-    }
 }
+
+extension GatewayClient.ActiveTool: Decodable {}

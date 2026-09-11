@@ -32,10 +32,16 @@ import re
 import secrets
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / "app"))
+
+from mail_client import MailAccessError, list_inbox_messages  # noqa: E402
+from notes_client import NotesAccessError, list_recent_notes  # noqa: E402
 
 PORT = 18794
 TOKEN_FILE = Path.home() / ".jarvis_memory_proxy_token"
@@ -43,6 +49,37 @@ OPENCLAW_BIN = "/opt/homebrew/bin/openclaw"
 WORKSPACE = Path.home() / ".openclaw" / "workspace"
 USER_MD_PATH = WORKSPACE / "USER.md"
 MEMORY_MD_PATH = WORKSPACE / "MEMORY.md"
+WHATSAPP_LOG_PATH = Path.home() / ".jarvis-whatsapp" / "messages.jsonl"
+WHATSAPP_MAX_MESSAGES = 150
+MAIL_MAX_MESSAGES = 60
+MAIL_MAX_AGE_DAYS = 7
+
+_GERMAN_MONTHS = {
+    "januar": 1, "februar": 2, "märz": 3, "april": 4, "mai": 5, "juni": 6,
+    "juli": 7, "august": 8, "september": 9, "oktober": 10, "november": 11, "dezember": 12,
+}
+_MAIL_DATE_RE = re.compile(
+    r"(\d{1,2})\.\s*(\w+)\s+(\d{4})\s+um\s+(\d{1,2}):(\d{2}):(\d{2})"
+)
+
+
+def _parse_mail_received(value: str) -> datetime | None:
+    """Parst Apple Mail's per-System-Locale formatiertes 'date received'-Datum, z.B.
+    "Freitag, 11. September 2026 um 10:24:39" - nur fuer die 7-Tage-Filterung, nicht
+    fuer irgendeine Anzeige. Liefert None statt zu werfen, wenn das Format mal
+    abweicht (z.B. andere Locale) - eine nicht parsbare Mail wird dann sicherheitshalber
+    trotzdem angezeigt statt stillschweigend zu verschwinden."""
+    match = _MAIL_DATE_RE.search(value)
+    if not match:
+        return None
+    day, month_name, year, hour, minute, second = match.groups()
+    month = _GERMAN_MONTHS.get(month_name.lower())
+    if month is None:
+        return None
+    try:
+        return datetime(int(year), month, int(day), int(hour), int(minute), int(second))
+    except ValueError:
+        return None
 
 _DIRECTIVE_COMMENT_RE = re.compile(
     r"<!--\s*observed:\s*([\d-]+)\s*\|\s*status:\s*(\w+)\s*-->"
@@ -208,8 +245,137 @@ def _parse_skill_capabilities() -> list[dict[str, Any]]:
     return facts
 
 
+def _parse_whatsapp_messages() -> list[dict[str, Any]]:
+    """Eine Erinnerung pro echter WhatsApp-Nachricht (whatsapp-bridge/index.mjs
+    protokolliert jede ein-/ausgehende Nachricht bereits nach messages.jsonl) - live
+    gewuenscht 2026-09-11: "jede Nachricht soll als Punkt gespeichert sein". Nur die
+    letzten WHATSAPP_MAX_MESSAGES (nicht die komplette, unbegrenzt wachsende Historie),
+    sonst wuerde die Kugel auf Dauer von einer einzigen Quelle ueberflutet. "note"-
+    Eintraege (interne ntfy-Push-Protokollierung, keine echte WhatsApp-Nachricht)
+    werden uebersprungen."""
+    if not WHATSAPP_LOG_PATH.exists():
+        return []
+    lines = WHATSAPP_LOG_PATH.read_text(encoding="utf-8").splitlines()
+    facts: list[dict[str, Any]] = []
+    for line in lines[-WHATSAPP_MAX_MESSAGES:]:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        direction = entry.get("direction")
+        if direction not in ("in", "out"):
+            continue
+        name = str(entry.get("name") or entry.get("jid") or "Unbekannt").strip()
+        text = str(entry.get("text") or "").strip()
+        if not text:
+            continue
+        arrow = "→" if direction == "out" else "←"
+        content = f"{arrow} {name}: {text}"[:280]
+        ts = str(entry.get("ts") or "")
+        facts.append(_make_fact(
+            fact_id=_fact_id("whatsapp", f"{ts}:{content}"),
+            content=content,
+            category="Nachrichten",
+            source_type="auto",
+            observed_at=ts or None,
+        ))
+    return facts
+
+
+_mail_cache: dict[str, Any] = {"at": 0.0, "facts": []}
+_MAIL_CACHE_SECONDS = 120.0
+
+
+def _parse_mail_messages() -> list[dict[str, Any]]:
+    """Eine Erinnerung pro Mail aus dem Posteingang der letzten MAIL_MAX_AGE_DAYS Tage
+    (live gewuenscht 2026-09-11, eingegrenzt auf 7 Tage statt des kompletten Postfachs -
+    sonst wuerden tausende alte Mails die Kugel fluten). Nutzt direkt
+    app/mail_client.py::list_inbox_messages (AppleScript/Mail.app), gleiches
+    Self-contained-Modul wie beim files/photos-Proxy. Kurz gecacht (2 Min) - ein
+    AppleScript-Roundtrip zu Mail.app ist deutlich teurer als ein Dateizugriff und soll
+    nicht bei jedem UI-Poll erneut ausgeloest werden."""
+    now = datetime.now(timezone.utc).timestamp()
+    if now - _mail_cache["at"] < _MAIL_CACHE_SECONDS:
+        return _mail_cache["facts"]
+
+    try:
+        messages = list_inbox_messages(max_messages=MAIL_MAX_MESSAGES)
+    except MailAccessError:
+        return _mail_cache["facts"]
+
+    cutoff = datetime.now() - timedelta(days=MAIL_MAX_AGE_DAYS)
+    facts: list[dict[str, Any]] = []
+    for message in messages:
+        received_at = _parse_mail_received(message.received)
+        if received_at is not None and received_at < cutoff:
+            continue
+        content = f"{message.sender}: {message.subject}"[:280]
+        facts.append(_make_fact(
+            fact_id=f"mail-{message.message_id or _fact_id('mail', content)}",
+            content=content,
+            category="Mail",
+            source_type="auto",
+            observed_at=None,
+        ))
+
+    _mail_cache["at"] = now
+    _mail_cache["facts"] = facts
+    return facts
+
+
+_notes_cache: dict[str, Any] = {"at": 0.0, "facts": []}
+_NOTES_CACHE_SECONDS = 120.0
+NOTES_MAX = 100
+
+
+def _parse_notes() -> list[dict[str, Any]]:
+    """Eine Erinnerung pro Apple-Notiz (live gewuenscht 2026-09-11: "jede Notiz soll
+    als Punkt abgespeichert sein"). Nutzt app/notes_client.py::list_recent_notes -
+    liefert nur Titel + Aenderungsdatum, keinen Notiztext (die Kugel zeigt ohnehin nur
+    kurze content-Strings, und der volle Notizinhalt landet nicht unnoetig in einem
+    weiteren Speicher). Gleiches 2-Minuten-Caching wie bei Mail - AppleScript-
+    Roundtrips zu Notes.app sind teuer, nicht bei jedem UI-Poll erneut ausloesen."""
+    now = datetime.now(timezone.utc).timestamp()
+    if now - _notes_cache["at"] < _NOTES_CACHE_SECONDS:
+        return _notes_cache["facts"]
+
+    try:
+        notes = list_recent_notes(limit=NOTES_MAX)
+    except NotesAccessError:
+        return _notes_cache["facts"]
+
+    facts: list[dict[str, Any]] = []
+    for note in notes:
+        title = str(note.get("title") or "").strip()
+        if not title:
+            continue
+        modified = note.get("modified")
+        observed_at = modified.isoformat() if hasattr(modified, "isoformat") else None
+        facts.append(_make_fact(
+            fact_id=_fact_id("notes", title),
+            content=title[:280],
+            category="Notizen",
+            source_type="auto",
+            observed_at=observed_at,
+        ))
+
+    _notes_cache["at"] = now
+    _notes_cache["facts"] = facts
+    return facts
+
+
 def all_facts() -> list[dict[str, Any]]:
-    return _parse_user_md() + _parse_memory_md() + _parse_skill_capabilities()
+    return (
+        _parse_user_md()
+        + _parse_memory_md()
+        + _parse_skill_capabilities()
+        + _parse_whatsapp_messages()
+        + _parse_mail_messages()
+        + _parse_notes()
+    )
 
 
 def facts_payload(search: str = "", category: str = "") -> dict[str, Any]:

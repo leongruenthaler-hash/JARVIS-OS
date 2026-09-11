@@ -11,10 +11,14 @@ import SceneKit
 /// Ablehnen/Loeschen (siehe MemoryView.swift's factDetailSheet) erhalten bleibt.
 struct MemorySphereView: View {
     let facts: [MemoryFact]
+    /// Kategorien, die gerade live "aufblitzen" sollen, weil Jarvis laut GatewayClient
+    /// genau jetzt ein passendes Werkzeug ausfuehrt (2026-09-11) - leer, wenn nichts
+    /// laeuft oder keine Live-Verbindung besteht.
+    var activeCategories: Set<String> = []
     let onSelect: (MemoryFact) -> Void
 
     var body: some View {
-        SceneKitSphereView(facts: facts, onSelect: onSelect)
+        SceneKitSphereView(facts: facts, activeCategories: activeCategories, onSelect: onSelect)
             .overlay(alignment: .bottom) { legend }
             .overlay {
                 if facts.isEmpty {
@@ -29,15 +33,18 @@ struct MemorySphereView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 12) {
                 ForEach(MemorySphereCategory.all, id: \.name) { category in
+                    let isActive = activeCategories.contains(category.name)
                     HStack(spacing: 5) {
                         Circle().fill(category.color).frame(width: 8, height: 8)
                         Text(category.name)
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(isActive ? .primary : .secondary)
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(.thinMaterial, in: Capsule())
+                    .background(isActive ? AnyShapeStyle(category.color.opacity(0.25)) : AnyShapeStyle(.thinMaterial), in: Capsule())
+                    .overlay(Capsule().strokeBorder(isActive ? category.color : .clear, lineWidth: 1.5))
+                    .animation(.easeOut(duration: 0.2), value: isActive)
                 }
             }
             .padding(.horizontal, 12)
@@ -54,16 +61,36 @@ struct MemorySphereCategory {
         MemorySphereCategory(name: "Profil", color: .blue),
         MemorySphereCategory(name: "Langzeit", color: .green),
         MemorySphereCategory(name: "Fähigkeiten", color: .mint),
+        MemorySphereCategory(name: "Nachrichten", color: .orange),
+        MemorySphereCategory(name: "Mail", color: .yellow),
+        MemorySphereCategory(name: "Notizen", color: .purple),
     ]
     static let generalColor = Color.white
 
     static func index(for name: String) -> Int? {
         all.firstIndex(where: { $0.name == name })
     }
+
+    /// Grobe Stichwort-Zuordnung von einem laufenden Werkzeug-Aufruf (GatewayClient's
+    /// live beobachtete tool-Ereignisse - "name" ist meist generisch wie "exec"/"read",
+    /// die eigentliche Aktion steckt im "title", z.B. "exec Ungelesene Mails zählen") zu
+    /// einer Kugel-Kategorie, fuer das Aufblitzen passender Punkte waehrend Jarvis
+    /// tatsaechlich darauf zugreift (2026-09-11). Absichtlich grob statt exakt - eine
+    /// halbwegs treffende Kategorie ist besser als gar keine Live-Rueckmeldung.
+    static func category(forToolName name: String, title: String) -> String? {
+        let lower = (name + " " + title).lowercased()
+        if lower.contains("mail") { return "Mail" }
+        if lower.contains("notiz") || lower.contains("note") { return "Notizen" }
+        if lower.contains("whatsapp") { return "Nachrichten" }
+        if lower.contains("memory") || lower.contains("erinnerung") || lower.contains("gedächtnis") { return "Langzeit" }
+        if lower.contains("user.md") || lower.contains("profil") { return "Profil" }
+        return "Fähigkeiten"
+    }
 }
 
 private struct SceneKitSphereView: NSViewRepresentable {
     let facts: [MemoryFact]
+    let activeCategories: Set<String>
     let onSelect: (MemoryFact) -> Void
 
     func makeNSView(context: Context) -> SCNView {
@@ -76,6 +103,8 @@ private struct SceneKitSphereView: NSViewRepresentable {
         let click = NSClickGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleClick(_:)))
         view.addGestureRecognizer(click)
         context.coordinator.view = view
+        context.coordinator.builtFactIDs = facts.map(\.id)
+        context.coordinator.categoryByFactID = Dictionary(uniqueKeysWithValues: facts.map { ($0.id, $0.category) })
         context.coordinator.resolveTap = { factID in
             guard let fact = facts.first(where: { $0.id == factID }) else { return }
             onSelect(fact)
@@ -88,8 +117,21 @@ private struct SceneKitSphereView: NSViewRepresentable {
             guard let fact = facts.first(where: { $0.id == factID }) else { return }
             onSelect(fact)
         }
-        // Facts-Identitaet (Anzahl+Inhalt) hat sich geaendert - Szene neu aufbauen.
-        nsView.scene = SceneKitSphereView.buildScene(facts: facts)
+
+        // Nur bei tatsaechlich geaenderten Facts neu aufbauen - sonst wuerde jedes
+        // Live-Tool-Ereignis (activeCategories aendert sich mehrmals pro Sekunde
+        // waehrend eines Werkzeug-Aufrufs) die komplette Szene ersetzen und damit
+        // Kamera-Rotation/-Zoom UND jede laufende Pulsanimation zuruecksetzen -
+        // live beobachtet 2026-09-11, bevor dieser Vergleich eingebaut wurde.
+        let newFactIDs = facts.map(\.id)
+        if newFactIDs != context.coordinator.builtFactIDs {
+            nsView.scene = SceneKitSphereView.buildScene(facts: facts)
+            context.coordinator.builtFactIDs = newFactIDs
+            context.coordinator.categoryByFactID = Dictionary(uniqueKeysWithValues: facts.map { ($0.id, $0.category) })
+            context.coordinator.pulsingCategories = []
+        }
+
+        context.coordinator.applyPulses(activeCategories: activeCategories, in: nsView)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -97,6 +139,9 @@ private struct SceneKitSphereView: NSViewRepresentable {
     final class Coordinator: NSObject {
         weak var view: SCNView?
         var resolveTap: ((String) -> Void)?
+        var builtFactIDs: [String] = []
+        var categoryByFactID: [String: String] = [:]
+        var pulsingCategories: Set<String> = []
 
         @objc func handleClick(_ recognizer: NSClickGestureRecognizer) {
             guard let view else { return }
@@ -105,6 +150,75 @@ private struct SceneKitSphereView: NSViewRepresentable {
             guard let node = hits.first?.node, let factID = node.name else { return }
             resolveTap?(factID)
         }
+
+        /// Startet/stoppt einen deutlich sichtbaren Leucht-Halo um alle Punkte einer
+        /// Kategorie - eine reine Skalierung der winzigen Original-Punkte war gegen den
+        /// kraeftigen Bloom-Effekt kaum wahrnehmbar (live gemeldet 2026-09-11: "sehe das
+        /// nicht an den Kugeln selber"). Nur die tatsaechlich geaenderten Kategorien
+        /// werden angefasst.
+        func applyPulses(activeCategories: Set<String>, in view: SCNView) {
+            guard let coreNode = view.scene?.rootNode.childNode(withName: "core", recursively: false) else { return }
+
+            let startedCategories = activeCategories.subtracting(pulsingCategories)
+            let stoppedCategories = pulsingCategories.subtracting(activeCategories)
+            guard !startedCategories.isEmpty || !stoppedCategories.isEmpty else { return }
+            pulsingCategories = activeCategories
+
+            let matchingFactIDs: (String) -> Set<String> = { category in
+                Set(self.categoryByFactID.filter { $0.value == category }.keys)
+            }
+
+            for category in startedCategories {
+                let factIDs = matchingFactIDs(category)
+                guard !factIDs.isEmpty else { continue }
+                for node in coreNode.childNodes where node.name.map(factIDs.contains) == true {
+                    guard node.childNode(withName: "flare", recursively: false) == nil else { continue }
+                    node.addChildNode(SceneKitSphereView.makeFlareNode())
+                }
+            }
+
+            for category in stoppedCategories {
+                let factIDs = matchingFactIDs(category)
+                guard !factIDs.isEmpty else { continue }
+                for node in coreNode.childNodes where node.name.map(factIDs.contains) == true {
+                    node.childNode(withName: "flare", recursively: false)?.removeFromParentNode()
+                }
+            }
+        }
+    }
+
+    /// Ein deutlich sichtbarer, wachsend-verblassender weisser Halo - als Kindknoten an
+    /// einen Punkt gehaengt, waehrend Jarvis laut GatewayClient live darauf zugreift.
+    /// Direkter Port von JarvisMobile's gleichnamiger Funktion - siehe dort fuer die
+    /// Begruendung (eine reine Skalierung des winzigen Original-Punkts ging im
+    /// Bloom-Effekt unter).
+    static func makeFlareNode() -> SCNNode {
+        let geometry = SCNSphere(radius: 0.02)
+        geometry.segmentCount = 12
+        let material = SCNMaterial()
+        material.diffuse.contents = NSColor.clear
+        material.emission.contents = NSColor.white
+        material.lightingModel = .constant
+        material.transparencyMode = .aOne
+        geometry.firstMaterial = material
+
+        let node = SCNNode(geometry: geometry)
+        node.name = "flare"
+        node.opacity = 0.9
+
+        let grow = SCNAction.scale(to: 6.0, duration: 0.55)
+        let shrink = SCNAction.scale(to: 1.0, duration: 0.01)
+        let fadeOut = SCNAction.fadeOpacity(to: 0.15, duration: 0.55)
+        let fadeIn = SCNAction.fadeOpacity(to: 0.9, duration: 0.01)
+        grow.timingMode = .easeOut
+        fadeOut.timingMode = .easeOut
+
+        let pulse = SCNAction.repeatForever(.sequence([
+            .group([grow, fadeOut]),
+            .group([shrink, fadeIn]),
+        ]))
+        node.runAction(pulse)
+        return node
     }
 
     static func buildScene(facts: [MemoryFact]) -> SCNScene {

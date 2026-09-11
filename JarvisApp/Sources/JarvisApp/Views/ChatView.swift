@@ -5,6 +5,9 @@ struct ChatView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.jarvisTheme) private var theme
     @State private var input = ""
+    /// Live "was Jarvis gerade tut"-Feed (2026-09-11) - geteilte Instanz von
+    /// JarvisMacApp.swift, siehe GatewayClient.swift.
+    @EnvironmentObject private var gateway: GatewayClient
 
     private var trimmedInput: String {
         input.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -179,12 +182,27 @@ struct ChatView: View {
                                     .multilineTextAlignment(.center)
                                     .frame(maxWidth: 520)
                                     .animation(.easeOut(duration: 0.15), value: appState.liveTranscriptText)
+                            } else if appState.voiceState == .thinking, let activity = gateway.currentActivity {
+                                Text(activity)
+                                    .font(.title3.weight(.medium))
+                                    .foregroundStyle(.primary)
+                                    .multilineTextAlignment(.center)
+                                    .frame(maxWidth: 520)
+                                    .animation(.easeOut(duration: 0.2), value: activity)
                             } else {
                                 Text(appState.voiceState.subtitle)
                                     .font(.title3)
                                     .foregroundStyle(.secondary)
                                     .multilineTextAlignment(.center)
                                     .frame(maxWidth: 520)
+                            }
+                            if appState.voiceState == .thinking, !gateway.activeTools.isEmpty {
+                                Text(gateway.activeTools.map(\.title).joined(separator: " · "))
+                                    .font(.caption)
+                                    .foregroundStyle(theme.primaryAccent)
+                                    .multilineTextAlignment(.center)
+                                    .frame(maxWidth: 520)
+                                    .lineLimit(1)
                             }
                         }
                         .padding(.horizontal, 22)

@@ -21,6 +21,9 @@ struct MemoryView: View {
         Category(name: "Profil", color: .blue),
         Category(name: "Langzeit", color: .green),
         Category(name: "Fähigkeiten", color: .mint),
+        Category(name: "Nachrichten", color: .orange),
+        Category(name: "Mail", color: .yellow),
+        Category(name: "Notizen", color: .purple),
     ]
     fileprivate static let generalColor = Color.white
 
@@ -57,6 +60,13 @@ struct MemoryView: View {
     @State private var isLoadingMemory = true
     @State private var memoryError: String?
     @State private var activityEvents: [MemoryProxyActivityEvent] = []
+    /// Live "was Jarvis gerade tut"-Feed (2026-09-11) - geteilte Instanz von
+    /// JarvisMobileApp.swift, treibt das Aufblitzen passender Kugel-Punkte.
+    @EnvironmentObject private var gateway: GatewayClient
+
+    private var activeCategories: Set<String> {
+        Set(gateway.activeTools.compactMap { MemoryView.category(forToolName: $0.name, title: $0.title) })
+    }
 
     @State private var testMessage = "Was liegt heute an?"
     @State private var isProcessing = false
@@ -72,13 +82,14 @@ struct MemoryView: View {
                     .tint(JarvisTheme.accent)
                     .foregroundStyle(.white)
             } else {
-                SphereView(items: memoryItems, pulseTrigger: pulseTrigger)
+                SphereView(items: memoryItems, pulseTrigger: pulseTrigger, activeCategories: activeCategories)
                     .ignoresSafeArea()
                     .id(memoryItems.count)
             }
 
             VStack {
                 legend
+                debugStatusLine
                 if let memoryError {
                     Text(memoryError).font(.caption).foregroundStyle(.orange).padding(.top, 4)
                 }
@@ -142,6 +153,37 @@ struct MemoryView: View {
         }
     }
 
+    /// TEMPORAER (2026-09-11): sichtbarer Debug-Status fuer die Live-Gateway-
+    /// Verbindung, um live pruefen zu koennen, ob das Aufblitzen aus Verbindungsgruenden
+    /// nicht funktioniert. Wieder entfernen, sobald das Aufblitzen bestaetigt zuverlaessig
+    /// laeuft.
+    private var debugStatusLine: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(gateway.isConnected ? Color.green : Color.red)
+                    .frame(width: 6, height: 6)
+                Text(gateway.isConnected ? "verbunden" : "NICHT verbunden")
+                Circle()
+                    .fill(gateway.isSubscribed ? Color.green : Color.red)
+                    .frame(width: 6, height: 6)
+                Text(gateway.isSubscribed ? "abonniert" : "NICHT abonniert")
+                if let error = gateway.connectionError {
+                    Text("· \(error)")
+                }
+            }
+            ForEach(Array(gateway.recentEventLog.suffix(8).enumerated()), id: \.offset) { _, line in
+                Text(line)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .font(.system(size: 9, design: .monospaced))
+        .foregroundStyle(.white.opacity(0.7))
+        .padding(.top, 4)
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private func loadActivity() async {
         do {
             guard let baseURL = RemoteSettings.memoryBaseURL, let token = RemoteSettings.memoryToken else { return }
@@ -160,15 +202,18 @@ struct MemoryView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 12) {
                 ForEach(Self.categories, id: \.name) { category in
+                    let isActive = activeCategories.contains(category.name)
                     HStack(spacing: 5) {
                         Circle().fill(category.color).frame(width: 8, height: 8)
                         Text(category.name)
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(JarvisTheme.textSecondary)
+                            .foregroundStyle(isActive ? .white : JarvisTheme.textSecondary)
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(JarvisTheme.cardFill, in: Capsule())
+                    .background(isActive ? AnyShapeStyle(category.color.opacity(0.3)) : AnyShapeStyle(JarvisTheme.cardFill), in: Capsule())
+                    .overlay(Capsule().strokeBorder(isActive ? category.color : .clear, lineWidth: 1.5))
+                    .animation(.easeOut(duration: 0.2), value: isActive)
                 }
             }
             .padding(.horizontal, 12)
@@ -250,6 +295,19 @@ struct MemoryView: View {
     fileprivate static func categoryIndex(_ name: String) -> Int? {
         categories.firstIndex(where: { $0.name == name })
     }
+
+    /// Grobe Stichwort-Zuordnung von einem laufenden Werkzeug-Aufruf zu einer
+    /// Kugel-Kategorie (2026-09-11) - siehe JarvisApp's MemorySphereCategory.category(
+    /// forToolName:title:) fuer die identische Logik/Begruendung.
+    fileprivate static func category(forToolName name: String, title: String) -> String? {
+        let lower = (name + " " + title).lowercased()
+        if lower.contains("mail") { return "Mail" }
+        if lower.contains("notiz") || lower.contains("note") { return "Notizen" }
+        if lower.contains("whatsapp") { return "Nachrichten" }
+        if lower.contains("memory") || lower.contains("erinnerung") || lower.contains("gedächtnis") { return "Langzeit" }
+        if lower.contains("user.md") || lower.contains("profil") { return "Profil" }
+        return "Fähigkeiten"
+    }
 }
 
 /// UIKit/SceneKit-Bruecke - SCNView bringt `allowsCameraControl` bereits
@@ -258,6 +316,7 @@ struct MemoryView: View {
 private struct SphereView: UIViewRepresentable {
     let items: [MemoryView.MemoryPoint]
     let pulseTrigger: Int
+    let activeCategories: Set<String>
 
     func makeUIView(context: Context) -> SCNView {
         let view = SCNView()
@@ -266,16 +325,100 @@ private struct SphereView: UIViewRepresentable {
         view.autoenablesDefaultLighting = false
         view.backgroundColor = .clear
         view.antialiasingMode = .multisampling4X
+        context.coordinator.builtItemCount = items.count
         return view
     }
 
     func updateUIView(_ uiView: SCNView, context: Context) {
-        guard pulseTrigger > 0, let sphereNode = uiView.scene?.rootNode.childNode(withName: "core", recursively: false) else { return }
-        let up = SCNAction.scale(to: 1.06, duration: 0.35)
-        let down = SCNAction.scale(to: 1.0, duration: 0.45)
-        up.timingMode = .easeOut
-        down.timingMode = .easeInEaseOut
-        sphereNode.runAction(.sequence([up, down]))
+        if pulseTrigger > 0, let sphereNode = uiView.scene?.rootNode.childNode(withName: "core", recursively: false) {
+            let up = SCNAction.scale(to: 1.06, duration: 0.35)
+            let down = SCNAction.scale(to: 1.0, duration: 0.45)
+            up.timingMode = .easeOut
+            down.timingMode = .easeInEaseOut
+            sphereNode.runAction(.sequence([up, down]))
+        }
+
+        // Nur bei tatsaechlich geaenderter Punktzahl neu aufbauen - sonst wuerde jedes
+        // Live-Tool-Ereignis (aendert sich mehrmals pro Sekunde waehrend eines
+        // Werkzeug-Aufrufs) die komplette Szene ersetzen und damit Kamera-
+        // Rotation/-Zoom UND jede laufende Pulsanimation zuruecksetzen.
+        if items.count != context.coordinator.builtItemCount {
+            uiView.scene = SphereView.buildScene(items: items)
+            context.coordinator.builtItemCount = items.count
+            context.coordinator.pulsingCategories = []
+        }
+
+        context.coordinator.applyPulses(activeCategories: activeCategories, in: uiView)
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator {
+        var builtItemCount = 0
+        var pulsingCategories: Set<String> = []
+
+        /// Startet/stoppt einen deutlich sichtbaren Leucht-Halo um alle Punkte einer
+        /// Kategorie (per Knotenname getaggt, siehe buildScene). Eine reine Skalierung
+        /// der winzigen Original-Punkte war gegen den ohnehin kraeftigen Bloom-Effekt der
+        /// Kugel kaum wahrnehmbar (live gemeldet 2026-09-11: "sehe das nicht an den
+        /// Kugeln selber") - stattdessen bekommt jeder betroffene Punkt einen eigenen,
+        /// deutlich groesseren, halbtransparenten weissen Halo-Kindknoten, der waechst
+        /// und verblasst. Nur die tatsaechlich geaenderten Kategorien werden angefasst.
+        func applyPulses(activeCategories: Set<String>, in view: SCNView) {
+            guard let coreNode = view.scene?.rootNode.childNode(withName: "core", recursively: false) else { return }
+
+            let startedCategories = activeCategories.subtracting(pulsingCategories)
+            let stoppedCategories = pulsingCategories.subtracting(activeCategories)
+            guard !startedCategories.isEmpty || !stoppedCategories.isEmpty else { return }
+            pulsingCategories = activeCategories
+
+            for category in startedCategories {
+                for node in coreNode.childNodes where node.name == category {
+                    guard node.childNode(withName: "flare", recursively: false) == nil else { continue }
+                    node.addChildNode(SphereView.makeFlareNode())
+                }
+            }
+
+            for category in stoppedCategories {
+                for node in coreNode.childNodes where node.name == category {
+                    node.childNode(withName: "flare", recursively: false)?.removeFromParentNode()
+                }
+            }
+        }
+    }
+
+    /// Ein deutlich sichtbarer, wachsend-verblassender weisser Halo - als Kindknoten an
+    /// einen Punkt gehaengt, waehrend Jarvis laut GatewayClient live darauf zugreift. Um
+    /// ein Vielfaches groesser als die Original-Punkte (die sind nur 0.014...0.032 Radius
+    /// - eine reine Skalierung davon geht im Bloom unter), daher ein eigener Knoten statt
+    /// einer Transform-Animation auf dem Original.
+    static func makeFlareNode() -> SCNNode {
+        let geometry = SCNSphere(radius: 0.02)
+        geometry.segmentCount = 12
+        let material = SCNMaterial()
+        material.diffuse.contents = UIColor.clear
+        material.emission.contents = UIColor.white
+        material.lightingModel = .constant
+        material.transparencyMode = .aOne
+        geometry.firstMaterial = material
+
+        let node = SCNNode(geometry: geometry)
+        node.name = "flare"
+        node.opacity = 0.9
+
+        let grow = SCNAction.scale(to: 6.0, duration: 0.55)
+        let shrink = SCNAction.scale(to: 1.0, duration: 0.01)
+        let fadeOut = SCNAction.fadeOpacity(to: 0.15, duration: 0.55)
+        let fadeIn = SCNAction.fadeOpacity(to: 0.9, duration: 0.01)
+        grow.timingMode = .easeOut
+        fadeOut.timingMode = .easeOut
+
+        let pulse = SCNAction.repeatForever(.sequence([
+            .group([grow, fadeOut]),
+            .group([shrink, fadeIn]),
+        ]))
+        node.runAction(pulse)
+        return node
     }
 
     static func buildScene(items: [MemoryView.MemoryPoint]) -> SCNScene {
@@ -299,6 +442,7 @@ private struct SphereView: UIViewRepresentable {
         let radius: CGFloat = 1.7
         var positions: [SCNVector3] = []
         var colors: [UIColor] = []
+        var categories: [String] = []
 
         func addPoint(theta: Double, phi: Double, color: UIColor) {
             let r = radius * CGFloat.random(in: 0.75...1.0)
@@ -317,18 +461,22 @@ private struct SphereView: UIViewRepresentable {
         for item in items {
             let color = MemoryView.categoryIndex(item.category).map { UIColor(MemoryView.categories[$0].color) } ?? UIColor(MemoryView.generalColor)
             addPoint(theta: Double.random(in: 0...(2 * .pi)), phi: Double.random(in: 0.05...(.pi - 0.05)), color: color)
+            categories.append(item.category)
         }
 
-        for (position, color) in zip(positions, colors) {
+        for index in positions.indices {
             let geometry = SCNSphere(radius: CGFloat.random(in: 0.014...0.032))
             geometry.segmentCount = 8
             let material = SCNMaterial()
             material.diffuse.contents = UIColor.black
-            material.emission.contents = color
+            material.emission.contents = colors[index]
             material.lightingModel = .constant
             geometry.firstMaterial = material
             let node = SCNNode(geometry: geometry)
-            node.position = position
+            node.position = positions[index]
+            // Kategorie als Knotenname - so kann applyPulses() spaeter passende
+            // Punkte per einfachem Namensvergleich finden (2026-09-11).
+            node.name = categories[index]
             coreNode.addChildNode(node)
         }
 
