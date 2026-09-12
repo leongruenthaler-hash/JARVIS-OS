@@ -21,6 +21,9 @@ struct RootView: View {
             NavigationStack { MemoryView() }
                 .tabItem { Label("Speicher", systemImage: "brain") }
 
+            NavigationStack { HealthView() }
+                .tabItem { Label("Gesundheit", systemImage: "heart.fill") }
+
             NavigationStack { SettingsView() }
                 .tabItem { Label("Einstellungen", systemImage: "slider.horizontal.3") }
 

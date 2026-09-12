@@ -148,4 +148,28 @@ enum RemoteSettings {
         guard !trimmedHost.isEmpty else { return nil }
         return URL(string: "http://\(trimmedHost):18795")
     }
+
+    /// Token fuer den Mac Mini's Gesundheits-Proxy (scripts/health_proxy_server.py,
+    /// Port 18801, 2026-09-12) - anders als alle anderen Proxys hier PUSHT dieses
+    /// Geraet Daten dorthin (HealthKit gibt es nur auf iOS, der Mac Mini kann Apple
+    /// Health/Watch-Werte nicht selbst abfragen), statt nur zu lesen.
+    static var healthToken: String? {
+        get { KeychainStore.read(service: keychainService, account: healthKeychainAccount) }
+        set {
+            if let newValue, !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                KeychainStore.save(newValue, service: keychainService, account: healthKeychainAccount)
+            } else {
+                KeychainStore.delete(service: keychainService, account: healthKeychainAccount)
+            }
+        }
+    }
+    private static let healthKeychainAccount = "health-proxy-token"
+
+    /// Same Mac Mini host as `baseURL`, different port - see
+    /// scripts/health_proxy_server.py::PORT.
+    static var healthBaseURL: URL? {
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedHost.isEmpty else { return nil }
+        return URL(string: "http://\(trimmedHost):18801")
+    }
 }

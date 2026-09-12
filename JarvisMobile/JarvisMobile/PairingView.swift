@@ -12,6 +12,8 @@ struct PairingView: View {
     @State private var memoryTokenSaved = RemoteSettings.memoryToken != nil
     @State private var gatewayActivityTokenDraft = ""
     @State private var gatewayActivityTokenSaved = RemoteSettings.gatewayActivityToken != nil
+    @State private var healthTokenDraft = ""
+    @State private var healthTokenSaved = RemoteSettings.healthToken != nil
 
     var body: some View {
         Form {
@@ -136,6 +138,34 @@ struct PairingView: View {
                     Button("Token löschen", role: .destructive) {
                         RemoteSettings.gatewayActivityToken = nil
                         gatewayActivityTokenSaved = false
+                    }
+                }
+            }
+
+            Section("Gesundheits-Proxy") {
+                if healthTokenSaved {
+                    Label("Token ist in der Keychain gespeichert.", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                } else {
+                    Label("Noch kein Token gespeichert - Gesundheitswerte werden solange nicht hochgeladen.", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
+                Text("Auf dem Mac Mini im Terminal ausgegeben, sobald scripts/health_proxy_server.py läuft.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                SecureField("Gesundheits-Proxy-Token vom Mac Mini", text: $healthTokenDraft)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button("Token speichern") {
+                    RemoteSettings.healthToken = healthTokenDraft
+                    healthTokenDraft = ""
+                    healthTokenSaved = RemoteSettings.healthToken != nil
+                }
+                .disabled(healthTokenDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                if healthTokenSaved {
+                    Button("Token löschen", role: .destructive) {
+                        RemoteSettings.healthToken = nil
+                        healthTokenSaved = false
                     }
                 }
             }
