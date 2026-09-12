@@ -24,6 +24,10 @@ struct MemoryView: View {
         Category(name: "Nachrichten", color: .orange),
         Category(name: "Mail", color: .yellow),
         Category(name: "Notizen", color: .purple),
+        // Der sonst unsichtbare Rohindex, den OpenClaw fuer memory_search im
+        // Hintergrund haelt (2026-09-12, Nutzerwunsch) - bewusst gedeckt/grau,
+        // klar von den kuratierten Kategorien oben unterscheidbar.
+        Category(name: "Rohindex", color: .gray),
     ]
     fileprivate static let generalColor = Color.white
 

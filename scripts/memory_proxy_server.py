@@ -30,6 +30,7 @@ import hashlib
 import json
 import re
 import secrets
+import sqlite3
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -53,6 +54,8 @@ WHATSAPP_LOG_PATH = Path.home() / ".jarvis-whatsapp" / "messages.jsonl"
 WHATSAPP_MAX_MESSAGES = 150
 MAIL_MAX_MESSAGES = 60
 MAIL_MAX_AGE_DAYS = 7
+AGENT_DB_PATH = Path.home() / ".openclaw" / "agents" / "main" / "agent" / "openclaw-agent.sqlite"
+RAW_INDEX_MAX_CHUNKS = 2000
 
 _GERMAN_MONTHS = {
     "januar": 1, "februar": 2, "märz": 3, "april": 4, "mai": 5, "juni": 6,
@@ -367,6 +370,71 @@ def _parse_notes() -> list[dict[str, Any]]:
     return facts
 
 
+_RAW_INDEX_CACHE_SECONDS = 60.0
+_raw_index_cache: dict[str, Any] = {"at": 0.0, "facts": []}
+
+
+def _parse_raw_index_chunks() -> list[dict[str, Any]]:
+    """Der riesige, sonst unsichtbare Rohindex, den OpenClaw fuer memory_search
+    im Hintergrund haelt (2026-09-12, Nutzerwunsch "will den Rohindex auch als
+    Punkte sehen, aber in einer anderen Farbe"): jede Zeile aus
+    memory_index_chunks (OpenClaws eigene SQLite-Datenbank, siehe
+    ~/.openclaw/agents/main/agent/openclaw-agent.sqlite) - sowohl die aus
+    USER.md/MEMORY.md gechunkten Wissens-Stuecke ("source"='memory') als auch
+    die aus Sitzungs-Transkripten gechunkten Gespraechs-Stuecke
+    ("source"='sessions', nur vorhanden weil experimental.sessionMemory bei uns
+    aktiv ist). Bewusst EIGENE Kategorie ("Rohindex"), nicht "Nachrichten"/
+    "Profil" etc. - das hier sind rohe Such-Fragmente, keine kuratierten
+    Fakten, und sollen in der Kugel-Ansicht auch farblich klar als
+    Hintergrund-Rauschen erkennbar sein, nicht mit echten Erinnerungen
+    verwechselt werden.
+
+    Read-only-Verbindung per "file:...?mode=ro" - der Gateway-Prozess haelt
+    dieselbe Datei staendig offen (WAL-Modus), ein zweiter, rein lesender
+    Verbindungsaufbau ist damit unproblematisch (kein Lock-Konflikt), aber
+    absichtlich kein Schreibzugriff von hier aus."""
+    now = datetime.now(timezone.utc).timestamp()
+    if now - _raw_index_cache["at"] < _RAW_INDEX_CACHE_SECONDS:
+        return _raw_index_cache["facts"]
+
+    facts: list[dict[str, Any]] = []
+    if AGENT_DB_PATH.exists():
+        try:
+            uri = f"file:{AGENT_DB_PATH}?mode=ro"
+            with sqlite3.connect(uri, uri=True, timeout=5) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    "SELECT id, path, source, text, updated_at FROM memory_index_chunks "
+                    "ORDER BY updated_at DESC LIMIT ?",
+                    (RAW_INDEX_MAX_CHUNKS,),
+                ).fetchall()
+            for row in rows:
+                text = str(row["text"] or "").strip()
+                if not text:
+                    continue
+                # updated_at ist ein Unix-Millisekunden-Zeitstempel (OpenClaws eigene
+                # Konvention, siehe memory_index_chunks-Schema), nicht Sekunden.
+                try:
+                    observed_at = datetime.fromtimestamp(
+                        int(row["updated_at"]) / 1000.0, tz=timezone.utc
+                    ).isoformat()
+                except (TypeError, ValueError, OSError):
+                    observed_at = None
+                facts.append(_make_fact(
+                    fact_id=f"rawindex-{row['id']}",
+                    content=text[:280],
+                    category="Rohindex",
+                    source_type="auto",
+                    observed_at=observed_at,
+                ))
+        except sqlite3.Error:
+            pass
+
+    _raw_index_cache["at"] = now
+    _raw_index_cache["facts"] = facts
+    return facts
+
+
 def all_facts() -> list[dict[str, Any]]:
     return (
         _parse_user_md()
@@ -375,6 +443,7 @@ def all_facts() -> list[dict[str, Any]]:
         + _parse_whatsapp_messages()
         + _parse_mail_messages()
         + _parse_notes()
+        + _parse_raw_index_chunks()
     )
 
 

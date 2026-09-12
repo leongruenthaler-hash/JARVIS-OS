@@ -64,6 +64,12 @@ struct MemorySphereCategory {
         MemorySphereCategory(name: "Nachrichten", color: .orange),
         MemorySphereCategory(name: "Mail", color: .yellow),
         MemorySphereCategory(name: "Notizen", color: .purple),
+        // Der sonst unsichtbare Rohindex, den OpenClaw fuer memory_search im
+        // Hintergrund haelt (2026-09-12, Nutzerwunsch "will den Rohindex auch
+        // als Punkte sehen, aber in einer anderen Farbe") - bewusst gedeckt/grau,
+        // klar von den kuratierten Kategorien oben unterscheidbar, da das hier
+        // rohe Such-Fragmente sind, keine echten Erinnerungen.
+        MemorySphereCategory(name: "Rohindex", color: .gray),
     ]
     static let generalColor = Color.white
 
