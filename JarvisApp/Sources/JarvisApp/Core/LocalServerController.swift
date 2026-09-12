@@ -1164,34 +1164,6 @@ final class LocalServerController: ObservableObject {
         try await apiClient.dismissProactivityEvent(dedupKey: dedupKey)
     }
 
-    func tasks(status: String = "", project: String = "") async throws -> JarvisTasksResponse {
-        try await apiClient.tasks(status: status, project: project)
-    }
-
-    func createTask(title: String, project: String?, priority: String, deadline: String?) async throws -> JarvisTask? {
-        try await apiClient.createTask(.init(title: title, project: project, priority: priority, deadline: deadline))
-    }
-
-    @discardableResult
-    func updateTask(id: String, fields: [String: String]) async throws -> Bool {
-        try await apiClient.updateTask(id: id, fields: fields)
-    }
-
-    @discardableResult
-    func confirmTask(id: String) async throws -> Bool {
-        try await apiClient.confirmTask(id: id)
-    }
-
-    @discardableResult
-    func rejectTask(id: String) async throws -> Bool {
-        try await apiClient.rejectTask(id: id)
-    }
-
-    @discardableResult
-    func deleteTask(id: String) async throws -> Bool {
-        try await apiClient.deleteTask(id: id)
-    }
-
     func voiceModeStatus() async throws -> VoiceModeStatus {
         try await apiClient.voiceModeStatus()
     }

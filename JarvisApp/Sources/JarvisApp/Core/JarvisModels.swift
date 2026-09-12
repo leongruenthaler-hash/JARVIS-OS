@@ -14,7 +14,7 @@ enum JarvisSection: String, CaseIterable, Identifiable {
     case files = "Dateien"
     case photos = "Fotos"
     case memory = "Gedächtnis"
-    case tasks = "Aufgaben"
+    case automations = "Automationen"
     case privacy = "Datenschutz"
     case models = "Modelle"
     case licenses = "Lizenzen"
@@ -34,7 +34,7 @@ enum JarvisSection: String, CaseIterable, Identifiable {
         case .files: "folder"
         case .photos: "photo.on.rectangle"
         case .memory: "brain.head.profile"
-        case .tasks: "checkmark.circle"
+        case .automations: "bolt.badge.clock"
         case .privacy: "hand.raised"
         case .models: "cpu"
         case .licenses: "doc.text.magnifyingglass"
@@ -244,34 +244,33 @@ struct ActivityEventsResponse: Codable {
     let events: [ActivityEvent]
 }
 
-/// Phase D: internal tasks, separate from Apple Reminders (CalendarRemindersView).
-/// Auto-detected tasks (from conversation/mail) always start life with
-/// status "vorgeschlagen" - see app/core/task_manager.py - never silently binding.
-struct JarvisTask: Codable, Identifiable, Equatable {
+/// "Automationen"-Ansicht (2026-09-12, ersetzt die zuvor migrierte, nie
+/// wirklich genutzte interne Aufgabenliste): zeigt die echten OpenClaw-
+/// Cronjobs (mail-summary-watch, calendar-30min-reminder, proaktive
+/// Watch-Automationen etc.) - siehe scripts/automations_proxy_server.py.
+/// Rein lesend, Steuerung bleibt Sache von `openclaw cron edit/run`.
+struct AutomationJob: Codable, Identifiable, Equatable {
     let id: String
-    var title: String
-    var project: String?
-    var priority: String
-    var deadline: String?
-    var status: String
-    let source: String
-    var tags: [String]
-    var dependsOn: [String]
-    let createdAt: String
-    let updatedAt: String
+    let name: String
+    let description: String
+    let enabled: Bool
+    let schedule: String
+    let status: String
+    let lastRunAtMs: Double?
+    let nextRunAtMs: Double?
+    let lastError: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, project, priority, deadline, status, source, tags
-        case dependsOn = "depends_on"
-        case createdAt = "created_at"
-        case updatedAt = "updated_at"
+        case id, name, description, enabled, schedule, status
+        case lastRunAtMs = "last_run_at_ms"
+        case nextRunAtMs = "next_run_at_ms"
+        case lastError = "last_error"
     }
 }
 
-struct JarvisTasksResponse: Codable {
-    let tasks: [JarvisTask]
+struct AutomationsResponse: Codable {
+    let automations: [AutomationJob]
     let total: Int
-    let blocked: [String]
 }
 
 /// Phase E: Kurzmodus / Standardmodus / Fokusmodus / Diskreter Modus / Privater Modus

@@ -23,9 +23,8 @@ final class AppState: ObservableObject {
     @Published var memoryFacts: [MemoryFact] = []
     @Published var memoryFactsTotal = 0
     @Published var proactiveEvents: [ProactiveEvent] = []
-    @Published var tasks: [JarvisTask] = []
-    @Published var blockedTaskIDs: Set<String> = []
-    @Published var tasksLoading = false
+    @Published var automations: [AutomationJob] = []
+    @Published var automationsLoading = false
     @Published var voiceMode = "standard"
     @Published var availableVoiceModes: [String] = ["kurz", "standard", "fokus", "diskret", "privat"]
     // TARS-Style Regler (0-100) - siehe app/core/personality_manager.py PersonalityStyle.
@@ -332,63 +331,15 @@ final class AppState: ObservableObject {
         }
     }
 
-    func refreshTasks(status: String = "", project: String = "") async {
-        await ensureServerConnected()
-        tasksLoading = true
-        defer { tasksLoading = false }
+    func refreshAutomations() async {
+        automationsLoading = true
+        defer { automationsLoading = false }
         do {
-            let response = try await serverController.tasks(status: status, project: project)
-            tasks = response.tasks
-            blockedTaskIDs = Set(response.blocked)
+            let response = try await OpenClawAutomationsClient().automations()
+            automations = response.automations
             lastError = nil
         } catch {
-            lastError = "Aufgaben konnten nicht geladen werden."
-        }
-    }
-
-    func createTask(title: String, project: String? = nil, priority: String = "mittel", deadline: String? = nil) async {
-        await ensureServerConnected()
-        do {
-            _ = try await serverController.createTask(title: title, project: project, priority: priority, deadline: deadline)
-            await refreshTasks()
-        } catch {
-            lastError = "Aufgabe konnte nicht erstellt werden."
-        }
-    }
-
-    func updateTask(_ task: JarvisTask, fields: [String: String]) async {
-        do {
-            try await serverController.updateTask(id: task.id, fields: fields)
-            await refreshTasks()
-        } catch {
-            lastError = "Aufgabe konnte nicht geändert werden."
-        }
-    }
-
-    func confirmTask(_ task: JarvisTask) async {
-        do {
-            try await serverController.confirmTask(id: task.id)
-            await refreshTasks()
-        } catch {
-            lastError = "Aufgabe konnte nicht bestätigt werden."
-        }
-    }
-
-    func rejectTask(_ task: JarvisTask) async {
-        do {
-            try await serverController.rejectTask(id: task.id)
-            await refreshTasks()
-        } catch {
-            lastError = "Aufgabe konnte nicht abgelehnt werden."
-        }
-    }
-
-    func deleteTask(_ task: JarvisTask) async {
-        do {
-            try await serverController.deleteTask(id: task.id)
-            tasks.removeAll { $0.id == task.id }
-        } catch {
-            lastError = "Aufgabe konnte nicht gelöscht werden."
+            lastError = "Automationen konnten nicht geladen werden."
         }
     }
 
@@ -1212,9 +1163,10 @@ final class AppState: ObservableObject {
     }
 
     func refreshCalendarOverview() async {
-        await ensureServerConnected()
+        // Laeuft jetzt ueber den Kalender-Proxy statt das alte Backend
+        // (2026-09-12, "Kalender" Fachbereich Migration).
         do {
-            calendarOverview = try await serverController.calendarOverview()
+            calendarOverview = try await OpenClawCalendarClient().overview()
         } catch {
             lastError = "Kalenderübersicht konnte nicht geladen werden."
         }

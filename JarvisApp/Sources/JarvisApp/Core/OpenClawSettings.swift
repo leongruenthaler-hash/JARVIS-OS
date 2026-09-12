@@ -244,4 +244,53 @@ enum OpenClawSettings {
         guard !trimmedHost.isEmpty else { return nil }
         return URL(string: "http://\(trimmedHost):18797")
     }
+
+    /// Separate token for the Mac Mini's standalone Kalender-Proxy
+    /// (scripts/calendar_proxy_server.py, port 18798) - replaces the old
+    /// backend's /api/calendar/overview endpoint (2026-09-12, "Kalender"
+    /// Fachbereich Migration, nur die Dashboard-Uebersichtskarte - Termine/
+    /// Erinnerungen anlegen laeuft weiterhin ueber OpenClaw-Chat).
+    static var calendarToken: String? {
+        get { KeychainStore.read(service: keychainService, account: calendarKeychainAccount) }
+        set {
+            if let newValue, !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                KeychainStore.save(newValue, service: keychainService, account: calendarKeychainAccount)
+            } else {
+                KeychainStore.delete(service: keychainService, account: calendarKeychainAccount)
+            }
+        }
+    }
+    private static let calendarKeychainAccount = "calendar-proxy-token"
+
+    /// Same Mac Mini host as `baseURL`, different port - see
+    /// scripts/calendar_proxy_server.py::PORT.
+    static var calendarBaseURL: URL? {
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedHost.isEmpty else { return nil }
+        return URL(string: "http://\(trimmedHost):18798")
+    }
+
+    /// Separate token for the Mac Mini's standalone Automationen-Proxy
+    /// (scripts/automations_proxy_server.py, port 18800) - zeigt die echten
+    /// OpenClaw-Cronjobs (2026-09-12, ersetzt die zuvor gebaute, nie wirklich
+    /// genutzte interne Aufgabenliste).
+    static var automationsToken: String? {
+        get { KeychainStore.read(service: keychainService, account: automationsKeychainAccount) }
+        set {
+            if let newValue, !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                KeychainStore.save(newValue, service: keychainService, account: automationsKeychainAccount)
+            } else {
+                KeychainStore.delete(service: keychainService, account: automationsKeychainAccount)
+            }
+        }
+    }
+    private static let automationsKeychainAccount = "automations-proxy-token"
+
+    /// Same Mac Mini host as `baseURL`, different port - see
+    /// scripts/automations_proxy_server.py::PORT.
+    static var automationsBaseURL: URL? {
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedHost.isEmpty else { return nil }
+        return URL(string: "http://\(trimmedHost):18800")
+    }
 }

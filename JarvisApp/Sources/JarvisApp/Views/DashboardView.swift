@@ -71,6 +71,7 @@ struct DashboardView: View {
             if mailAllowed { await appState.refreshMailOverview() }
         }
         .task(id: musicAllowed) { await pollMusicOverview() }
+        .task { await appState.refreshAutomations() }
     }
 
     private var calendarOrRemindersAllowed: Bool {
@@ -443,11 +444,11 @@ struct DashboardView: View {
                 )
             }
             .frame(width: wideWidth)
-            DashboardCard(title: "Aufgaben", symbol: "checklist", trailingSymbol: "plus") {
-                AufgabenCardContent(
-                    hasPermission: appState.permissions["reminders"]?.allowed ?? false,
-                    overview: appState.calendarOverview.reminders,
-                    openSettings: { activeSection = .section(.privacy) }
+            DashboardCard(title: "Automationen", symbol: "bolt.badge.clock") {
+                AutomationsCardContent(
+                    automations: appState.automations,
+                    isLoading: appState.automationsLoading,
+                    openSettings: { activeSection = .section(.settings) }
                 )
             }
             .frame(width: narrowWidth)
@@ -593,7 +594,7 @@ struct DashboardView: View {
             case .files: FilesView()
             case .photos: PhotosView()
             case .memory: MemoryView()
-            case .tasks: TasksView()
+            case .automations: AutomationsView()
             case .calendar: CalendarWorkspaceView()
             case .reminders: RemindersWorkspaceView()
             case .privacy: PrivacyView()
@@ -854,26 +855,26 @@ private struct MailCardContent: View {
     }
 }
 
-private struct AufgabenCardContent: View {
-    let hasPermission: Bool
-    let overview: CalendarOverviewSection
+private struct AutomationsCardContent: View {
+    let automations: [AutomationJob]
+    let isLoading: Bool
     var openSettings: (() -> Void)?
 
     var body: some View {
-        if !hasPermission {
-            DashboardPlaceholder(text: "Erinnerungen nicht verbunden - hier tippen.", action: openSettings)
-        } else if overview.message == "Noch nicht geladen." {
+        if OpenClawSettings.automationsToken == nil {
+            DashboardPlaceholder(text: "Automationen nicht verbunden - hier tippen.", action: openSettings)
+        } else if isLoading && automations.isEmpty {
             DashboardLoadingPlaceholder()
-        } else if overview.items.isEmpty {
-            DashboardPlaceholder(text: overview.message)
+        } else if automations.isEmpty {
+            DashboardPlaceholder(text: "Keine Automationen gefunden.")
         } else {
             VStack(alignment: .leading, spacing: 6) {
-                ForEach(overview.items.prefix(4)) { item in
+                ForEach(automations.prefix(4)) { job in
                     HStack(spacing: 6) {
-                        Image(systemName: "circle")
+                        Image(systemName: "circle.fill")
                             .font(.system(size: 8))
-                            .foregroundStyle(DashboardPalette.accent)
-                        Text(item.title)
+                            .foregroundStyle(statusTint(job.status))
+                        Text(job.name)
                             .font(.system(size: 11.5))
                             .foregroundStyle(.white)
                             .lineLimit(1)
@@ -881,6 +882,15 @@ private struct AufgabenCardContent: View {
                 }
             }
             .frame(maxWidth: .infinity, minHeight: 64, alignment: .topLeading)
+        }
+    }
+
+    private func statusTint(_ status: String) -> Color {
+        switch status {
+        case "ok": return .green
+        case "error": return .red
+        case "skipped": return .orange
+        default: return DashboardPalette.accent
         }
     }
 }

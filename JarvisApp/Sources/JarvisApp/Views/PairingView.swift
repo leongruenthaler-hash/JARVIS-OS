@@ -22,6 +22,10 @@ struct PairingView: View {
     @State private var mailTokenSaved = OpenClawSettings.mailToken != nil
     @State private var musicTokenDraft = ""
     @State private var musicTokenSaved = OpenClawSettings.musicToken != nil
+    @State private var calendarTokenDraft = ""
+    @State private var calendarTokenSaved = OpenClawSettings.calendarToken != nil
+    @State private var automationsTokenDraft = ""
+    @State private var automationsTokenSaved = OpenClawSettings.automationsToken != nil
     @State private var memoryTokenDraft = ""
     @State private var memoryTokenSaved = OpenClawSettings.memoryToken != nil
     @State private var gatewayActivityTokenDraft = ""
@@ -300,6 +304,80 @@ struct PairingView: View {
                                 Button(role: .destructive) {
                                     OpenClawSettings.musicToken = nil
                                     musicTokenSaved = false
+                                } label: {
+                                    Label("Token löschen", systemImage: "trash")
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                    }
+
+                    Divider().opacity(0.4)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Kalender-Proxy")
+                            .font(.headline)
+                        Text(calendarTokenSaved ? "Token ist in der macOS-Keychain gespeichert." : "Noch kein Token gespeichert - Kalender-Übersicht auf dem Dashboard bleibt solange leer.")
+                            .font(.callout)
+                            .foregroundStyle(calendarTokenSaved ? Color.secondary : Color.orange)
+                        Text("Auf dem Mac Mini im Terminal ausgegeben, sobald scripts/calendar_proxy_server.py läuft.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        SecureField("Kalender-Proxy-Token vom Mac Mini", text: $calendarTokenDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 320)
+
+                        HStack(spacing: 10) {
+                            Button("Token speichern") {
+                                OpenClawSettings.calendarToken = calendarTokenDraft
+                                calendarTokenDraft = ""
+                                calendarTokenSaved = OpenClawSettings.calendarToken != nil
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(calendarTokenDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                            if calendarTokenSaved {
+                                Button(role: .destructive) {
+                                    OpenClawSettings.calendarToken = nil
+                                    calendarTokenSaved = false
+                                } label: {
+                                    Label("Token löschen", systemImage: "trash")
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                    }
+
+                    Divider().opacity(0.4)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Automationen-Proxy")
+                            .font(.headline)
+                        Text(automationsTokenSaved ? "Token ist in der macOS-Keychain gespeichert." : "Noch kein Token gespeichert - die Automationen-Ansicht bleibt solange leer.")
+                            .font(.callout)
+                            .foregroundStyle(automationsTokenSaved ? Color.secondary : Color.orange)
+                        Text("Auf dem Mac Mini im Terminal ausgegeben, sobald scripts/automations_proxy_server.py läuft.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        SecureField("Automationen-Proxy-Token vom Mac Mini", text: $automationsTokenDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 320)
+
+                        HStack(spacing: 10) {
+                            Button("Token speichern") {
+                                OpenClawSettings.automationsToken = automationsTokenDraft
+                                automationsTokenDraft = ""
+                                automationsTokenSaved = OpenClawSettings.automationsToken != nil
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(automationsTokenDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                            if automationsTokenSaved {
+                                Button(role: .destructive) {
+                                    OpenClawSettings.automationsToken = nil
+                                    automationsTokenSaved = false
                                 } label: {
                                     Label("Token löschen", systemImage: "trash")
                                 }
