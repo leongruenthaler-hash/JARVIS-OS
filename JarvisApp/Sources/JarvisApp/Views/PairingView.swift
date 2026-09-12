@@ -20,6 +20,8 @@ struct PairingView: View {
     @State private var photosTokenSaved = OpenClawSettings.photosToken != nil
     @State private var mailTokenDraft = ""
     @State private var mailTokenSaved = OpenClawSettings.mailToken != nil
+    @State private var musicTokenDraft = ""
+    @State private var musicTokenSaved = OpenClawSettings.musicToken != nil
     @State private var memoryTokenDraft = ""
     @State private var memoryTokenSaved = OpenClawSettings.memoryToken != nil
     @State private var gatewayActivityTokenDraft = ""
@@ -261,6 +263,43 @@ struct PairingView: View {
                                 Button(role: .destructive) {
                                     OpenClawSettings.mailToken = nil
                                     mailTokenSaved = false
+                                } label: {
+                                    Label("Token löschen", systemImage: "trash")
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                    }
+
+                    Divider().opacity(0.4)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Musik-Proxy")
+                            .font(.headline)
+                        Text(musicTokenSaved ? "Token ist in der macOS-Keychain gespeichert." : "Noch kein Token gespeichert - Musik-Übersicht auf dem Dashboard bleibt solange leer.")
+                            .font(.callout)
+                            .foregroundStyle(musicTokenSaved ? Color.secondary : Color.orange)
+                        Text("Auf dem Mac Mini im Terminal ausgegeben, sobald scripts/music_proxy_server.py läuft.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        SecureField("Musik-Proxy-Token vom Mac Mini", text: $musicTokenDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 320)
+
+                        HStack(spacing: 10) {
+                            Button("Token speichern") {
+                                OpenClawSettings.musicToken = musicTokenDraft
+                                musicTokenDraft = ""
+                                musicTokenSaved = OpenClawSettings.musicToken != nil
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(musicTokenDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                            if musicTokenSaved {
+                                Button(role: .destructive) {
+                                    OpenClawSettings.musicToken = nil
+                                    musicTokenSaved = false
                                 } label: {
                                     Label("Token löschen", systemImage: "trash")
                                 }

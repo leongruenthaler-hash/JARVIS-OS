@@ -219,4 +219,29 @@ enum OpenClawSettings {
         guard !trimmedHost.isEmpty else { return nil }
         return URL(string: "http://\(trimmedHost):18796")
     }
+
+    /// Separate token for the Mac Mini's standalone Musik-Proxy
+    /// (scripts/music_proxy_server.py, port 18797) - replaces the old backend's
+    /// /api/music/overview endpoint (2026-09-12, "Musik" Fachbereich Migration,
+    /// nur die Dashboard-Uebersichtskarte - Wiedergabe-Steuerung laeuft bereits
+    /// ueber den installierten OpenClaw-Skill "managing-apple-music").
+    static var musicToken: String? {
+        get { KeychainStore.read(service: keychainService, account: musicKeychainAccount) }
+        set {
+            if let newValue, !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                KeychainStore.save(newValue, service: keychainService, account: musicKeychainAccount)
+            } else {
+                KeychainStore.delete(service: keychainService, account: musicKeychainAccount)
+            }
+        }
+    }
+    private static let musicKeychainAccount = "music-proxy-token"
+
+    /// Same Mac Mini host as `baseURL`, different port - see
+    /// scripts/music_proxy_server.py::PORT.
+    static var musicBaseURL: URL? {
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedHost.isEmpty else { return nil }
+        return URL(string: "http://\(trimmedHost):18797")
+    }
 }

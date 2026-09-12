@@ -44,6 +44,7 @@
 		4838CBC987EB4044E4B55AC1 /* OpenClawMemoryClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 103172ABBA903DB4A277EF48 /* OpenClawMemoryClient.swift */; };
 		12C35FD06ADEF91C24216AE0 /* GatewayClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8FDCA3FB4F4B4DE89637DFD /* GatewayClient.swift */; };
 		81D6179F77B14F22BE9E0846 /* OpenClawMailClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A8F65F671E249F9AD7C79F4 /* OpenClawMailClient.swift */; };
+		98844E6C82964A3EB86574BE /* OpenClawMusicClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 580738A5C68F494DA8A7C255 /* OpenClawMusicClient.swift */; };
 		F9A2F194F880CA97B38364EF /* OpenClawSpeechPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AA413904806CF0BCB71A5BB /* OpenClawSpeechPlayer.swift */; };
 		F1674172B98247CC9389C2F5 /* PairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C20A2ABBCD74CBB994D3FC1 /* PairingView.swift */; };
 		9B3222560E60EFA286A779D5 /* PrivacyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85002DF6FCD359EC134EC4F9 /* PrivacyView.swift */; };
@@ -118,6 +119,7 @@
 		103172ABBA903DB4A277EF48 /* OpenClawMemoryClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawMemoryClient.swift; sourceTree = "<group>"; };
 		C8FDCA3FB4F4B4DE89637DFD /* GatewayClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GatewayClient.swift; sourceTree = "<group>"; };
 		1A8F65F671E249F9AD7C79F4 /* OpenClawMailClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawMailClient.swift; sourceTree = "<group>"; };
+		580738A5C68F494DA8A7C255 /* OpenClawMusicClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawMusicClient.swift; sourceTree = "<group>"; };
 		2AA413904806CF0BCB71A5BB /* OpenClawSpeechPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawSpeechPlayer.swift; sourceTree = "<group>"; };
 		6C20A2ABBCD74CBB994D3FC1 /* PairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingView.swift; sourceTree = "<group>"; };
 		CD87D845E1639C0D7F9C10A3 /* ModelsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelsView.swift; sourceTree = "<group>"; };
@@ -251,6 +253,7 @@
 				103172ABBA903DB4A277EF48 /* OpenClawMemoryClient.swift */,
 				C8FDCA3FB4F4B4DE89637DFD /* GatewayClient.swift */,
 				1A8F65F671E249F9AD7C79F4 /* OpenClawMailClient.swift */,
+				580738A5C68F494DA8A7C255 /* OpenClawMusicClient.swift */,
 				2AA413904806CF0BCB71A5BB /* OpenClawSpeechPlayer.swift */,
 				2805D3602E78FDB8A2D88F3B /* JarvisModels.swift */,
 					3F96930612F747DFA5C63B67 /* MemoryCoreLayout.swift */,
@@ -434,6 +437,7 @@
 				4838CBC987EB4044E4B55AC1 /* OpenClawMemoryClient.swift in Sources */,
 				12C35FD06ADEF91C24216AE0 /* GatewayClient.swift in Sources */,
 				81D6179F77B14F22BE9E0846 /* OpenClawMailClient.swift in Sources */,
+				98844E6C82964A3EB86574BE /* OpenClawMusicClient.swift in Sources */,
 				F9A2F194F880CA97B38364EF /* OpenClawSpeechPlayer.swift in Sources */,
 				F1674172B98247CC9389C2F5 /* PairingView.swift in Sources */,
 				C4B7BAE04211F925F46CE89E /* JarvisModels.swift in Sources */,

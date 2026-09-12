@@ -1231,9 +1231,10 @@ final class AppState: ObservableObject {
     }
 
     func refreshMusicOverview() async {
-        await ensureServerConnected()
+        // Laeuft jetzt ueber den Musik-Proxy statt das alte Backend (2026-09-12,
+        // "Musik" Fachbereich Migration).
         do {
-            musicOverview = try await serverController.musicOverview()
+            musicOverview = try await OpenClawMusicClient().overview()
         } catch {
             lastError = "Musikübersicht konnte nicht geladen werden."
         }
