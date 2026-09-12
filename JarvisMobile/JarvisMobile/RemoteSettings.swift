@@ -149,6 +149,29 @@ enum RemoteSettings {
         return URL(string: "http://\(trimmedHost):18795")
     }
 
+    /// Token fuer den Mac Mini's Ankunfts-Proxy (scripts/presence_proxy_server.py,
+    /// Port 18802, 2026-09-12) - dieses Geraet PUSHT ein Ereignis dorthin, sobald
+    /// LocationManager per GPS-Geofence erkennt, dass Leon zu Hause ankommt.
+    static var presenceToken: String? {
+        get { KeychainStore.read(service: keychainService, account: presenceKeychainAccount) }
+        set {
+            if let newValue, !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                KeychainStore.save(newValue, service: keychainService, account: presenceKeychainAccount)
+            } else {
+                KeychainStore.delete(service: keychainService, account: presenceKeychainAccount)
+            }
+        }
+    }
+    private static let presenceKeychainAccount = "presence-proxy-token"
+
+    /// Same Mac Mini host as `baseURL`, different port - see
+    /// scripts/presence_proxy_server.py::PORT.
+    static var presenceBaseURL: URL? {
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedHost.isEmpty else { return nil }
+        return URL(string: "http://\(trimmedHost):18802")
+    }
+
     /// Token fuer den Mac Mini's Gesundheits-Proxy (scripts/health_proxy_server.py,
     /// Port 18801, 2026-09-12) - anders als alle anderen Proxys hier PUSHT dieses
     /// Geraet Daten dorthin (HealthKit gibt es nur auf iOS, der Mac Mini kann Apple

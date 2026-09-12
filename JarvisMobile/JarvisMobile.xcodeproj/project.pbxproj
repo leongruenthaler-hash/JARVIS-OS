@@ -23,6 +23,7 @@
 		7C6B5A4D3E2F1A0B9C8D7E6F /* MemoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C3B2A1D0E9F8A7B6C5D4E3F /* MemoryView.swift */; };
 		E479A905F0844F2DBEC2BE80 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6AA9C0CDA9B143E19675A4A0 /* Assets.xcassets */; };
 		E4E834C5D35D4A79AA2C8A58 /* RemoteSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2A163257D394487BFFC7449 /* RemoteSettings.swift */; };
+		6178353C844A464F8D4977AE /* LocationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6808F688D50410B9A35CFA0 /* LocationManager.swift */; };
 		C487C3DEAC5C4D95B5F67DD3 /* HealthKitManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 973EBD16C96842829737BB88 /* HealthKitManager.swift */; };
 		D3FEE371E3874638868AF7C7 /* HealthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6791C3EE540540BEAA12CC4C /* HealthView.swift */; };
 		460A7F84E9AD4331BC79D905 /* EdgeTTSClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF45526484154DF6B3EB3971 /* EdgeTTSClient.swift */; };
@@ -45,6 +46,7 @@
 		9854A7D2A46747E4BD385187 /* PairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingView.swift; sourceTree = "<group>"; };
 		A7A1A6FAC6B741D2857C61F9 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B2A163257D394487BFFC7449 /* RemoteSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSettings.swift; sourceTree = "<group>"; };
+		F6808F688D50410B9A35CFA0 /* LocationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationManager.swift; sourceTree = "<group>"; };
 		973EBD16C96842829737BB88 /* HealthKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitManager.swift; sourceTree = "<group>"; };
 		6791C3EE540540BEAA12CC4C /* HealthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthView.swift; sourceTree = "<group>"; };
 		EA69DCE8E2654A0DABB6E57F /* JarvisMobile.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = JarvisMobile.entitlements; sourceTree = "<group>"; };
@@ -114,6 +116,7 @@
 				2D4F6318242843DC8CBCFF62 /* Models.swift */,
 				14CA8B348B1246BBBA6EA69A /* KeychainStore.swift */,
 				B2A163257D394487BFFC7449 /* RemoteSettings.swift */,
+				F6808F688D50410B9A35CFA0 /* LocationManager.swift */,
 				973EBD16C96842829737BB88 /* HealthKitManager.swift */,
 				6791C3EE540540BEAA12CC4C /* HealthView.swift */,
 				EA69DCE8E2654A0DABB6E57F /* JarvisMobile.entitlements */,
@@ -221,6 +224,7 @@
 				643218832C9E421D8C798541 /* Models.swift in Sources */,
 				92A8E883E5214124BFE0F796 /* KeychainStore.swift in Sources */,
 				E4E834C5D35D4A79AA2C8A58 /* RemoteSettings.swift in Sources */,
+				6178353C844A464F8D4977AE /* LocationManager.swift in Sources */,
 				C487C3DEAC5C4D95B5F67DD3 /* HealthKitManager.swift in Sources */,
 				D3FEE371E3874638868AF7C7 /* HealthView.swift in Sources */,
 			);

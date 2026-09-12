@@ -8,6 +8,7 @@ struct JarvisMobileApp: App {
     /// gleichnamiges Pendant in JarvisMacApp.swift.
     @StateObject private var gatewayClient = GatewayClient()
     @StateObject private var healthKit = HealthKitManager()
+    @StateObject private var locationManager = LocationManager()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -15,6 +16,7 @@ struct JarvisMobileApp: App {
             RootView()
                 .environmentObject(gatewayClient)
                 .environmentObject(healthKit)
+                .environmentObject(locationManager)
                 .task {
                     guard RemoteSettings.isPaired else { return }
                     gatewayClient.connect(sessionUser: RemoteSettings.sessionUser)

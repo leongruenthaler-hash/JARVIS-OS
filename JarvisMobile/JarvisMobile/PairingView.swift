@@ -14,6 +14,8 @@ struct PairingView: View {
     @State private var gatewayActivityTokenSaved = RemoteSettings.gatewayActivityToken != nil
     @State private var healthTokenDraft = ""
     @State private var healthTokenSaved = RemoteSettings.healthToken != nil
+    @State private var presenceTokenDraft = ""
+    @State private var presenceTokenSaved = RemoteSettings.presenceToken != nil
 
     var body: some View {
         Form {
@@ -166,6 +168,34 @@ struct PairingView: View {
                     Button("Token löschen", role: .destructive) {
                         RemoteSettings.healthToken = nil
                         healthTokenSaved = false
+                    }
+                }
+            }
+
+            Section("Ankunfts-Proxy") {
+                if presenceTokenSaved {
+                    Label("Token ist in der Keychain gespeichert.", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                } else {
+                    Label("Noch kein Token gespeichert - die Ankunfts-Begrüßung bleibt solange aus.", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
+                Text("Auf dem Mac Mini im Terminal ausgegeben, sobald scripts/presence_proxy_server.py läuft.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                SecureField("Ankunfts-Proxy-Token vom Mac Mini", text: $presenceTokenDraft)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button("Token speichern") {
+                    RemoteSettings.presenceToken = presenceTokenDraft
+                    presenceTokenDraft = ""
+                    presenceTokenSaved = RemoteSettings.presenceToken != nil
+                }
+                .disabled(presenceTokenDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                if presenceTokenSaved {
+                    Button("Token löschen", role: .destructive) {
+                        RemoteSettings.presenceToken = nil
+                        presenceTokenSaved = false
                     }
                 }
             }

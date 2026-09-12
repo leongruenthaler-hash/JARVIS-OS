@@ -10,6 +10,7 @@ import AVFoundation
 /// idiomatic way to change persona, matching how a user would ask for this
 /// verbally in the first place.
 struct SettingsView: View {
+    @EnvironmentObject private var locationManager: LocationManager
     @AppStorage("JarvisHumorLevel") private var humorLevel = 60.0
     @AppStorage("JarvisHonestyLevel") private var honestyLevel = 70.0
     @State private var isApplying = false
@@ -158,6 +159,42 @@ struct SettingsView: View {
                     .foregroundStyle(JarvisTheme.textSecondary)
             } header: {
                 Text("Fähigkeiten")
+            }
+            .listRowBackground(JarvisTheme.cardFill)
+
+            Section {
+                Text("Jarvis erkennt per GPS, wenn du zu Hause ankommst, und begrüßt dich über den Mac Mini - komplett lokal, kein Standort-Tracking-Dienst. Tipp diesen Button EINMAL an, während du wirklich zu Hause bist.")
+                    .font(.callout)
+                    .foregroundStyle(JarvisTheme.textSecondary)
+
+                if locationManager.authorizationStatus != .authorizedAlways {
+                    Button("Standortzugriff (\"Immer\") anfragen") {
+                        locationManager.requestAuthorization()
+                    }
+                }
+
+                Button("Aktuellen Standort als Zuhause speichern") {
+                    locationManager.setCurrentLocationAsHome()
+                }
+
+                if locationManager.homeSet {
+                    Label("Zuhause ist gespeichert.", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Button("Zuhause löschen", role: .destructive) {
+                        locationManager.clearHome()
+                    }
+                } else {
+                    Label("Noch kein Zuhause gespeichert.", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
+
+                if let lastError = locationManager.lastError {
+                    Label(lastError, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.callout)
+                }
+            } header: {
+                Text("Ankunfts-Begrüßung")
             }
             .listRowBackground(JarvisTheme.cardFill)
         }
