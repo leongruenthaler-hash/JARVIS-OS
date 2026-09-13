@@ -916,7 +916,10 @@ final class AppState: ObservableObject {
         defer { photoIsLoading = false }
 
         do {
-            let response = try await serverController.chat(command, history: history)
+            // Ueber OpenClaw-Chat + den bereits installierten "jarvis-photos"-Skill statt
+            // des alten Backends (Rest-Migrations-Plan, Abschnitt 3 - vorher als TODO in
+            // OpenClawPhotosClient.swift vermerkt).
+            let response = try await openClaw.sendChat(applyVoiceModeStyle(to: command), history: history)
             photoResult = response.answer
             messages.append(ChatMessage(role: .user, text: command))
             messages.append(ChatMessage(role: .jarvis, text: response.answer))
@@ -1088,7 +1091,11 @@ final class AppState: ObservableObject {
         defer { fileIsLoading = false }
 
         do {
-            let response = try await serverController.chat(command, history: history)
+            // Ueber OpenClaw-Chat statt des alten Backends (Rest-Migrations-Plan,
+            // Abschnitt 3). Kein dediziertes "files"-Skill installiert (im Gegensatz zu
+            // "jarvis-photos") - OpenClaws Agent beantwortet Dateifragen mit seinen
+            // eigenen, generischen Datei-Werkzeugen auf dem Mac Mini.
+            let response = try await openClaw.sendChat(applyVoiceModeStyle(to: command), history: history)
             fileResult = response.answer
             messages.append(ChatMessage(role: .user, text: command))
             messages.append(ChatMessage(role: .jarvis, text: response.answer))

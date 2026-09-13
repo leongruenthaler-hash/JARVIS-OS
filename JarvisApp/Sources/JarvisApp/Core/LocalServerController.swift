@@ -708,21 +708,6 @@ final class LocalServerController: ObservableObject {
         return data
     }
 
-    func chat(_ message: String, history: [[String: String]] = []) async throws -> ChatResponse {
-        do {
-            let answer = try await apiClient.sendChat(message, history: history)
-            isRunning = true
-            return answer
-        } catch {
-            let response: ChatResponse = try await bridge(
-                command: "chat",
-                payload: ["message": message, "history": history]
-            )
-            isRunning = true
-            return response
-        }
-    }
-
     func chatStream(
         _ message: String,
         history: [[String: String]] = [],
