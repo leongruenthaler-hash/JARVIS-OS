@@ -337,38 +337,6 @@ struct JarvisAPIClient {
         return response.events
     }
 
-    func voiceModeStatus() async throws -> VoiceModeStatus {
-        try await get("/api/settings/voice-mode")
-    }
-
-    @discardableResult
-    func setVoiceMode(_ mode: String) async throws -> String {
-        struct Request: Encodable { let mode: String }
-        struct Response: Decodable { let ok: Bool; let mode: String }
-        let response: Response = try await post("/api/settings/voice-mode", body: Request(mode: mode))
-        return response.mode
-    }
-
-    func personalitySettings() async throws -> PersonalitySettings {
-        try await get("/api/settings/personality")
-    }
-
-    @discardableResult
-    func setPersonalitySettings(humorLevel: Int, honestyLevel: Int) async throws -> PersonalitySettings {
-        struct Request: Encodable {
-            let humorLevel: Int
-            let honestyLevel: Int
-            enum CodingKeys: String, CodingKey {
-                case humorLevel = "humor_level"
-                case honestyLevel = "honesty_level"
-            }
-        }
-        return try await post(
-            "/api/settings/personality",
-            body: Request(humorLevel: humorLevel, honestyLevel: honestyLevel)
-        )
-    }
-
     /// Fire-and-forget: only numeric millisecond durations, never transcript/audio
     /// content - see app/core/voice_performance.py.
     func recordVoicePerformance(_ metrics: [String: Int]) async throws {

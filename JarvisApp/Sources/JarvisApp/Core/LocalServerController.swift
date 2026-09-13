@@ -1097,24 +1097,6 @@ final class LocalServerController: ObservableObject {
         try await apiClient.recentActivity(since: since)
     }
 
-    func voiceModeStatus() async throws -> VoiceModeStatus {
-        try await apiClient.voiceModeStatus()
-    }
-
-    @discardableResult
-    func setVoiceMode(_ mode: String) async throws -> String {
-        try await apiClient.setVoiceMode(mode)
-    }
-
-    func personalitySettings() async throws -> PersonalitySettings {
-        try await apiClient.personalitySettings()
-    }
-
-    @discardableResult
-    func setPersonalitySettings(humorLevel: Int, honestyLevel: Int) async throws -> PersonalitySettings {
-        try await apiClient.setPersonalitySettings(humorLevel: humorLevel, honestyLevel: honestyLevel)
-    }
-
     func recordVoicePerformance(_ metrics: [String: Int]) async throws {
         try await apiClient.recordVoicePerformance(metrics)
     }
@@ -1125,13 +1107,6 @@ final class LocalServerController: ObservableObject {
 
     func deleteOpenAIKey() async throws {
         try await apiClient.deleteOpenAIKey()
-    }
-
-    func setUserProfile(userName: String, salutation: String) async throws {
-        let _: EmptyResponse = try await bridge(
-            command: "set_user_profile",
-            payload: ["user_name": userName, "salutation": salutation]
-        )
     }
 
     private func bridge<T: Decodable>(

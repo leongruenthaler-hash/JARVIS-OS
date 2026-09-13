@@ -206,30 +206,6 @@ struct AutomationsResponse: Codable {
     let total: Int
 }
 
-/// Phase E: Kurzmodus / Standardmodus / Fokusmodus / Diskreter Modus / Privater Modus
-/// (Master-Plan Abschnitt 6.4). See app/core/voice_modes.py.
-struct VoiceModeStatus: Codable, Equatable {
-    let mode: String
-    let availableModes: [String]
-
-    enum CodingKeys: String, CodingKey {
-        case mode
-        case availableModes = "available_modes"
-    }
-}
-
-/// TARS-Style Persönlichkeits-Regler (Humor/Ehrlichkeit, 0-100). Siehe
-/// app/core/personality_manager.py PersonalityStyle.
-struct PersonalitySettings: Codable, Equatable {
-    let humorLevel: Int
-    let honestyLevel: Int
-
-    enum CodingKeys: String, CodingKey {
-        case humorLevel = "humor_level"
-        case honestyLevel = "honesty_level"
-    }
-}
-
 struct FileSearchPayload: Codable, Equatable {
     let query: String
     let message: String

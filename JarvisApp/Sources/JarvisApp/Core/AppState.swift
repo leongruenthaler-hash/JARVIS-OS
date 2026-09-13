@@ -23,11 +23,18 @@ final class AppState: ObservableObject {
     @Published var memoryFactsTotal = 0
     @Published var automations: [AutomationJob] = []
     @Published var automationsLoading = false
-    @Published var voiceMode = "standard"
+    // Rein lokaler Zustand (kein Server-Roundtrip mehr, siehe setVoiceMode) -
+    // wird als Stilanweisung in jede Chat-Anfrage an OpenClaw eingefuegt statt
+    // an einen /api/settings/voice-mode-Endpunkt geschickt, den es bei
+    // OpenClaw nicht gibt (Rest-Migrations-Plan, Abschnitt 2).
+    @Published var voiceMode = UserDefaults.standard.string(forKey: "JarvisVoiceMode") ?? "standard"
     @Published var availableVoiceModes: [String] = ["kurz", "standard", "fokus", "diskret", "privat"]
-    // TARS-Style Regler (0-100) - siehe app/core/personality_manager.py PersonalityStyle.
-    @Published var humorLevel = 60
-    @Published var honestyLevel = 90
+    // TARS-Style Regler (0-100) - werden per Chat-Anweisung in Jarvis' eigene
+    // SOUL.md geschrieben (savePersonalitySettingsToCore), nicht mehr an einen
+    // alten Backend-Endpunkt (siehe app/core/personality_manager.py, jetzt
+    // ungenutzt). Lokal nur als letzter bekannter Anzeigewert gecacht.
+    @Published var humorLevel = UserDefaults.standard.object(forKey: "JarvisHumorLevel") as? Int ?? 60
+    @Published var honestyLevel = UserDefaults.standard.object(forKey: "JarvisHonestyLevel") as? Int ?? 90
     @Published var memoryIsLoading = false
     @Published var recentActivity: [ActivityEvent] = []
     @Published var mailResult = "Noch keine Mail-Aktion ausgeführt."
@@ -117,10 +124,12 @@ final class AppState: ObservableObject {
         _ = await voiceWarmup
         _ = await audioWarmup
         if onboardingCompleted {
-            await saveUserProfileToCore()
+            // Nur lokal, kein Chat-Aufruf bei jedem App-Start (siehe
+            // saveUserProfileToCore) - der Rest-Migrations-Plan will keine
+            // OpenClaw-Anfrage auf jedem Launch, sondern nur bei tatsaechlicher
+            // Aenderung durch den Nutzer (Settings/Onboarding).
+            saveUserProfileLocally()
         }
-        await refreshVoiceMode()
-        await refreshPersonalitySettings()
         autoListenEnabled = true
         keepListeningAfterGreeting = true
         await presentStartupGreetingIfNeeded()
@@ -165,47 +174,53 @@ final class AppState: ObservableObject {
         }
     }
 
-    func refreshVoiceMode() async {
-        await ensureServerConnected()
-        do {
-            let status = try await serverController.voiceModeStatus()
-            voiceMode = status.mode
-            availableVoiceModes = status.availableModes
-        } catch {
-            // Best-effort - falling back to the cached/default mode is fine, this
-            // isn't worth surfacing as a user-facing error.
+    /// Rein lokal, kein Server-Roundtrip mehr - siehe `voiceMode`s Deklaration.
+    func setVoiceMode(_ mode: String) {
+        voiceMode = mode
+        UserDefaults.standard.set(mode, forKey: "JarvisVoiceMode")
+    }
+
+    /// Antwortstil-Stichwort fuer den aktuellen Gespraechsmodus, als kurzer Hinweis vor
+    /// jede Chat-Anfrage gestellt (gleiches Praefix-Anweisungs-Muster wie
+    /// whatsapp-bridge/index.mjs's OPERATING_INSTRUCTIONS) - ersetzt den alten
+    /// serverseitigen /api/settings/voice-mode-Endpunkt, den es bei OpenClaw nicht gibt.
+    /// "diskret" braucht hier keinen Hinweis (rein clientseitig ueber
+    /// `voiceOutputAllowed` in streamAndSpeakAnswer abgedeckt).
+    private func voiceModeInstruction() -> String? {
+        switch voiceMode {
+        case "kurz":
+            return "Antworte diesmal extrem knapp, meist nur ein Satz."
+        case "fokus":
+            return "Antworte ausführlich und technisch - fokussiert auf Programmierung und Planung."
+        case "privat":
+            return "Nutze für diese Antwort keine Websuche und keine externen Datenquellen."
+        default:
+            return nil
         }
     }
 
-    func setVoiceMode(_ mode: String) async {
-        do {
-            voiceMode = try await serverController.setVoiceMode(mode)
-        } catch {
-            lastError = "Gesprächsmodus konnte nicht geändert werden."
-        }
+    private func applyVoiceModeStyle(to text: String) -> String {
+        guard let instruction = voiceModeInstruction() else { return text }
+        return "[Antwortstil-Hinweis: \(instruction)]\n\n\(text)"
     }
 
-    func refreshPersonalitySettings() async {
-        await ensureServerConnected()
-        do {
-            let status = try await serverController.personalitySettings()
-            humorLevel = status.humorLevel
-            honestyLevel = status.honestyLevel
-        } catch {
-            // Best-effort - fallback auf die gecachten/Default-Werte ist unkritisch.
-        }
-    }
-
+    /// Persönlichkeits-Regler (Humor/Ehrlichkeit) per Chat-Anweisung setzen, statt einen
+    /// alten Backend-Endpunkt zu rufen - Jarvis aktualisiert dabei selbst seine eigene
+    /// SOUL.md (er hat bereits Dateizugriff). Gleiches Muster wie JarvisMobile
+    /// (SettingsView.swift's applyPersonality(), 2026-09-08).
     func savePersonalitySettingsToCore() async {
+        UserDefaults.standard.set(humorLevel, forKey: "JarvisHumorLevel")
+        UserDefaults.standard.set(honestyLevel, forKey: "JarvisHonestyLevel")
+        let instruction = """
+        Bitte aktualisiere deine eigene SOUL.md mit diesen beiden Persönlichkeits-Reglern - überschreibe frühere Humor-/Ehrlichkeits-Angaben dort, statt sie zu duplizieren:
+        - Humor-Level: \(humorLevel)/100 (0 = kein Humor, sachlich; 100 = sucht aktiv nach Gelegenheiten für trocken-sarkastische Seitenhiebe, à la TARS aus Interstellar)
+        - Ehrlichkeits-Level: \(honestyLevel)/100 (0 = vorsichtig/diplomatisch bei unangenehmen Wahrheiten; 100 = direkt und ungeschönt, ohne Polster)
+        Bestätige kurz in einem Satz, dass du das gespeichert hast.
+        """
         do {
-            let status = try await serverController.setPersonalitySettings(
-                humorLevel: humorLevel,
-                honestyLevel: honestyLevel
-            )
-            humorLevel = status.humorLevel
-            honestyLevel = status.honestyLevel
+            _ = try await openClaw.sendChat(instruction, history: [])
         } catch {
-            lastError = "Persönlichkeits-Einstellungen konnten nicht gespeichert werden."
+            lastError = "Persönlichkeits-Einstellungen konnten nicht an Jarvis übermittelt werden."
         }
     }
 
@@ -242,12 +257,23 @@ final class AppState: ObservableObject {
         UserDefaults.standard.set(language, forKey: "JarvisLanguage")
     }
 
+    /// Nutzerprofil (Name/Anrede) per Chat-Anweisung setzen, statt einen alten Backend-
+    /// Endpunkt zu rufen - Jarvis aktualisiert dabei selbst seine eigene USER.md.
+    /// Strukturell identisch zu savePersonalitySettingsToCore(). Wird bewusst NICHT bei
+    /// jedem App-Start aufgerufen (siehe bootstrap()), nur bei tatsaechlicher Aenderung
+    /// durch den Nutzer.
     func saveUserProfileToCore() async {
         saveUserProfileLocally()
+        let instruction = """
+        Bitte aktualisiere deine eigene USER.md mit diesen Angaben - überschreibe frühere Name-/Anrede-Angaben dort, statt sie zu duplizieren:
+        - Name: \(displayUserName)
+        - Anrede: \(userAddress)
+        Bestätige kurz in einem Satz, dass du das gespeichert hast.
+        """
         do {
-            try await serverController.setUserProfile(userName: displayUserName, salutation: userSalutation)
+            _ = try await openClaw.sendChat(instruction, history: [])
         } catch {
-            lastError = "Profil wurde lokal gespeichert. Der Core übernimmt es beim nächsten erfolgreichen Start."
+            lastError = "Profil wurde lokal gespeichert. Jarvis übernimmt es beim nächsten erfolgreichen Verbindungsaufbau."
         }
     }
 
@@ -755,7 +781,7 @@ final class AppState: ObservableObject {
         defer { mailIsLoading = false }
 
         do {
-            let response = try await openClaw.sendChat(command, history: history)
+            let response = try await openClaw.sendChat(applyVoiceModeStyle(to: command), history: history)
             mailResult = response.answer
             messages.append(ChatMessage(role: .user, text: command))
             messages.append(ChatMessage(role: .jarvis, text: response.answer))
@@ -1467,7 +1493,7 @@ final class AppState: ObservableObject {
         // Diskreter Modus (Phase E, Master-Plan 6.4): text-only, no TTS.
         let voiceOutputAllowed = voiceMode != "diskret"
 
-        let response = try await openClaw.sendChat(question, history: history)
+        let response = try await openClaw.sendChat(applyVoiceModeStyle(to: question), history: history)
         let answer = response.answer
         messages[answerIndex].text = answer
         onTextChunk?(answer)

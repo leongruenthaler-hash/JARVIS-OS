@@ -141,7 +141,7 @@ struct SettingsView: View {
                     .labelsHidden()
                 }
                 .onChange(of: appState.voiceMode) { _, newValue in
-                    Task { await appState.setVoiceMode(newValue) }
+                    appState.setVoiceMode(newValue)
                 }
 
                 Divider().opacity(0.4)
