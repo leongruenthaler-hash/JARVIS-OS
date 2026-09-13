@@ -83,12 +83,6 @@ final class AppState: ObservableObject {
     /// an error, since a 10-15 minute one-time setup is expected behavior, not a failure.
     @Published var bootstrapStatus: String?
 
-    let serverController = LocalServerController()
-    /// Chat/health talk to OpenClaw now instead of `serverController` (Phase 1
-    /// Meilenstein 1, "JarvisApp auf OpenClaw umstellen"-Plan, 2026-09-08).
-    /// `serverController` stays in place for now - TTS (Edge-TTS subprocess
-    /// bridge), live transcription, and the still-deferred domain features
-    /// (Mail/Photos/...) keep using it until their own milestones land.
     let openClaw = OpenClawClient()
 
     private lazy var ttsService = OpenClawSpeechPlayer()
@@ -117,10 +111,8 @@ final class AppState: ObservableObject {
 
     func bootstrap() async {
         async let serverReady: Void = ensureServerConnected()
-        async let voiceWarmup: Void = prewarmVoicePipeline()
         async let audioWarmup: Void = warmAudioCapturePipeline()
         _ = await serverReady
-        _ = await voiceWarmup
         _ = await audioWarmup
         if onboardingCompleted {
             // Nur lokal, kein Chat-Aufruf bei jedem App-Start (siehe
@@ -501,8 +493,7 @@ final class AppState: ObservableObject {
             status = .idle
         } catch {
             activeSpeechPlayer = nil
-            let detail = serverController.lastLaunchError.map { " Technisch: \($0)" } ?? ""
-            messages[answerIndex].text = "Ich erreiche den lokalen Core gerade nicht. Ich verbinde im Hintergrund neu.\(detail)"
+            messages[answerIndex].text = "Ich erreiche OpenClaw auf dem Mac Mini gerade nicht. Ich verbinde im Hintergrund neu."
             status = .offline
             setVoiceState(.error, reason: "text_message_failed")
             await ensureServerConnected()
@@ -744,8 +735,7 @@ final class AppState: ObservableObject {
             return shouldStopAfterThisTurn
         } catch {
             activeSpeechPlayer = nil
-            let detail = serverController.lastLaunchError.map { " Technisch: \($0)" } ?? ""
-            messages[answerIndex].text = "Ich erreiche den lokalen Core gerade nicht. Ich verbinde im Hintergrund neu.\(detail)"
+            messages[answerIndex].text = "Ich erreiche OpenClaw auf dem Mac Mini gerade nicht. Ich verbinde im Hintergrund neu."
             status = .offline
             setVoiceState(.error, reason: "listen_failed")
             await ensureServerConnected()
@@ -1407,7 +1397,6 @@ final class AppState: ObservableObject {
         nextVoiceListenTask = nil
         await stopCurrentSpeech()
         audioCaptureService.cancel()
-        await serverController.cancelListening()
         status = .idle
         setVoiceState(.idle, reason: "auto_listening_stopped")
         logVoiceEvent("auto listening stopped by user")
@@ -1622,9 +1611,6 @@ final class AppState: ObservableObject {
                     self?.nextVoiceListenTask = nil
                 }
             }
-            if self.status != .offline {
-                await self.prewarmVoicePipeline()
-            }
             for _ in 0..<20 {
                 if !self.isVoiceRequestRunning {
                     break
@@ -1639,15 +1625,6 @@ final class AppState: ObservableObject {
     private func warmAudioCapturePipeline() async {
         await audioCaptureService.prepareAudioSession()
     }
-
-    private func prewarmVoicePipeline() async {
-        await serverController.prewarmVoicePipeline()
-    }
-
-    // MARK: - Sprecher-Verifikation (siehe plans/2026-08-10-jarvis-sprecher-
-    // verifikation-weckwort.md) - Einlernen laeuft ueber einen eigenen Punkt in den
-    // Einstellungen (Leons ausdruecklicher Wunsch, analog zu Siris Einrichtung),
-    // nicht per Sprachbefehl.
 
     private func resumeContinuousVoiceMode(reason: String) {
         autoListenEnabled = true
@@ -1761,19 +1738,6 @@ final class AppState: ObservableObject {
             "playback=\(playback)ms"
         )
 
-        // Phase E: persist alongside the console print, not instead of it - see
-        // app/core/voice_performance.py. Only non-negative numeric durations, fire-
-        // and-forget so a slow/offline server never delays the voice turn itself.
-        let rawMetrics: [String: Int] = [
-            "micReady": micReady, "recordingStart": recordingStart, "transcription": transcription,
-            "llmFirstToken": firstToken, "llm": llm, "tts": tts, "playback": playback,
-        ]
-        let metrics = rawMetrics.filter { $0.value >= 0 }
-        if !metrics.isEmpty {
-            Task { [serverController] in
-                try? await serverController.recordVoicePerformance(metrics)
-            }
-        }
     }
 
     private func modelLabel(from provider: String, model: String) -> String {

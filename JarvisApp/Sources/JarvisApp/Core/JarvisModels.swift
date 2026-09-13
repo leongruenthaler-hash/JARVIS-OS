@@ -249,3 +249,110 @@ struct FileSearchResult: Codable, Identifiable, Equatable {
         case fileExtension = "extension"
     }
 }
+
+// Datenmodelle fuer OpenClaw-Antworten - umgezogen aus dem geloeschten
+// JarvisAPIClient.swift (Rest-Migrations-Plan, Abschnitt 8): diese Typen selbst
+// gehoerten nie zum alten Backend-Netzwerk-Code, sondern beschreiben nur die
+// (weiterhin gueltigen) JSON-Formen der Mac-Mini-Proxys/OpenClaw-Antworten.
+
+struct ChatResponse: Decodable {
+    let answer: String
+    let source: String?
+    let model: String?
+}
+
+struct LocalVisionStatus: Decodable, Equatable {
+    let available: Bool
+    let model: String
+    let installedModels: [String]
+    let message: String
+
+    enum CodingKeys: String, CodingKey {
+        case available
+        case model
+        case installedModels = "installed_models"
+        case message
+    }
+}
+
+struct CalendarOverviewPayload: Decodable, Equatable {
+    let calendar: CalendarOverviewSection
+    let reminders: CalendarOverviewSection
+}
+
+struct CalendarOverviewSection: Decodable, Equatable {
+    let items: [CalendarOverviewItem]
+    let count: Int
+    let message: String
+    let error: String
+}
+
+struct CalendarOverviewItem: Decodable, Identifiable, Equatable {
+    let calendar: String?
+    let list: String?
+    let title: String
+    let start: String?
+    let end: String?
+    let due: String?
+
+    var id: String {
+        [calendar ?? list ?? "", title, start ?? due ?? ""].joined(separator: "|")
+    }
+}
+
+struct MailOverviewPayload: Decodable, Equatable {
+    let unreadCount: Int
+    let messages: [MailOverviewMessage]
+    let message: String
+    let error: String
+
+    enum CodingKeys: String, CodingKey {
+        case unreadCount = "unread_count"
+        case messages, message, error
+    }
+}
+
+struct MailOverviewMessage: Decodable, Identifiable, Equatable {
+    let sender: String
+    let subject: String
+
+    var id: String { sender + "|" + subject }
+}
+
+struct MusicOverviewPayload: Decodable, Equatable {
+    let track: MusicTrack?
+    let message: String
+    let error: String
+}
+
+struct MusicTrack: Decodable, Equatable {
+    let title: String
+    let artist: String?
+    let album: String?
+    let isPlaying: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case title, artist, album
+        case isPlaying = "is_playing"
+    }
+}
+
+struct VoiceTranscriptionResponse: Decodable {
+    let transcript: String
+    let duration: Double?
+    let speechDuration: Double?
+    let sampleRate: Double?
+    let source: String?
+    let model: String?
+    let error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case transcript
+        case duration
+        case speechDuration = "speech_duration"
+        case sampleRate = "sample_rate"
+        case source
+        case model
+        case error
+    }
+}

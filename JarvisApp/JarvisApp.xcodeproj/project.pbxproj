@@ -31,9 +31,7 @@
 		4492D0E9C2B33074CA9E4E61 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE436B2B3FAF9DED68E8828A /* SettingsView.swift */; };
 		5A70B029084FA57F9FD921CB /* FeaturePlaceholderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B59109264F63EF29D2AC0E6 /* FeaturePlaceholderView.swift */; };
 		5EA0C61453C727CED1DD9588 /* JarvisMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDB9A78B15C2C04E8B5296A0 /* JarvisMacApp.swift */; };
-		7565F6938579AAC278653159 /* JarvisAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B46CBAFAF3DB457C442D8FD3 /* JarvisAPIClient.swift */; };
 		B4566CA9F17C4309A5145759 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D4D9F07ACC146A7AA290861 /* KeychainStore.swift */; };
-		C615B91CFDEC42E6A636DB84 /* RemoteConnectionSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4E8E0B77E2241F9A6422944 /* RemoteConnectionSettings.swift */; };
 		CBBEF2D38990432EA2C623DA /* OpenClawSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 537414BDC8214724B7CD7B0A /* OpenClawSettings.swift */; };
 		DE50A5B7D5624A3FBAC4AEA5 /* OpenClawClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 094C3D22CF7841649CF6E8B5 /* OpenClawClient.swift */; };
 		50D618127E66F07F415753DB /* OpenClawTTSClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45A453D5E2CB7F9507E5162E /* OpenClawTTSClient.swift */; };
@@ -46,12 +44,12 @@
 		81EBC41DF9B44E1AA489F58F /* OpenClawCalendarClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8AFB044D4024C13A08F21A2 /* OpenClawCalendarClient.swift */; };
 		55900C1F7A9B4590A199A3E4 /* OpenClawAutomationsClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07FE3B4B039F4303802C7FAC /* OpenClawAutomationsClient.swift */; };
 		F9A2F194F880CA97B38364EF /* OpenClawSpeechPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AA413904806CF0BCB71A5BB /* OpenClawSpeechPlayer.swift */; };
+		BA92A39DB1954957B587D73D /* BridgeRuntimeEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFAA5AB2D9424D5088B1501E /* BridgeRuntimeEvent.swift */; };
 		6E2FE29260D048718B952957 /* VoiceTranscribeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6ACE7FC68AA34D4A81E8EEBC /* VoiceTranscribeClient.swift */; };
 		0CC27E67C8404A4D8D900F99 /* LiveTranscriptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C832F03B6B41474AA3D18FA8 /* LiveTranscriptionService.swift */; };
 		F1674172B98247CC9389C2F5 /* PairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C20A2ABBCD74CBB994D3FC1 /* PairingView.swift */; };
 		9B3222560E60EFA286A779D5 /* PrivacyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85002DF6FCD359EC134EC4F9 /* PrivacyView.swift */; };
 		A967EE67784809B6D279BE80 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 992C4FC6091295CB38DABD5C /* AppState.swift */; };
-		AC88AFFB19BB65617496152F /* LocalServerController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30E64A9827D02FDF81834A79 /* LocalServerController.swift */; };
 		BB56C742007B2B0006A915D4 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FED92BDBA779BC8A1F4138B2 /* RootView.swift */; };
 		48D758B3A86E4F01A6565628 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 760C71EFC090439CB0914410 /* DashboardView.swift */; };
 		BEEDA8D544E9F2D2E159BD20 /* MainShellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F69298EA3305AA688AC9E91 /* MainShellView.swift */; };
@@ -62,9 +60,6 @@
 		EB19DCFF8A89B08FA0E5BE7E /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55545D9D4E1E70D1A8E00B36 /* OnboardingView.swift */; };
 		EE1BE78BAB5E3FEAD8C2DBDD /* StatusPill.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B130D8C5A37DA22F60FFAC7 /* StatusPill.swift */; };
 		F77A288475FF33BA98017C16 /* ChatBubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92E35ED0C4D6DD7D7322A890 /* ChatBubble.swift */; };
-		A9DCE0625F9E7DA36BD1F013 /* ollama-runtime in Resources */ = {isa = PBXBuildFile; fileRef = 2707426F09591592CE237BB0 /* ollama-runtime */; };
-		17A6B63198F9AE63395D0FCB /* bundled-models in Resources */ = {isa = PBXBuildFile; fileRef = 7C761675FE88A65AA049132A /* bundled-models */; };
-		FBE55DC1E6394344AA1F4B5E /* JarvisBackend in Resources */ = {isa = PBXBuildFile; fileRef = 5B5262ECDE1540D7A9E19B23 /* JarvisBackend */; };
 		754EEEC1B4E65CA705A0B83A /* Licenses in Resources */ = {isa = PBXBuildFile; fileRef = 76D4F0EC3378BF4EE09AAFAC /* Licenses */; };
 		1D311D8055F64F1BA6F5C74C /* Images in Resources */ = {isa = PBXBuildFile; fileRef = 887606F4384B4D53BFEA33C3 /* Images */; };
 		B17B7F6ED8AD4F2F66FDC84F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 2F18DDFF1E795BF62A0CC79C /* Assets.xcassets */; };
@@ -102,16 +97,13 @@
 		0F69298EA3305AA688AC9E91 /* MainShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainShellView.swift; sourceTree = "<group>"; };
 		2805D3602E78FDB8A2D88F3B /* JarvisModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisModels.swift; sourceTree = "<group>"; };
 		2B59109264F63EF29D2AC0E6 /* FeaturePlaceholderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeaturePlaceholderView.swift; sourceTree = "<group>"; };
-		30E64A9827D02FDF81834A79 /* LocalServerController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalServerController.swift; sourceTree = "<group>"; };
 		55545D9D4E1E70D1A8E00B36 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		7B130D8C5A37DA22F60FFAC7 /* StatusPill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusPill.swift; sourceTree = "<group>"; };
 		85002DF6FCD359EC134EC4F9 /* PrivacyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyView.swift; sourceTree = "<group>"; };
 		92E35ED0C4D6DD7D7322A890 /* ChatBubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatBubble.swift; sourceTree = "<group>"; };
 		992C4FC6091295CB38DABD5C /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		AEF63687048485D45524643C /* JarvisApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = JarvisApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		B46CBAFAF3DB457C442D8FD3 /* JarvisAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisAPIClient.swift; sourceTree = "<group>"; };
 		6D4D9F07ACC146A7AA290861 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
-		A4E8E0B77E2241F9A6422944 /* RemoteConnectionSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteConnectionSettings.swift; sourceTree = "<group>"; };
 		537414BDC8214724B7CD7B0A /* OpenClawSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawSettings.swift; sourceTree = "<group>"; };
 		094C3D22CF7841649CF6E8B5 /* OpenClawClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawClient.swift; sourceTree = "<group>"; };
 		45A453D5E2CB7F9507E5162E /* OpenClawTTSClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawTTSClient.swift; sourceTree = "<group>"; };
@@ -124,6 +116,7 @@
 		C8AFB044D4024C13A08F21A2 /* OpenClawCalendarClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawCalendarClient.swift; sourceTree = "<group>"; };
 		07FE3B4B039F4303802C7FAC /* OpenClawAutomationsClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawAutomationsClient.swift; sourceTree = "<group>"; };
 		2AA413904806CF0BCB71A5BB /* OpenClawSpeechPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawSpeechPlayer.swift; sourceTree = "<group>"; };
+		FFAA5AB2D9424D5088B1501E /* BridgeRuntimeEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeRuntimeEvent.swift; sourceTree = "<group>"; };
 		6ACE7FC68AA34D4A81E8EEBC /* VoiceTranscribeClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTranscribeClient.swift; sourceTree = "<group>"; };
 		C832F03B6B41474AA3D18FA8 /* LiveTranscriptionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranscriptionService.swift; sourceTree = "<group>"; };
 		6C20A2ABBCD74CBB994D3FC1 /* PairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingView.swift; sourceTree = "<group>"; };
@@ -134,9 +127,6 @@
 		FEC5ED5093EF18C40845EC9F /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		FED92BDBA779BC8A1F4138B2 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		760C71EFC090439CB0914410 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
-		2707426F09591592CE237BB0 /* ollama-runtime */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/JarvisApp/Resources/ollama-runtime; sourceTree = SOURCE_ROOT; };
-		7C761675FE88A65AA049132A /* bundled-models */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/JarvisApp/Resources/bundled-models; sourceTree = SOURCE_ROOT; };
-		5B5262ECDE1540D7A9E19B23 /* JarvisBackend */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/JarvisApp/Resources/JarvisBackend; sourceTree = SOURCE_ROOT; };
 		76D4F0EC3378BF4EE09AAFAC /* Licenses */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/JarvisApp/Resources/Licenses; sourceTree = SOURCE_ROOT; };
 		887606F4384B4D53BFEA33C3 /* Images */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/JarvisApp/Resources/Images; sourceTree = SOURCE_ROOT; };
 		2F18DDFF1E795BF62A0CC79C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Sources/JarvisApp/Resources/Assets.xcassets; sourceTree = SOURCE_ROOT; };
@@ -244,9 +234,7 @@
 				992C4FC6091295CB38DABD5C /* AppState.swift */,
 				2A1B3C4D5E6F708192A3B4C0 /* AudioCaptureService.swift */,
 				B86BFE542B4A6C67A06D1284 /* NotificationPermissionManager.swift */,
-				B46CBAFAF3DB457C442D8FD3 /* JarvisAPIClient.swift */,
 				6D4D9F07ACC146A7AA290861 /* KeychainStore.swift */,
-				A4E8E0B77E2241F9A6422944 /* RemoteConnectionSettings.swift */,
 				537414BDC8214724B7CD7B0A /* OpenClawSettings.swift */,
 				094C3D22CF7841649CF6E8B5 /* OpenClawClient.swift */,
 				45A453D5E2CB7F9507E5162E /* OpenClawTTSClient.swift */,
@@ -259,13 +247,13 @@
 				C8AFB044D4024C13A08F21A2 /* OpenClawCalendarClient.swift */,
 				07FE3B4B039F4303802C7FAC /* OpenClawAutomationsClient.swift */,
 				2AA413904806CF0BCB71A5BB /* OpenClawSpeechPlayer.swift */,
+				FFAA5AB2D9424D5088B1501E /* BridgeRuntimeEvent.swift */,
 				6ACE7FC68AA34D4A81E8EEBC /* VoiceTranscribeClient.swift */,
 				C832F03B6B41474AA3D18FA8 /* LiveTranscriptionService.swift */,
 				2805D3602E78FDB8A2D88F3B /* JarvisModels.swift */,
 					3F96930612F747DFA5C63B67 /* MemoryCoreLayout.swift */,
 					370756B3665D46F78BA83C51 /* MemorySynapsePulse.swift */,
 				2B7E1011A9C44CCB8F311001 /* JarvisTheme.swift */,
-					30E64A9827D02FDF81834A79 /* LocalServerController.swift */,
 					1A2B3C4D5E6F708192A3B4C4 /* ScanProgress.swift */,
 					60FEA70A8BF10CD876B81319 /* TTSService.swift */,
 				AE444AB69D8A6A00DEE3C4E2 /* JarvisVoiceState.swift */,
@@ -281,9 +269,6 @@
 		062A844EF2D9465AB25814A8 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
-				2707426F09591592CE237BB0 /* ollama-runtime */,
-				7C761675FE88A65AA049132A /* bundled-models */,
-				5B5262ECDE1540D7A9E19B23 /* JarvisBackend */,
 				76D4F0EC3378BF4EE09AAFAC /* Licenses */,
 				887606F4384B4D53BFEA33C3 /* Images */,
 				2F18DDFF1E795BF62A0CC79C /* Assets.xcassets */,
@@ -300,7 +285,6 @@
 			buildPhases = (
 				E4F78730D65EE9F55E2BAC2F /* Sources */,
 				7B8633C7EB6F5CB13673C25D /* Frameworks */,
-				7A15A109732B4661B7FC89B9 /* Stage JarvisBackend Resources */,
 				C52ABA055DA4D0050382EB56 /* Resources */,
 				E8D2BD7C640558C55FEA4EDE /* Strip Extended Attributes From Bundled Resources */,
 			);
@@ -351,9 +335,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A9DCE0625F9E7DA36BD1F013 /* ollama-runtime in Resources */,
-				17A6B63198F9AE63395D0FCB /* bundled-models in Resources */,
-				FBE55DC1E6394344AA1F4B5E /* JarvisBackend in Resources */,
 				754EEEC1B4E65CA705A0B83A /* Licenses in Resources */,
 				1D311D8055F64F1BA6F5C74C /* Images in Resources */,
 				B17B7F6ED8AD4F2F66FDC84F /* Assets.xcassets in Resources */,
@@ -362,26 +343,6 @@
 		};
 /* End PBXResourcesBuildPhase section */
 /* Begin PBXShellScriptBuildPhase section */
-		7A15A109732B4661B7FC89B9 /* Stage JarvisBackend Resources */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-			);
-			name = "Stage JarvisBackend Resources";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-				"$(SOURCE_ROOT)/Sources/JarvisApp/Resources/JarvisBackend",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "set -e\nSRC=\"${SOURCE_ROOT}/../app\"\nDEST=\"${SOURCE_ROOT}/Sources/JarvisApp/Resources/JarvisBackend\"\nrm -rf \"$DEST\"\nmkdir -p \"$DEST/app\"\nrsync -a \\\n    --exclude='__pycache__/' \\\n    --exclude='*.pyc' \\\n    --exclude='*.wav' \\\n    --exclude='.DS_Store' \\\n    --exclude='/backups/' \\\n    --exclude='/app/' \\\n    --exclude='/nano app/' \\\n    --exclude='/config.json' \\\n    --exclude='/apple_speech' \\\n    --exclude='/Jarvis Photos Helper.app' \\\n    --exclude='/mic_test.py' \\\n    --exclude='/sound_test.py' \\\n    --exclude='/vad_audio_test.py' \\\n    --exclude='/voice_test.py' \\\n    --exclude='/openai_test.py' \\\n    --exclude='/voice_jarvis.py' \\\n    --exclude='/voice_jarvis_wake.py' \\\n    --exclude='/openai_jarvis.py' \\\n    --exclude='/openai_jarvis_backup.py' \\\n    --exclude='/openai_jarvis_v1_working.py' \\\n    --exclude='/openai_jarvis_vad.py' \\\n    --exclude='/openai_jarvis_vad_backup_aktivierungswort.py' \\\n    \"$SRC/\" \"$DEST/app/\"\ncp \"${SOURCE_ROOT}/../requirements.txt\" \"$DEST/requirements.txt\"\n";
-		};
 		E8D2BD7C640558C55FEA4EDE /* Strip Extended Attributes From Bundled Resources */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
@@ -432,9 +393,7 @@
 				8401EAA29BF80DAE1B953483 /* SetupProgressCard.swift in Sources */,
 				EE1BE78BAB5E3FEAD8C2DBDD /* StatusPill.swift in Sources */,
 				A967EE67784809B6D279BE80 /* AppState.swift in Sources */,
-				7565F6938579AAC278653159 /* JarvisAPIClient.swift in Sources */,
 				B4566CA9F17C4309A5145759 /* KeychainStore.swift in Sources */,
-				C615B91CFDEC42E6A636DB84 /* RemoteConnectionSettings.swift in Sources */,
 				CBBEF2D38990432EA2C623DA /* OpenClawSettings.swift in Sources */,
 				DE50A5B7D5624A3FBAC4AEA5 /* OpenClawClient.swift in Sources */,
 				50D618127E66F07F415753DB /* OpenClawTTSClient.swift in Sources */,
@@ -447,11 +406,11 @@
 				81EBC41DF9B44E1AA489F58F /* OpenClawCalendarClient.swift in Sources */,
 				55900C1F7A9B4590A199A3E4 /* OpenClawAutomationsClient.swift in Sources */,
 				F9A2F194F880CA97B38364EF /* OpenClawSpeechPlayer.swift in Sources */,
+				BA92A39DB1954957B587D73D /* BridgeRuntimeEvent.swift in Sources */,
 				6E2FE29260D048718B952957 /* VoiceTranscribeClient.swift in Sources */,
 				0CC27E67C8404A4D8D900F99 /* LiveTranscriptionService.swift in Sources */,
 				F1674172B98247CC9389C2F5 /* PairingView.swift in Sources */,
 				C4B7BAE04211F925F46CE89E /* JarvisModels.swift in Sources */,
-				AC88AFFB19BB65617496152F /* LocalServerController.swift in Sources */,
 				90890DC4E684B2478412645D /* JarvisVoiceOrb.swift in Sources */,
 				8F9B0F06A4C10AB2852852AC /* TTSService.swift in Sources */,
 				39327D9A91C54B11A9811D18 /* SystemMonitor.swift in Sources */,

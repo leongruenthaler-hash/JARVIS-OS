@@ -4,8 +4,6 @@ struct OnboardingView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.jarvisTheme) private var theme
     @State private var step = 0
-    @State private var selectedModel = "phi4-mini"
-    @State private var openAIKey = ""
     @State private var tappedExamples: Set<String> = []
 
     private let capabilityItems: [(icon: String, title: String, detail: String)] = [
@@ -14,7 +12,7 @@ struct OnboardingView: View {
         ("folder", "Dateien", "Lokal suchen, öffnen, verschieben"),
         ("music.note", "Musik", "Wiedergabe über Apple Music steuern"),
         ("ear", "Immer-Zuhören-Modus", "Optional per Aktivierungswort"),
-        ("cpu", "Lokal oder Cloud", "Eigenes Modell wählen, jederzeit wechselbar")
+        ("cpu", "OpenClaw", "Läuft auf deinem Mac Mini, immer erreichbar")
     ]
 
     private let examples = [
@@ -24,9 +22,7 @@ struct OnboardingView: View {
         "Öffne meine Mails.",
         "Suche nach Informationen über Apple.",
         "Fasse diese Datei zusammen.",
-        "Erstelle einen Kalendereintrag.",
-        "Arbeite lokal.",
-        "Nutze OpenAI."
+        "Erstelle einen Kalendereintrag."
     ]
 
     var body: some View {
@@ -40,9 +36,9 @@ struct OnboardingView: View {
                     Button("Zurück") { withAnimation { step -= 1 } }
                 }
                 Spacer()
-                Button(step == 8 ? "Jarvis starten" : "Weiter") {
+                Button(step == 5 ? "Jarvis starten" : "Weiter") {
                     withAnimation {
-                        if step == 8 {
+                        if step == 5 {
                             Task {
                                 await appState.saveUserProfileToCore()
                                 appState.completeOnboarding()
@@ -69,10 +65,8 @@ struct OnboardingView: View {
         case 1: capabilities
         case 2: language
         case 3: profile
-        case 4: model
-        case 5: privacy
-        case 6: permissions
-        case 7: tutorial
+        case 4: privacy
+        case 5: tutorial
         default: done
         }
     }
@@ -176,53 +170,15 @@ struct OnboardingView: View {
         }
     }
 
-    private var model: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("KI-Modell auswählen")
-                .font(.largeTitle.bold())
-            Picker("Modell", selection: $selectedModel) {
-                Text("Lokal empfohlen · phi4-mini").tag("phi4-mini")
-                Text("Lokale Premiumqualität · gemma3:4b").tag("gemma3:4b")
-                Text("Lokale höchste Qualität · qwen3:4b").tag("qwen3:4b")
-                Text("OpenAI GPT-5 Nano").tag("openai")
-            }
-            .pickerStyle(.radioGroup)
-            if selectedModel == "openai" {
-                SecureField("OpenAI API-Key", text: $openAIKey)
-                Button("API-Key testen") {
-                    Task { try? await appState.serverController.setOpenAIKey(openAIKey) }
-                }
-            }
-        }
-    }
-
     private var privacy: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Datenschutz")
                 .font(.largeTitle.bold())
-            Label("Jarvis verarbeitet Daten lokal, wann immer möglich.", systemImage: "lock")
-            Label("Cloud wird nur nach Zustimmung verwendet.", systemImage: "cloud")
-            Label("Berechtigungen können jederzeit geändert werden.", systemImage: "switch.2")
+            Label("Jarvis läuft über OpenClaw auf deinem eigenen Mac Mini, nicht in einer fremden Cloud.", systemImage: "lock")
+            Label("Mail, Kalender, Fotos und Dateien koppelst du einzeln in den Einstellungen - erst dann greift Jarvis darauf zu.", systemImage: "link")
+            Label("Mikrofon und Spracherkennung kannst du jederzeit unter „Datenschutz“ prüfen und ändern.", systemImage: "switch.2")
         }
         .font(.title3)
-    }
-
-    private var permissions: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Berechtigungen")
-                .font(.largeTitle.bold())
-            ForEach(["Mikrofon", "Mail", "Kalender", "Erinnerungen", "Dateien", "Fotos", "Internet", "Cloud", "Memory"], id: \.self) { item in
-                Label(item, systemImage: "checkmark.seal")
-                    .padding(10)
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
-                    )
-            }
-            Text("Jede Berechtigung wird einzeln erklärt, bevor Jarvis sie nutzt.")
-                .foregroundStyle(.secondary)
-        }
     }
 
     private var tutorial: some View {
