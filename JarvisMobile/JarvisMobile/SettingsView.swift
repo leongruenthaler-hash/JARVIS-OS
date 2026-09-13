@@ -173,13 +173,36 @@ struct SettingsView: View {
                     }
                 }
 
-                Button("Aktuellen Standort als Zuhause speichern") {
+                Button {
                     locationManager.setCurrentLocationAsHome()
+                } label: {
+                    if locationManager.isCapturingHome {
+                        HStack {
+                            ProgressView()
+                            Text("Erfasse genauen Standort …")
+                        }
+                    } else {
+                        Text("Aktuellen Standort als Zuhause speichern")
+                    }
                 }
+                .disabled(locationManager.isCapturingHome)
 
                 if locationManager.homeSet {
                     Label("Zuhause ist gespeichert.", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
+                    if let accuracy = locationManager.homeAccuracyMeters {
+                        Text("Genauigkeit beim Speichern: ±\(Int(accuracy)) m")
+                            .font(.caption)
+                            .foregroundStyle(JarvisTheme.textSecondary)
+                    }
+                    Button("Zone jetzt prüfen (Diagnose)") {
+                        locationManager.checkRegionState()
+                    }
+                    if let state = locationManager.lastRegionState {
+                        Text(state)
+                            .font(.caption)
+                            .foregroundStyle(JarvisTheme.textSecondary)
+                    }
                     Button("Zuhause löschen", role: .destructive) {
                         locationManager.clearHome()
                     }

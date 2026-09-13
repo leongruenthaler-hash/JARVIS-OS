@@ -38,17 +38,23 @@ SUBPROCESS_ENV = {
     "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
 }
 
+VENV_PYTHON = "/Users/leongrunthaler/Projekte/JARVIS-OS/.venv/bin"
+
 GREETING_PROMPT = (
     "Leon ist gerade per GPS-Geofence als zu Hause angekommen erkannt worden "
     "(automatisches Ereignis, kein Chat mit ihm). Formuliere eine kurze "
     "Willkommens-Begruessung in deinem etablierten Jarvis-Stil (trocken-"
     "sarkastisch, aber freundlich, 'sir' ansprechen, 1-2 Saetze, Deutsch, "
-    "kein Markdown). Fuehre dann per exec GENAU diese zwei Kommandos "
+    "kein Markdown). Fuehre dann per exec GENAU diese drei Kommandos "
     "nacheinander aus (Anfuehrungszeichen im Text escapen):\n"
     "1. osascript -e \"set volume output volume 80\"\n"
     "   (Systemlautstaerke war beim ersten Live-Test zu leise, deshalb "
     "vorher anheben)\n"
-    "2. say -v \"Markus (Enhanced)\" \"<deine Begruessung>\"\n"
+    f"2. {VENV_PYTHON}/edge-tts --voice de-DE-KillianNeural --text \"<deine "
+    "Begruessung>\" --write-media /tmp/jarvis_arrival_greeting.mp3\n"
+    "   (Killian ist die von Leon gewuenschte Microsoft-Edge-TTS-Stimme, "
+    "kein macOS-Bordmittel - live verifiziert 2026-09-13)\n"
+    "3. afplay /tmp/jarvis_arrival_greeting.mp3\n"
     "Antworte selbst danach exakt mit NO_REPLY - das hier ist kein Chat, "
     "niemand liest eine normale Antwort."
 )
