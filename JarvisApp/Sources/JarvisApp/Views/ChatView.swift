@@ -98,17 +98,7 @@ struct ChatView: View {
                     .lineLimit(1)
                 HStack(spacing: 8) {
                     statusBadge
-                    Text("Modell: \(appState.modelStatus.activeModel)")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    Text("Modus: \(modelModeLabel)")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    if appState.modelStatus.provider.lowercased() == "openai" {
-                        modelBadge(title: "OpenAI aktiv", tint: .orange)
-                    } else {
-                        modelBadge(title: "Lokal aktiv", tint: theme.isDark ? theme.primaryAccent : .blue)
-                    }
+                    modelBadge(title: "OpenClaw", tint: theme.isDark ? theme.primaryAccent : .blue)
                 }
             }
 
@@ -313,17 +303,6 @@ struct ChatView: View {
         .padding(.top, 6)
     }
 
-    private var modelModeLabel: String {
-        switch appState.modelStatus.mode.lowercased() {
-        case "quality":
-            return "Qualität"
-        case "balanced":
-            return "Ausgewogen"
-        default:
-            return "Performance"
-        }
-    }
-
     private func miniChip(title: String, icon: String, tint: Color) -> some View {
         Label(title, systemImage: icon)
             .font(.caption.weight(.semibold))
@@ -387,7 +366,7 @@ struct ChatView: View {
                 HStack(spacing: 8) {
                     Text(appState.lastAnswerSource)
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(appState.modelStatus.provider.lowercased() == "openai" ? .orange : (theme.isDark ? theme.primaryAccent : .blue))
+                        .foregroundStyle(theme.isDark ? theme.primaryAccent : .blue)
                     if appState.voiceState == .jarvisSpeaking {
                         Text("Live")
                             .font(.caption2.weight(.bold))

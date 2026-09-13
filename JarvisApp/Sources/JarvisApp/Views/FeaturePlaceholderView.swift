@@ -44,8 +44,6 @@ struct FeaturePlaceholderView: View {
 
     private var description: String {
         switch section {
-        case .history:
-            return "Hier bekommt Jarvis später eine saubere Verlaufsansicht. Bis dahin bleibt der Chat dein schneller Mittelpunkt."
         case .mail:
             return "Mail-Funktionen laufen bereits im Jarvis-Core. Diese Seite wird zur übersichtlichen Mail-Zentrale für Zusammenfassungen, Kategorien und Aktionen."
         case .calendar:

@@ -89,15 +89,9 @@ struct PrivacyView: View {
             )
             summaryCard(
                 title: "KI-Modus",
-                value: appState.modelStatus.openAIEnabled ? "Cloud aktiv" : "Lokal aktiv",
-                symbol: appState.modelStatus.openAIEnabled ? "cloud.fill" : "house.fill",
-                tint: appState.modelStatus.openAIEnabled ? .orange : .blue
-            )
-            summaryCard(
-                title: "OpenAI Key",
-                value: appState.modelStatus.openAIKeyPresent ? "Keychain" : "Nicht gesetzt",
-                symbol: appState.modelStatus.openAIKeyPresent ? "key.fill" : "key.slash.fill",
-                tint: appState.modelStatus.openAIKeyPresent ? .green : .secondary
+                value: "OpenClaw",
+                symbol: "cpu.fill",
+                tint: .blue
             )
             summaryCard(
                 title: "Logging",

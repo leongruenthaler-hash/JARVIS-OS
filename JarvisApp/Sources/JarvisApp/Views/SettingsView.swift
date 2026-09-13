@@ -6,10 +6,8 @@ struct SettingsView: View {
     @AppStorage("JarvisActiveTheme") private var activeThemeRaw = JarvisTheme.signal.rawValue
     @AppStorage("JarvisDashboardLayoutEnabled") private var dashboardLayoutEnabled = true
     @AppStorage("JarvisSignalAccentHue") private var signalAccentHueRaw: Double = SignalAccentHue.mint.rawValue
-    @State private var apiKey = ""
     @State private var weatherCityDraft = ""
     @State private var usageGoalDraft = ""
-    @State private var voiceEnrollmentPrompt = ""
     @State private var showPairingSheet = false
 
     var body: some View {
@@ -21,7 +19,6 @@ struct SettingsView: View {
                 generalSection
                 designSection
                 voiceSection
-                openAISection
                 connectionSection
                 licensesSection
             }
@@ -41,9 +38,6 @@ struct SettingsView: View {
             if usageGoalDraft.isEmpty, let goal = appState.dailyUsageGoalMinutes {
                 usageGoalDraft = String(Int(goal))
             }
-        }
-        .task {
-            await appState.refreshConversationHistory()
         }
     }
 
@@ -132,21 +126,6 @@ struct SettingsView: View {
 
                 Divider().opacity(0.4)
 
-                Toggle(isOn: $appState.fastVoiceMode) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Schneller Sprachmodus")
-                            .font(.headline)
-                        Text("Kürzere Antworten, Streaming bevorzugt und weniger Denkpause. Jarvis trinkt dabei keinen Kaffee, wirkt aber so.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .onChange(of: appState.fastVoiceMode) { _, _ in
-                    Task { await appState.saveFastVoiceModeToCore() }
-                }
-
-                Divider().opacity(0.4)
-
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Gesprächsmodus")
                         .font(.headline)
@@ -228,74 +207,6 @@ struct SettingsView: View {
                 }
                 .onChange(of: appState.alwaysListenEnabled) { _, _ in
                     Task { await appState.applyAlwaysListenChange() }
-                }
-
-                Divider().opacity(0.4)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Sprecher-Verifikation")
-                        .font(.headline)
-                    Text("Prüft beim Weckwort, ob wirklich Ihre Stimme spricht - wie bei Siri. Erkennt Jarvis eine andere Stimme, meldet er sich kurz zurück statt zu aktivieren. Läuft komplett lokal, keine Cloud-Anfrage.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    if appState.isEnrollingVoiceProfile {
-                        HStack(spacing: 8) {
-                            ProgressView()
-                            Text(voiceEnrollmentPrompt)
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                        }
-                    } else {
-                        HStack(spacing: 10) {
-                            Button {
-                                Task { await runVoiceEnrollment() }
-                            } label: {
-                                Label(
-                                    appState.voiceProfileEnrolled ? "Stimme neu einlernen" : "Meine Stimme einlernen",
-                                    systemImage: "waveform"
-                                )
-                            }
-                            if appState.voiceProfileEnrolled {
-                                Button(role: .destructive) {
-                                    Task { await appState.resetVoiceProfile() }
-                                } label: {
-                                    Label("Stimmprofil löschen", systemImage: "trash")
-                                }
-                            }
-                        }
-                    }
-
-                    Toggle(isOn: $appState.speakerVerificationEnabled) {
-                        Text("Beim Weckwort aktivieren")
-                            .font(.callout)
-                    }
-                    .disabled(!appState.voiceProfileEnrolled)
-                    .onChange(of: appState.speakerVerificationEnabled) { _, newValue in
-                        UserDefaults.standard.set(newValue, forKey: "JarvisSpeakerVerificationEnabled")
-                    }
-                    if !appState.voiceProfileEnrolled {
-                        Text("Erst Stimme einlernen, um diesen Schalter zu aktivieren.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .task { await appState.refreshVoiceProfileStatus() }
-
-                Divider().opacity(0.4)
-
-                Toggle(isOn: $appState.storeConversationEnabled) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Gesprächsverlauf speichern")
-                            .font(.headline)
-                        Text("Speichert die letzten Nachrichten lokal, damit der Verlauf-Tab etwas anzeigen kann. Standardmäßig aus.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .onChange(of: appState.storeConversationEnabled) { _, newValue in
-                    Task { await appState.setStoreConversationEnabled(newValue) }
                 }
 
                 Divider().opacity(0.4)
@@ -492,71 +403,6 @@ struct SettingsView: View {
         .liquidGlassPanel(tint: .cyan)
     }
 
-    private var openAISection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            sectionHeader("OpenAI", subtitle: "Optionaler Cloud-Modus. Der Key landet in der macOS-Keychain, nicht in Klartextdateien.")
-
-            HStack(spacing: 12) {
-                Image(systemName: appState.modelStatus.openAIKeyPresent ? "key.fill" : "key.slash.fill")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(appState.modelStatus.openAIKeyPresent ? .green : .orange)
-                    .frame(width: 40, height: 40)
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(appState.modelStatus.openAIKeyPresent ? "API-Key ist gespeichert" : "Kein API-Key gespeichert")
-                        .font(.headline)
-                    Text("Jarvis zeigt den Key nie an und schreibt ihn nicht in Logs.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
-
-            SecureField("API-Key", text: $apiKey)
-                .textFieldStyle(.plain)
-                .padding(13)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.16), lineWidth: 1)
-                )
-
-            HStack(spacing: 10) {
-                Button {
-                    Task {
-                        // Only clear the field on success - it previously cleared
-                        // unconditionally, so a failed save (e.g. Keychain locked) silently
-                        // discarded the key the user just typed while the UI looked as if
-                        // it had worked.
-                        do {
-                            try await appState.serverController.setOpenAIKey(apiKey)
-                            apiKey = ""
-                        } catch {
-                            // Keep the typed key in the field so the user can retry.
-                        }
-                        await appState.refreshStatus()
-                    }
-                } label: {
-                    Label("In Keychain speichern", systemImage: "key.fill")
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                Button(role: .destructive) {
-                    Task {
-                        try? await appState.serverController.deleteOpenAIKey()
-                        await appState.refreshStatus()
-                    }
-                } label: {
-                    Label("API-Key löschen", systemImage: "trash")
-                }
-                .buttonStyle(.bordered)
-            }
-        }
-        .liquidGlassPanel(tint: .orange)
-    }
-
     private var connectionSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             sectionHeader(
@@ -646,14 +492,6 @@ struct SettingsView: View {
         let trimmed = usageGoalDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let value = Double(trimmed), value > 0 else { return }
         appState.updateDailyUsageGoal(value)
-    }
-
-    private func runVoiceEnrollment() async {
-        voiceEnrollmentPrompt = "Vorbereitung ..."
-        await appState.enrollVoiceProfile { index, total in
-            voiceEnrollmentPrompt = "Sag ein paar Worte, Satz \(index + 1) von \(total) ..."
-        }
-        voiceEnrollmentPrompt = ""
     }
 
     private func voiceModeLabel(_ mode: String) -> String {

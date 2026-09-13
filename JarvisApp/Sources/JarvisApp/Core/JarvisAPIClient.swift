@@ -109,47 +109,10 @@ struct JarvisAPIClient {
         let _: Response = try await post("/api/voice/cancel-listening", body: EmptyBody())
     }
 
-    /// Sprecher-Verifikation beim Weckwort, siehe
-    /// plans/2026-08-10-jarvis-sprecher-verifikation-weckwort.md. Einlernen und
-    /// Pruefen laufen beide lokal auf dem bereits laufenden Python-Server -
-    /// Audiodaten verlassen nie das Geraet.
-    func voiceProfileStatus() async throws -> VoiceProfileStatus {
-        try await get("/api/voice/profile/status")
-    }
-
-    func enrollVoiceProfile(audioPaths: [String]) async throws -> VoiceProfileEnrollResponse {
-        struct Request: Encodable {
-            let audioPaths: [String]
-            enum CodingKeys: String, CodingKey { case audioPaths = "audio_paths" }
-        }
-        return try await post("/api/voice/enroll", body: Request(audioPaths: audioPaths), timeoutInterval: 60)
-    }
-
-    func verifyVoiceProfile(audioPath: String) async throws -> VoiceProfileVerifyResponse {
-        struct Request: Encodable {
-            let audioPath: String
-            enum CodingKeys: String, CodingKey { case audioPath = "audio_path" }
-        }
-        return try await post("/api/voice/verify", body: Request(audioPath: audioPath), timeoutInterval: 20)
-    }
-
-    func resetVoiceProfile() async throws {
-        struct Response: Decodable { let ok: Bool }
-        let _: Response = try await post("/api/voice/profile/reset", body: EmptyBody())
-    }
-
     func setVoiceSpeakingState(_ isSpeaking: Bool) async throws {
         struct Request: Encodable { let speaking: Bool }
         struct Response: Decodable { let ok: Bool }
         let _: Response = try await post("/api/voice/speaking", body: Request(speaking: isSpeaking))
-    }
-
-    func models() async throws -> ModelStatus {
-        try await get("/api/models")
-    }
-
-    func scanStatus() async throws -> ScanStatusBundle {
-        try await post("/api/scan-status", body: EmptyBody())
     }
 
     func startMailFolderScan() async throws -> ScanProgress {
@@ -201,10 +164,6 @@ struct JarvisAPIClient {
 
     func musicOverview() async throws -> MusicOverviewPayload {
         try await get("/api/music/overview")
-    }
-
-    func conversationHistory() async throws -> ConversationHistoryPayload {
-        try await get("/api/conversation-history")
     }
 
     func dailyBriefing() async throws -> DailyBriefingPayload {
@@ -259,30 +218,6 @@ struct JarvisAPIClient {
         struct Response: Decodable { let status: String }
         let response: Response = try await get("/api/photos/permission-status")
         return response.status
-    }
-
-    func setModel(provider: String? = nil, model: String? = nil) async throws -> ModelStatus {
-        struct Request: Encodable { let provider: String?; let model: String? }
-        struct Response: Decodable { let message: String; let status: ModelStatus }
-        let response: Response = try await post("/api/models", body: Request(provider: provider, model: model))
-        return response.status
-    }
-
-    func pullModel(_ model: String) async throws -> ScanProgress {
-        struct Request: Encodable { let model: String }
-        return try await post("/api/models/pull", body: Request(model: model))
-    }
-
-    func setFastVoiceMode(_ enabled: Bool) async throws {
-        struct Request: Encodable { let enabled: Bool }
-        struct Response: Decodable { let ok: Bool; let enabled: Bool }
-        let _: Response = try await post("/api/settings/fast-voice-mode", body: Request(enabled: enabled))
-    }
-
-    func setStoreConversation(_ enabled: Bool) async throws {
-        struct Request: Encodable { let enabled: Bool }
-        struct Response: Decodable { let ok: Bool; let enabled: Bool }
-        let _: Response = try await post("/api/settings/store-conversation", body: Request(enabled: enabled))
     }
 
     func setVoice(_ voice: String) async throws {
@@ -400,31 +335,6 @@ struct JarvisAPIClient {
         let query = components.percentEncodedQuery.map { "?\($0)" } ?? ""
         let response: ActivityEventsResponse = try await get("/api/activity/recent" + query)
         return response.events
-    }
-
-    func proactivityEvents() async throws -> [ProactiveEvent] {
-        let response: ProactiveEventsResponse = try await get("/api/proactivity/events")
-        return response.events
-    }
-
-    @discardableResult
-    func snoozeProactivityEvent(dedupKey: String, minutes: Int = 60) async throws -> Bool {
-        struct Request: Encodable { let dedupKey: String; let minutes: Int
-            enum CodingKeys: String, CodingKey { case dedupKey = "dedup_key"; case minutes }
-        }
-        struct Response: Decodable { let ok: Bool }
-        let response: Response = try await post("/api/proactivity/snooze", body: Request(dedupKey: dedupKey, minutes: minutes))
-        return response.ok
-    }
-
-    @discardableResult
-    func dismissProactivityEvent(dedupKey: String) async throws -> Bool {
-        struct Request: Encodable { let dedupKey: String
-            enum CodingKeys: String, CodingKey { case dedupKey = "dedup_key" }
-        }
-        struct Response: Decodable { let ok: Bool }
-        let response: Response = try await post("/api/proactivity/dismiss", body: Request(dedupKey: dedupKey))
-        return response.ok
     }
 
     func voiceModeStatus() async throws -> VoiceModeStatus {
@@ -600,30 +510,6 @@ struct DailyBriefingPayload: Decodable, Equatable {
     }
 }
 
-struct ConversationHistoryPayload: Decodable, Equatable {
-    let recordingEnabled: Bool
-    let turns: [ConversationTurnPayload]
-
-    enum CodingKeys: String, CodingKey {
-        case recordingEnabled = "recording_enabled"
-        case turns
-    }
-}
-
-struct ConversationTurnPayload: Decodable, Equatable, Identifiable {
-    let role: String
-    let content: String
-    let createdAt: String
-
-    var id: String { createdAt + role + content.prefix(20) }
-
-    enum CodingKeys: String, CodingKey {
-        case role
-        case content
-        case createdAt = "created_at"
-    }
-}
-
 struct CalendarOverviewSection: Decodable, Equatable {
     let items: [CalendarOverviewItem]
     let count: Int
@@ -701,24 +587,3 @@ struct VoiceTranscriptionResponse: Decodable {
     }
 }
 
-struct VoiceProfileStatus: Decodable {
-    let enrolled: Bool
-}
-
-struct VoiceProfileEnrollResponse: Decodable {
-    let ok: Bool
-    let sampleCount: Int?
-    let error: String?
-
-    enum CodingKeys: String, CodingKey {
-        case ok
-        case sampleCount = "sample_count"
-        case error
-    }
-}
-
-struct VoiceProfileVerifyResponse: Decodable {
-    let match: Bool
-    let score: Double?
-    let reason: String?
-}

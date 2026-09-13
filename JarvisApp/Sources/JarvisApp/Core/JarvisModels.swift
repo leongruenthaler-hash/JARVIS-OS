@@ -7,7 +7,6 @@ enum JarvisSection: String, CaseIterable, Identifiable {
     case home = "Home"
     case actions = "Aktionszentrale"
     case chat = "Chat"
-    case history = "Verlauf"
     case calendar = "Kalender"
     case mail = "Mail"
     case reminders = "Erinnerungen"
@@ -16,7 +15,6 @@ enum JarvisSection: String, CaseIterable, Identifiable {
     case memory = "Gedächtnis"
     case automations = "Automationen"
     case privacy = "Datenschutz"
-    case models = "Modelle"
     case licenses = "Lizenzen"
     case settings = "Einstellungen"
 
@@ -27,7 +25,6 @@ enum JarvisSection: String, CaseIterable, Identifiable {
         case .home: "house.fill"
         case .actions: "rectangle.grid.2x2.fill"
         case .chat: "bubble.left.and.bubble.right"
-        case .history: "clock.arrow.circlepath"
         case .calendar: "calendar"
         case .mail: "envelope"
         case .reminders: "checklist"
@@ -36,7 +33,6 @@ enum JarvisSection: String, CaseIterable, Identifiable {
         case .memory: "brain.head.profile"
         case .automations: "bolt.badge.clock"
         case .privacy: "hand.raised"
-        case .models: "cpu"
         case .licenses: "doc.text.magnifyingglass"
         case .settings: "gearshape"
         }
@@ -62,69 +58,6 @@ struct ChatMessage: Identifiable, Equatable {
         case user
         case jarvis
         case system
-    }
-}
-
-struct ModelStatus: Codable, Equatable {
-    var provider: String = "ollama"
-    var activeModel: String = "phi4-mini"
-    var mode: String = "performance"
-    var openAIEnabled: Bool = false
-    var ollamaInstalled: Bool = false
-    var ollamaRunning: Bool = false
-    var installedModels: [String] = []
-    var missingModels: [String] = []
-    var openAIKeyPresent: Bool = false
-
-    enum CodingKeys: String, CodingKey {
-        case provider
-        case activeModel = "active_model"
-        case mode
-        case openAIEnabled = "openai_enabled"
-        case ollamaInstalled = "ollama_installed"
-        case ollamaRunning = "ollama_running"
-        case installedModels = "installed_models"
-        case missingModels = "missing_models"
-        case openAIKeyPresent = "openai_key_present"
-    }
-
-    init(
-        provider: String = "ollama",
-        activeModel: String = "phi4-mini",
-        mode: String = "performance",
-        openAIEnabled: Bool = false,
-        ollamaInstalled: Bool = false,
-        ollamaRunning: Bool = false,
-        installedModels: [String] = [],
-        missingModels: [String] = [],
-        openAIKeyPresent: Bool = false
-    ) {
-        self.provider = provider
-        self.activeModel = activeModel
-        self.mode = mode
-        self.openAIEnabled = openAIEnabled
-        self.ollamaInstalled = ollamaInstalled
-        self.ollamaRunning = ollamaRunning
-        self.installedModels = installedModels
-        self.missingModels = missingModels
-        self.openAIKeyPresent = openAIKeyPresent
-    }
-
-    /// Custom decoding so the defaults above actually take effect for fields the backend
-    /// omits - Swift's synthesized Decodable ignores stored-property default values and
-    /// would otherwise require every key present, turning a partial/older `/api/models`
-    /// response into a hard decode failure instead of a degraded-but-usable status.
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        provider = try container.decodeIfPresent(String.self, forKey: .provider) ?? "ollama"
-        activeModel = try container.decodeIfPresent(String.self, forKey: .activeModel) ?? "phi4-mini"
-        mode = try container.decodeIfPresent(String.self, forKey: .mode) ?? "performance"
-        openAIEnabled = try container.decodeIfPresent(Bool.self, forKey: .openAIEnabled) ?? false
-        ollamaInstalled = try container.decodeIfPresent(Bool.self, forKey: .ollamaInstalled) ?? false
-        ollamaRunning = try container.decodeIfPresent(Bool.self, forKey: .ollamaRunning) ?? false
-        installedModels = try container.decodeIfPresent([String].self, forKey: .installedModels) ?? []
-        missingModels = try container.decodeIfPresent([String].self, forKey: .missingModels) ?? []
-        openAIKeyPresent = try container.decodeIfPresent(Bool.self, forKey: .openAIKeyPresent) ?? false
     }
 }
 
@@ -295,30 +228,6 @@ struct PersonalitySettings: Codable, Equatable {
         case humorLevel = "humor_level"
         case honestyLevel = "honesty_level"
     }
-}
-
-/// A deterministic, rule-based nudge from the Proactivity Engine (Phase C, see
-/// app/core/proactivity_engine.py). `reason` is always populated - every nudge must be
-/// traceable back to a concrete rule and the data that triggered it, never "the AI felt
-/// like it".
-struct ProactiveEvent: Codable, Identifiable, Equatable {
-    let id: String
-    let trigger: String
-    let priority: String
-    let message: String
-    let reason: String
-    let dedupKey: String
-    let createdAt: String
-
-    enum CodingKeys: String, CodingKey {
-        case id, trigger, priority, message, reason
-        case dedupKey = "dedup_key"
-        case createdAt = "created_at"
-    }
-}
-
-struct ProactiveEventsResponse: Codable {
-    let events: [ProactiveEvent]
 }
 
 struct FileSearchPayload: Codable, Equatable {

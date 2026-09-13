@@ -4,9 +4,9 @@ struct MainShellView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.jarvisTheme) private var theme
 
-    private let assistantSections: [JarvisSection] = [.home, .actions, .chat, .history]
+    private let assistantSections: [JarvisSection] = [.home, .actions, .chat]
     private let workspaceSections: [JarvisSection] = [.mail, .calendar, .reminders, .files, .photos, .memory, .automations]
-    private let systemSections: [JarvisSection] = [.privacy, .models, .settings]
+    private let systemSections: [JarvisSection] = [.privacy, .settings]
 
     var body: some View {
         NavigationSplitView {
@@ -87,8 +87,6 @@ struct MainShellView: View {
             ActionCenterView()
         case .chat:
             ChatView()
-        case .history:
-            HistoryView()
         case .mail:
             MailView()
         case .files:
@@ -105,8 +103,6 @@ struct MainShellView: View {
             RemindersWorkspaceView()
         case .privacy:
             PrivacyView()
-        case .models:
-            ModelsView()
         case .licenses:
             LicensesView()
         case .settings:

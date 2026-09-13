@@ -29,9 +29,7 @@
 		146B709D49504797B41164F8 /* WakeWordListener.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DA1257E9ED4C1297042F47 /* WakeWordListener.swift */; };
 		5FF6C3B78EF98E864A767111 /* MailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A2C1DABFBACBB2472B6D363 /* MailView.swift */; };
 		4492D0E9C2B33074CA9E4E61 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE436B2B3FAF9DED68E8828A /* SettingsView.swift */; };
-		44B318F7654DA7A070E13E94 /* ModelsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD87D845E1639C0D7F9C10A3 /* ModelsView.swift */; };
 		5A70B029084FA57F9FD921CB /* FeaturePlaceholderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B59109264F63EF29D2AC0E6 /* FeaturePlaceholderView.swift */; };
-		60467FD683924CD5B6294679 /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9B0BF54072C48A6A3F466B6 /* HistoryView.swift */; };
 		5EA0C61453C727CED1DD9588 /* JarvisMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDB9A78B15C2C04E8B5296A0 /* JarvisMacApp.swift */; };
 		7565F6938579AAC278653159 /* JarvisAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B46CBAFAF3DB457C442D8FD3 /* JarvisAPIClient.swift */; };
 		B4566CA9F17C4309A5145759 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D4D9F07ACC146A7AA290861 /* KeychainStore.swift */; };
@@ -102,7 +100,6 @@
 		0F69298EA3305AA688AC9E91 /* MainShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainShellView.swift; sourceTree = "<group>"; };
 		2805D3602E78FDB8A2D88F3B /* JarvisModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisModels.swift; sourceTree = "<group>"; };
 		2B59109264F63EF29D2AC0E6 /* FeaturePlaceholderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeaturePlaceholderView.swift; sourceTree = "<group>"; };
-		C9B0BF54072C48A6A3F466B6 /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
 		30E64A9827D02FDF81834A79 /* LocalServerController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalServerController.swift; sourceTree = "<group>"; };
 		55545D9D4E1E70D1A8E00B36 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		7B130D8C5A37DA22F60FFAC7 /* StatusPill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusPill.swift; sourceTree = "<group>"; };
@@ -126,7 +123,6 @@
 		07FE3B4B039F4303802C7FAC /* OpenClawAutomationsClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawAutomationsClient.swift; sourceTree = "<group>"; };
 		2AA413904806CF0BCB71A5BB /* OpenClawSpeechPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawSpeechPlayer.swift; sourceTree = "<group>"; };
 		6C20A2ABBCD74CBB994D3FC1 /* PairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingView.swift; sourceTree = "<group>"; };
-		CD87D845E1639C0D7F9C10A3 /* ModelsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelsView.swift; sourceTree = "<group>"; };
 		CE436B2B3FAF9DED68E8828A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		ECD6CEA34720D0375415009B /* ServerStatusCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerStatusCard.swift; sourceTree = "<group>"; };
 		A82EFFD2741E4DAD6415FC96 /* SetupProgressCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupProgressCard.swift; sourceTree = "<group>"; };
@@ -198,13 +194,11 @@
 				D045C8D752CE886EE4E99A82 /* LicensesView.swift */,
 				FEC5ED5093EF18C40845EC9F /* ChatView.swift */,
 				2B59109264F63EF29D2AC0E6 /* FeaturePlaceholderView.swift */,
-				C9B0BF54072C48A6A3F466B6 /* HistoryView.swift */,
 				1A2B3C4D5E6F708192A3B4D2 /* HomeView.swift */,
 				1A2B3C4D5E6F708192A3B4D5 /* CalendarRemindersView.swift */,
 				1A2B3C4D5E6F708192A3B4CA /* FilesView.swift */,
 				0F69298EA3305AA688AC9E91 /* MainShellView.swift */,
 					6A2C1DABFBACBB2472B6D363 /* MailView.swift */,
-					CD87D845E1639C0D7F9C10A3 /* ModelsView.swift */,
 					55545D9D4E1E70D1A8E00B36 /* OnboardingView.swift */,
 					1A2B3C4D5E6F708192A3B4C8 /* PhotosView.swift */,
 					5F86BBCEB6081834A36B5557 /* MemoryView.swift */,
@@ -460,11 +454,9 @@
 				146B709D49504797B41164F8 /* WakeWordListener.swift in Sources */,
 				D68C167C2C437B05A54BC24C /* ChatView.swift in Sources */,
 				5A70B029084FA57F9FD921CB /* FeaturePlaceholderView.swift in Sources */,
-				60467FD683924CD5B6294679 /* HistoryView.swift in Sources */,
 				BEEDA8D544E9F2D2E159BD20 /* MainShellView.swift in Sources */,
 				1A2B3C4D5E6F708192A3B4D4 /* CalendarRemindersView.swift in Sources */,
 				5FF6C3B78EF98E864A767111 /* MailView.swift in Sources */,
-				44B318F7654DA7A070E13E94 /* ModelsView.swift in Sources */,
 				EB19DCFF8A89B08FA0E5BE7E /* OnboardingView.swift in Sources */,
 				9B3222560E60EFA286A779D5 /* PrivacyView.swift in Sources */,
 				BB56C742007B2B0006A915D4 /* RootView.swift in Sources */,

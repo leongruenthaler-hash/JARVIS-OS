@@ -904,22 +904,6 @@ final class LocalServerController: ObservableObject {
         try await apiClient.transcribeVoice(audioPath: audioPath, sampleRate: sampleRate)
     }
 
-    func voiceProfileStatus() async throws -> VoiceProfileStatus {
-        try await apiClient.voiceProfileStatus()
-    }
-
-    func enrollVoiceProfile(audioPaths: [String]) async throws -> VoiceProfileEnrollResponse {
-        try await apiClient.enrollVoiceProfile(audioPaths: audioPaths)
-    }
-
-    func verifyVoiceProfile(audioPath: String) async throws -> VoiceProfileVerifyResponse {
-        try await apiClient.verifyVoiceProfile(audioPath: audioPath)
-    }
-
-    func resetVoiceProfile() async throws {
-        try await apiClient.resetVoiceProfile()
-    }
-
     func prewarmVoicePipeline() async {
         do {
             _ = try await apiClient.prewarmVoicePipeline()
@@ -946,24 +930,6 @@ final class LocalServerController: ObservableObject {
         } catch {
             isRunning = true
         }
-    }
-
-    func models() async throws -> ModelStatus {
-        let status = try await apiClient.models()
-        isRunning = true
-        return status
-    }
-
-    func pullModel(_ model: String) async throws -> ScanProgress {
-        let progress = try await apiClient.pullModel(model)
-        isRunning = true
-        return progress
-    }
-
-    func scanStatus() async throws -> ScanStatusBundle {
-        let status = try await apiClient.scanStatus()
-        isRunning = true
-        return status
     }
 
     func startMailFolderScan() async throws -> ScanProgress {
@@ -1014,10 +980,6 @@ final class LocalServerController: ObservableObject {
 
     func dailyBriefing() async throws -> DailyBriefingPayload {
         try await apiClient.dailyBriefing()
-    }
-
-    func conversationHistory() async throws -> ConversationHistoryPayload {
-        try await apiClient.conversationHistory()
     }
 
     func startFileIndexScan() async throws -> ScanProgress {
@@ -1077,21 +1039,6 @@ final class LocalServerController: ObservableObject {
         return progress
     }
 
-    func setModel(provider: String? = nil, model: String? = nil) async throws -> ModelStatus {
-        let status = try await apiClient.setModel(provider: provider, model: model)
-        isRunning = true
-        return status
-    }
-
-    func setFastVoiceMode(_ enabled: Bool) async throws {
-        try await apiClient.setFastVoiceMode(enabled)
-        isRunning = true
-    }
-
-    func setStoreConversation(_ enabled: Bool) async throws {
-        try await apiClient.setStoreConversation(enabled)
-        isRunning = true
-    }
 
     func setVoice(_ voice: String) async throws {
         try await apiClient.setVoice(voice)
@@ -1148,20 +1095,6 @@ final class LocalServerController: ObservableObject {
 
     func recentActivity(since: TimeInterval) async throws -> [ActivityEvent] {
         try await apiClient.recentActivity(since: since)
-    }
-
-    func proactivityEvents() async throws -> [ProactiveEvent] {
-        try await apiClient.proactivityEvents()
-    }
-
-    @discardableResult
-    func snoozeProactivityEvent(dedupKey: String, minutes: Int = 60) async throws -> Bool {
-        try await apiClient.snoozeProactivityEvent(dedupKey: dedupKey, minutes: minutes)
-    }
-
-    @discardableResult
-    func dismissProactivityEvent(dedupKey: String) async throws -> Bool {
-        try await apiClient.dismissProactivityEvent(dedupKey: dedupKey)
     }
 
     func voiceModeStatus() async throws -> VoiceModeStatus {

@@ -589,7 +589,6 @@ struct DashboardView: View {
             case .home: HomeView()
             case .actions: ActionCenterView()
             case .chat: ChatView()
-            case .history: HistoryView()
             case .mail: MailView()
             case .files: FilesView()
             case .photos: PhotosView()
@@ -598,7 +597,6 @@ struct DashboardView: View {
             case .calendar: CalendarWorkspaceView()
             case .reminders: RemindersWorkspaceView()
             case .privacy: PrivacyView()
-            case .models: ModelsView()
             case .licenses: LicensesView()
             case .settings: SettingsView()
             }

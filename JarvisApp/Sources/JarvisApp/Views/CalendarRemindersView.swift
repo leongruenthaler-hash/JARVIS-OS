@@ -81,7 +81,7 @@ struct CalendarWorkspaceView: View {
                 details: [
                     ("Status", permissionLabel("calendar")),
                     ("Nächster Termin", firstCalendarTitle()),
-                    ("Modus", appState.modelStatus.provider.lowercased() == "openai" ? "Cloud nur bei Zustimmung" : "Lokal zuerst")
+                    ("Modus", "OpenClaw")
                 ]
             )
             statusCard(

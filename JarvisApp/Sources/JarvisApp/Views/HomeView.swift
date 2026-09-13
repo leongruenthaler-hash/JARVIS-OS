@@ -169,7 +169,7 @@ struct HomeView: View {
                 HStack(spacing: 10) {
                     heroChip(title: appState.status == .offline ? "Offline" : "Verbunden", icon: appState.status == .offline ? "wifi.slash" : "checkmark.seal.fill", tint: appState.status == .offline ? .orange : .green)
                     heroChip(title: appState.voiceState.title, icon: appState.voiceState.symbol, tint: appState.voiceState.tint)
-                    heroChip(title: isModelInfoAvailable ? appState.modelStatus.activeModel : "Nicht verbunden", icon: modelProviderIsOpenAI ? "cloud.fill" : "cpu.fill", tint: modelProviderIsOpenAI ? .orange : .indigo)
+                    heroChip(title: isModelInfoAvailable ? "OpenClaw" : "Nicht verbunden", icon: "cpu.fill", tint: .indigo)
                     heroChip(title: jarvisAppVersion, icon: "seal.fill", tint: .cyan)
                 }
             }
@@ -201,8 +201,8 @@ struct HomeView: View {
             summaryCard(
                 title: "Modell",
                 value: modelSummary,
-                symbol: modelProviderIsOpenAI ? "cloud.fill" : "cpu.fill",
-                tint: modelProviderIsOpenAI ? .orange : .indigo
+                symbol: "cpu.fill",
+                tint: .indigo
             )
             summaryCard(
                 title: "Berechtigungen",
@@ -223,16 +223,9 @@ struct HomeView: View {
         appState.status != .offline
     }
 
-    private var modelProviderIsOpenAI: Bool {
-        isModelInfoAvailable && appState.modelStatus.provider.lowercased() == "openai"
-    }
-
     private var modelSummary: String {
         guard isModelInfoAvailable else { return "Nicht verbunden" }
-        if modelProviderIsOpenAI {
-            return "OpenAI • \(appState.modelStatus.activeModel)"
-        }
-        return "Lokal • \(appState.modelStatus.activeModel)"
+        return "OpenClaw"
     }
 
     private func summaryCard(title: String, value: String, symbol: String, tint: Color) -> some View {
@@ -430,9 +423,6 @@ struct HomeView: View {
                 quickAction(title: "Datenschutz", symbol: "hand.raised.fill", tint: .green) {
                     appState.selectedSection = .privacy
                 }
-                quickAction(title: "Modelle", symbol: "cpu.fill", tint: .indigo) {
-                    appState.selectedSection = .models
-                }
             }
         }
         .liquidGlassPanel(tint: .indigo)
@@ -566,7 +556,7 @@ struct ActionCenterView: View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 230), spacing: 14)], spacing: 14) {
             centerCard(title: "Status", value: appState.status.rawValue, symbol: "bolt.horizontal.circle.fill", tint: .green)
             centerCard(title: "Voice", value: appState.voiceState.title, symbol: appState.voiceState.symbol, tint: appState.voiceState.tint)
-            centerCard(title: "Modell", value: appState.status != .offline ? appState.modelStatus.activeModel : "Nicht verbunden", symbol: "cpu.fill", tint: .indigo)
+            centerCard(title: "Modell", value: appState.status != .offline ? "OpenClaw" : "Nicht verbunden", symbol: "cpu.fill", tint: .indigo)
             centerCard(title: "Letzter Fehler", value: appState.lastError ?? "Kein Fehler", symbol: "exclamationmark.triangle.fill", tint: appState.lastError == nil ? .green : .orange)
         }
     }
@@ -652,9 +642,6 @@ struct ActionCenterView: View {
                 }
                 actionButton("Datenschutz öffnen", symbol: "hand.raised.fill", tint: .green) {
                     appState.selectedSection = .privacy
-                }
-                actionButton("Modelle prüfen", symbol: "cpu.fill", tint: .indigo) {
-                    appState.selectedSection = .models
                 }
             }
         }

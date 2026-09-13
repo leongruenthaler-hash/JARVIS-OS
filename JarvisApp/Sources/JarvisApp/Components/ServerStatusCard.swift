@@ -9,14 +9,7 @@ struct ServerStatusCard: View {
             Label(appState.status.rawValue, systemImage: symbol)
                 .font(.headline)
             HStack(spacing: 8) {
-                statusChip(
-                    title: appState.modelStatus.provider.lowercased() == "openai" ? "OpenAI aktiv" : "Lokal aktiv",
-                    tint: appState.modelStatus.provider.lowercased() == "openai" ? .orange : .blue
-                )
-                statusChip(
-                    title: appState.modelStatus.activeModel,
-                    tint: .secondary
-                )
+                statusChip(title: "OpenClaw", tint: .blue)
             }
             if let error = appState.lastError {
                 Text(error)
