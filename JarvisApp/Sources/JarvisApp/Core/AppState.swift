@@ -95,6 +95,7 @@ final class AppState: ObservableObject {
 
     private lazy var ttsService = OpenClawSpeechPlayer()
     private lazy var audioCaptureService = AudioCaptureService()
+    private lazy var liveTranscriptionService = LiveTranscriptionService()
     private lazy var wakeWordListener = WakeWordListener()
     private var alwaysListenTask: Task<Void, Never>?
     private var scanPollingTask: Task<Void, Never>?
@@ -542,7 +543,7 @@ final class AppState: ObservableObject {
         let minUIUpdateInterval: TimeInterval = 0.15
 
         do {
-            let text = try await serverController.startLiveTranscription(locale: "de-DE") { [weak self] partial in
+            let text = try await liveTranscriptionService.startLiveTranscription(locale: "de-DE") { [weak self] partial in
                 let now = Date()
                 guard now.timeIntervalSince(lastUIUpdate) >= minUIUpdateInterval else { return }
                 lastUIUpdate = now
@@ -579,7 +580,6 @@ final class AppState: ObservableObject {
 
         if !allowWhileSpeaking {
             await stopCurrentSpeech()
-            await serverController.setVoiceSpeakingState(false)
         }
 
         resetVoicePerformance()
@@ -1259,7 +1259,6 @@ final class AppState: ObservableObject {
         messages.append(ChatMessage(role: .jarvis, text: greeting))
         do {
             isJarvisSpeaking = true
-            await serverController.setVoiceSpeakingState(true)
             try await ttsService.speak(greeting) { [weak self] event in
                 guard let self else { return }
                 switch event {
@@ -1274,14 +1273,12 @@ final class AppState: ObservableObject {
                 }
             }
             isJarvisSpeaking = false
-            await serverController.setVoiceSpeakingState(false)
             setVoiceState(.idle, reason: "startup_greeting_finished")
             didSpeakStartupGreeting = true
             keepListeningAfterGreeting = true
             scheduleNextVoiceListen()
         } catch {
             isJarvisSpeaking = false
-            await serverController.setVoiceSpeakingState(false)
             let detail = error.localizedDescription
             logVoiceEvent("startup greeting failed: \(detail)")
             lastError = "Die Begrüßung konnte noch nicht abgespielt werden."
@@ -1402,7 +1399,6 @@ final class AppState: ObservableObject {
         nextVoiceListenTask = nil
         await stopCurrentSpeech()
         audioCaptureService.cancel()
-        await serverController.setVoiceSpeakingState(false)
         await serverController.cancelListening()
         status = .idle
         setVoiceState(.idle, reason: "auto_listening_stopped")
@@ -1419,7 +1415,6 @@ final class AppState: ObservableObject {
         logVoiceEvent("tts started timestamp=\(Date())")
         do {
             isJarvisSpeaking = true
-            await serverController.setVoiceSpeakingState(true)
             for segment in ttsSegments(from: trimmed) {
                 guard isJarvisSpeaking else { break }
                 try await ttsService.speak(segment) { [weak self] event in
@@ -1438,7 +1433,6 @@ final class AppState: ObservableObject {
             }
             markVoicePerformanceIfMissing("audioPlaybackStarted")
             isJarvisSpeaking = false
-            await serverController.setVoiceSpeakingState(false)
             if voiceState == .jarvisSpeaking {
                 logVoiceEvent("tts finished timestamp=\(Date())")
                 setVoiceState(.idle, reason: "tts_finished")
@@ -1447,7 +1441,6 @@ final class AppState: ObservableObject {
             scheduleNextVoiceListen()
         } catch {
             isJarvisSpeaking = false
-            await serverController.setVoiceSpeakingState(false)
             setVoiceState(.error, reason: "tts_failed")
             lastError = "Sprachausgabe konnte nicht abgespielt werden."
             printVoicePerformanceReportIfVoiceRun()
@@ -1545,13 +1538,11 @@ final class AppState: ObservableObject {
         markVoicePerformance("ttsStarted")
         logVoiceEvent("tts started timestamp=\(Date())")
         isJarvisSpeaking = true
-        Task { await serverController.setVoiceSpeakingState(true) }
     }
 
     private func endStreamingSpeech() async {
         markVoicePerformanceIfMissing("audioPlaybackStarted")
         isJarvisSpeaking = false
-        await serverController.setVoiceSpeakingState(false)
         if voiceState == .jarvisSpeaking {
             logVoiceEvent("tts finished timestamp=\(Date())")
             setVoiceState(.idle, reason: "tts_finished")

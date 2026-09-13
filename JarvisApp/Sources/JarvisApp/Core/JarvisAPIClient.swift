@@ -109,12 +109,6 @@ struct JarvisAPIClient {
         let _: Response = try await post("/api/voice/cancel-listening", body: EmptyBody())
     }
 
-    func setVoiceSpeakingState(_ isSpeaking: Bool) async throws {
-        struct Request: Encodable { let speaking: Bool }
-        struct Response: Decodable { let ok: Bool }
-        let _: Response = try await post("/api/voice/speaking", body: Request(speaking: isSpeaking))
-    }
-
     func startMailFolderScan() async throws -> ScanProgress {
         try await post("/api/mail/scan-folders", body: EmptyBody())
     }
