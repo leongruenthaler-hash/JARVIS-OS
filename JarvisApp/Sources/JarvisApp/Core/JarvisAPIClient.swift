@@ -84,22 +84,6 @@ struct JarvisAPIClient {
     }
 
 
-    func transcribeVoice(audioPath: String, sampleRate: Double) async throws -> VoiceTranscriptionResponse {
-        struct Request: Encodable {
-            let audioPath: String
-            let sampleRate: Double
-
-            enum CodingKeys: String, CodingKey {
-                case audioPath = "audio_path"
-                case sampleRate = "sample_rate"
-            }
-        }
-        // First-ever voice request can trigger a slow, one-time STT model load/download
-        // (see LocalServerController voice-bootstrap status) - matches that timeframe
-        // instead of the default 60s, so it doesn't time out mid-load.
-        return try await post("/api/voice/transcribe", body: Request(audioPath: audioPath, sampleRate: sampleRate), timeoutInterval: 1200)
-    }
-
     func prewarmVoicePipeline() async throws -> PrewarmResponse {
         try await post("/api/voice/prewarm", body: EmptyBody())
     }

@@ -293,4 +293,29 @@ enum OpenClawSettings {
         guard !trimmedHost.isEmpty else { return nil }
         return URL(string: "http://\(trimmedHost):18800")
     }
+
+    /// Separate token for the Mac Mini's standalone Sprachnachrichten-
+    /// Transkriptions-Proxy (scripts/voice_transcribe_proxy_server.py, port
+    /// 18803) - ersetzt das alte Backend's `/api/voice/transcribe`, das einen
+    /// lokalen Dateipfad erwartete und seit der reinen Remote-Migration nicht
+    /// mehr funktionieren konnte (Rest-Migrations-Plan, Abschnitt 3).
+    static var voiceTranscribeToken: String? {
+        get { KeychainStore.read(service: keychainService, account: voiceTranscribeKeychainAccount) }
+        set {
+            if let newValue, !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                KeychainStore.save(newValue, service: keychainService, account: voiceTranscribeKeychainAccount)
+            } else {
+                KeychainStore.delete(service: keychainService, account: voiceTranscribeKeychainAccount)
+            }
+        }
+    }
+    private static let voiceTranscribeKeychainAccount = "voice-transcribe-proxy-token"
+
+    /// Same Mac Mini host as `baseURL`, different port - see
+    /// scripts/voice_transcribe_proxy_server.py::PORT.
+    static var voiceTranscribeBaseURL: URL? {
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedHost.isEmpty else { return nil }
+        return URL(string: "http://\(trimmedHost):18803")
+    }
 }

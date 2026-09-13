@@ -645,22 +645,16 @@ final class AppState: ObservableObject {
                 logVoiceEvent("recording completed duration=\(capture.duration)")
                 setVoiceState(.transcribing, reason: "recording_stopped")
                 defer { try? FileManager.default.removeItem(at: capture.fileURL) }
-                let voiceBootstrapPoll = Task { [weak self] in
-                    while !Task.isCancelled {
-                        if let status = self?.serverController.currentVoiceBootstrapStatus() {
-                            self?.bootstrapStatus = status.message
-                        }
-                        try? await Task.sleep(for: .milliseconds(500))
-                    }
-                }
-                defer {
-                    voiceBootstrapPoll.cancel()
-                    bootstrapStatus = nil
-                }
-                voiceTranscript = try await serverController.transcribeVoice(audioPath: capture.fileURL.path, sampleRate: capture.sampleRate)
-                if let error = voiceTranscript.error?.trimmingCharacters(in: .whitespacesAndNewlines), !error.isEmpty {
-                    throw NSError(domain: "JarvisVoiceTranscription", code: -1, userInfo: [NSLocalizedDescriptionKey: error])
-                }
+                let transcriptText = try await VoiceTranscribeClient.transcribe(audioPath: capture.fileURL.path, sampleRate: capture.sampleRate)
+                voiceTranscript = VoiceTranscriptionResponse(
+                    transcript: transcriptText,
+                    duration: capture.duration,
+                    speechDuration: nil,
+                    sampleRate: capture.sampleRate,
+                    source: "voice_transcribe_proxy",
+                    model: nil,
+                    error: nil
+                )
             }
         } catch {
             let detail = error.localizedDescription

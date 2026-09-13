@@ -46,6 +46,7 @@
 		81EBC41DF9B44E1AA489F58F /* OpenClawCalendarClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8AFB044D4024C13A08F21A2 /* OpenClawCalendarClient.swift */; };
 		55900C1F7A9B4590A199A3E4 /* OpenClawAutomationsClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07FE3B4B039F4303802C7FAC /* OpenClawAutomationsClient.swift */; };
 		F9A2F194F880CA97B38364EF /* OpenClawSpeechPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AA413904806CF0BCB71A5BB /* OpenClawSpeechPlayer.swift */; };
+		6E2FE29260D048718B952957 /* VoiceTranscribeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6ACE7FC68AA34D4A81E8EEBC /* VoiceTranscribeClient.swift */; };
 		0CC27E67C8404A4D8D900F99 /* LiveTranscriptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C832F03B6B41474AA3D18FA8 /* LiveTranscriptionService.swift */; };
 		F1674172B98247CC9389C2F5 /* PairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C20A2ABBCD74CBB994D3FC1 /* PairingView.swift */; };
 		9B3222560E60EFA286A779D5 /* PrivacyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85002DF6FCD359EC134EC4F9 /* PrivacyView.swift */; };
@@ -123,6 +124,7 @@
 		C8AFB044D4024C13A08F21A2 /* OpenClawCalendarClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawCalendarClient.swift; sourceTree = "<group>"; };
 		07FE3B4B039F4303802C7FAC /* OpenClawAutomationsClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawAutomationsClient.swift; sourceTree = "<group>"; };
 		2AA413904806CF0BCB71A5BB /* OpenClawSpeechPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawSpeechPlayer.swift; sourceTree = "<group>"; };
+		6ACE7FC68AA34D4A81E8EEBC /* VoiceTranscribeClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTranscribeClient.swift; sourceTree = "<group>"; };
 		C832F03B6B41474AA3D18FA8 /* LiveTranscriptionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranscriptionService.swift; sourceTree = "<group>"; };
 		6C20A2ABBCD74CBB994D3FC1 /* PairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingView.swift; sourceTree = "<group>"; };
 		CE436B2B3FAF9DED68E8828A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
@@ -257,6 +259,7 @@
 				C8AFB044D4024C13A08F21A2 /* OpenClawCalendarClient.swift */,
 				07FE3B4B039F4303802C7FAC /* OpenClawAutomationsClient.swift */,
 				2AA413904806CF0BCB71A5BB /* OpenClawSpeechPlayer.swift */,
+				6ACE7FC68AA34D4A81E8EEBC /* VoiceTranscribeClient.swift */,
 				C832F03B6B41474AA3D18FA8 /* LiveTranscriptionService.swift */,
 				2805D3602E78FDB8A2D88F3B /* JarvisModels.swift */,
 					3F96930612F747DFA5C63B67 /* MemoryCoreLayout.swift */,
@@ -444,6 +447,7 @@
 				81EBC41DF9B44E1AA489F58F /* OpenClawCalendarClient.swift in Sources */,
 				55900C1F7A9B4590A199A3E4 /* OpenClawAutomationsClient.swift in Sources */,
 				F9A2F194F880CA97B38364EF /* OpenClawSpeechPlayer.swift in Sources */,
+				6E2FE29260D048718B952957 /* VoiceTranscribeClient.swift in Sources */,
 				0CC27E67C8404A4D8D900F99 /* LiveTranscriptionService.swift in Sources */,
 				F1674172B98247CC9389C2F5 /* PairingView.swift in Sources */,
 				C4B7BAE04211F925F46CE89E /* JarvisModels.swift in Sources */,

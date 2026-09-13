@@ -762,10 +762,6 @@ final class LocalServerController: ObservableObject {
         return response
     }
 
-    func transcribeVoice(audioPath: String, sampleRate: Double) async throws -> VoiceTranscriptionResponse {
-        try await apiClient.transcribeVoice(audioPath: audioPath, sampleRate: sampleRate)
-    }
-
     func prewarmVoicePipeline() async {
         do {
             _ = try await apiClient.prewarmVoicePipeline()

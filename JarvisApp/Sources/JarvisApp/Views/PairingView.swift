@@ -26,6 +26,8 @@ struct PairingView: View {
     @State private var calendarTokenSaved = OpenClawSettings.calendarToken != nil
     @State private var automationsTokenDraft = ""
     @State private var automationsTokenSaved = OpenClawSettings.automationsToken != nil
+    @State private var voiceTranscribeTokenDraft = ""
+    @State private var voiceTranscribeTokenSaved = OpenClawSettings.voiceTranscribeToken != nil
     @State private var memoryTokenDraft = ""
     @State private var memoryTokenSaved = OpenClawSettings.memoryToken != nil
     @State private var gatewayActivityTokenDraft = ""
@@ -378,6 +380,43 @@ struct PairingView: View {
                                 Button(role: .destructive) {
                                     OpenClawSettings.automationsToken = nil
                                     automationsTokenSaved = false
+                                } label: {
+                                    Label("Token löschen", systemImage: "trash")
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                    }
+
+                    Divider().opacity(0.4)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Sprachnachrichten-Transkriptions-Proxy")
+                            .font(.headline)
+                        Text(voiceTranscribeTokenSaved ? "Token ist in der macOS-Keychain gespeichert." : "Noch kein Token gespeichert - Sprachnachrichten können dann nicht transkribiert werden.")
+                            .font(.callout)
+                            .foregroundStyle(voiceTranscribeTokenSaved ? Color.secondary : Color.orange)
+                        Text("Auf dem Mac Mini im Terminal ausgegeben, sobald scripts/voice_transcribe_proxy_server.py läuft.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        SecureField("Transkriptions-Proxy-Token vom Mac Mini", text: $voiceTranscribeTokenDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 320)
+
+                        HStack(spacing: 10) {
+                            Button("Token speichern") {
+                                OpenClawSettings.voiceTranscribeToken = voiceTranscribeTokenDraft
+                                voiceTranscribeTokenDraft = ""
+                                voiceTranscribeTokenSaved = OpenClawSettings.voiceTranscribeToken != nil
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(voiceTranscribeTokenDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                            if voiceTranscribeTokenSaved {
+                                Button(role: .destructive) {
+                                    OpenClawSettings.voiceTranscribeToken = nil
+                                    voiceTranscribeTokenSaved = false
                                 } label: {
                                     Label("Token löschen", systemImage: "trash")
                                 }
