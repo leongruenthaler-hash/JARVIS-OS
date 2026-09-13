@@ -19,6 +19,7 @@ struct ChatView: View {
     /// JarvisMobileApp.swift, siehe GatewayClient.swift. Ersetzt die bisherige reine
     /// Rate-Heuristik (Self.fillerPhrase) durch echte Server-Ereignisse, wo verfuegbar.
     @EnvironmentObject private var gateway: GatewayClient
+    @EnvironmentObject private var voiceActivation: VoiceActivationSignal
     @AppStorage(VoiceManager.speakRepliesKey) private var speakRepliesAloud = true
     @AppStorage(VoiceManager.wakeListeningEnabledKey) private var wakeListeningEnabled = false
 
@@ -122,6 +123,11 @@ struct ChatView: View {
         }
         .onAppear { isPaired = RemoteSettings.isPaired }
         .task { await activateWakeListeningIfEnabled() }
+        .task { await triggerPendingAutoListenIfNeeded() }
+        .onChange(of: voiceActivation.pendingAutoListen) { _, pending in
+            guard pending else { return }
+            Task { await triggerPendingAutoListenIfNeeded() }
+        }
         .onChange(of: wakeListeningEnabled) { _, enabled in
             if enabled {
                 Task { await activateWakeListeningIfEnabled() }
@@ -310,6 +316,27 @@ struct ChatView: View {
 
     private var canSend: Bool {
         !isSending && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Reagiert auf die Action-Button-URL ("jarvismobile://listen", siehe
+    /// JarvisMobileApp/VoiceActivationSignal): startet automatisch das
+    /// Mikrofon UND schickt nach einer Sprechpause automatisch ab - der
+    /// Nutzer muss nach dem Antippen des Action Buttons nur noch reden
+    /// (2026-09-13, Nutzerwunsch "nur noch reden muss und sich das dann
+    /// auch direkt abschickt"). Nutzt bewusst den bestehenden Follow-up-
+    /// Modus (Auto-Senden bei Pause), NICHT den manuellen Mikro-Button-Modus
+    /// (der schickt absichtlich nie automatisch ab, siehe toggleListening).
+    private func triggerPendingAutoListenIfNeeded() async {
+        guard voiceActivation.pendingAutoListen else { return }
+        voiceActivation.pendingAutoListen = false
+        guard isPaired, !voice.isListening, !voice.isSpeaking else { return }
+        let granted = await voice.requestPermissions()
+        guard granted else {
+            voice.errorMessage = "Mikrofon- oder Spracherkennungszugriff fehlt - bitte in den iOS-Einstellungen erlauben."
+            return
+        }
+        voice.stopWakeListening()
+        await voice.startFollowUpListening()
     }
 
     private func toggleListening() async {

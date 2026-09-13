@@ -48,6 +48,21 @@
     <string>Jarvis erkennt, wenn du zu Hause ankommst, um dich zu begrüßen.</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
     <string>Jarvis erkennt auch im Hintergrund, wenn du zu Hause ankommst, um dich über den Mac Mini zu begrüßen - dein Standort verlässt dabei nie dein Gerät und dieses Zuhause-Netzwerk.</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <!-- Fuer den iPhone-Action-Button (2026-09-13): eine Kurzbefehl-
+                 Aktion "URL öffnen" mit "jarvismobile://listen" bringt die
+                 App direkt in den Chat UND startet sofort das Mikrofon,
+                 statt nur die App zu oeffnen. -->
+            <key>CFBundleURLName</key>
+            <string>com.leon.jarvis.mobile.actionbutton</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>jarvismobile</string>
+            </array>
+        </dict>
+    </array>
     <key>UIBackgroundModes</key>
     <array>
         <!-- Erlaubt einer BEREITS AKTIVEN Audio-Sitzung (Mikrofon-Aufnahme

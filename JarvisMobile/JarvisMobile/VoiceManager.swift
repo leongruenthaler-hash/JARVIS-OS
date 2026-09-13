@@ -138,6 +138,13 @@ final class VoiceManager: NSObject, ObservableObject {
     /// (watching only for the wake word) or auto-send capture (watching for
     /// a pause to finish an utterance) - false for a manual mic-button press.
     private var isAutomaticSegment = false
+    /// Text von bereits abgeschlossenen Erkennungs-Segmenten im MANUELLEN
+    /// Modus, die wegen einer kurzen Sprechpause vorzeitig endeten (siehe
+    /// `handleRecognitionUpdate`) - wird dem naechsten Segment vorangestellt,
+    /// damit eine Denkpause nicht den ganzen bisher gesprochenen Text
+    /// verwirft (live gemeldeter Bug 2026-09-13: "wenn ich kurz aufhöre,
+    /// resettet sich der ganze Text").
+    private var manualSegmentPrefix = ""
     private var silenceTimer: Timer?
     /// Incremented every time a fresh recognition segment/task starts;
     /// captured by that segment's completion closure so a callback from an
@@ -205,6 +212,7 @@ final class VoiceManager: NSObject, ObservableObject {
         guard !isListening, !isWakeListening else { return }
         isAutomaticSegment = false
         isCapturingCommand = false
+        manualSegmentPrefix = ""
         try beginRecognitionSegment(resetTranscript: true)
     }
 
@@ -213,6 +221,7 @@ final class VoiceManager: NSObject, ObservableObject {
     func stopListening() {
         silenceTimer?.invalidate()
         silenceTimer = nil
+        manualSegmentPrefix = ""
         teardownAudioEngine()
     }
 
@@ -350,7 +359,8 @@ final class VoiceManager: NSObject, ObservableObject {
 
     private func handleRecognitionUpdate(result: SFSpeechRecognitionResult?, error: Error?) {
         if let result {
-            liveTranscript = result.bestTranscription.formattedString
+            let segmentText = result.bestTranscription.formattedString
+            liveTranscript = manualSegmentPrefix.isEmpty ? segmentText : manualSegmentPrefix + " " + segmentText
             if isAutomaticSegment {
                 if !isCapturingCommand {
                     // Noch im reinen Aktivierungswort-Modus - Text auf Treffer pruefen.
@@ -385,7 +395,20 @@ final class VoiceManager: NSObject, ObservableObject {
                     scheduleWakeSegmentRestart()
                 }
             } else if !isAutomaticSegment {
-                teardownAudioEngine()
+                // Manueller Mikrofon-Modus: der Erkenner hat das Segment
+                // selbst beendet, meist wegen einer kurzen Sprechpause -
+                // NICHT die ganze Aufnahme abwuergen (der Nutzer hat noch
+                // nicht auf "Stop" getippt), sondern das bisher Erkannte
+                // sichern und nahtlos ein frisches Segment anschliessen. Der
+                // Audio-Tap/die Engine bleiben dabei durchgehend aktiv (siehe
+                // isAudioEngineActive in beginRecognitionSegment), es ist
+                // also kein hoerbarer Aussetzer.
+                if isListening {
+                    manualSegmentPrefix = liveTranscript
+                    recognitionTask = nil
+                    recognitionRequest = nil
+                    try? beginRecognitionSegment(resetTranscript: false)
+                }
             }
         }
     }
@@ -421,7 +444,11 @@ final class VoiceManager: NSObject, ObservableObject {
     /// nichts ansagen, er reagiert dann gar nicht").
     private func resetSilenceTimer(initial: Bool = false) {
         silenceTimer?.invalidate()
-        let interval = initial ? 4.0 : 1.5
+        // 1.5s war zu kurz fuer eine normale kurze Denkpause mitten im Satz -
+        // die Nachricht wurde live beobachtet zu frueh abgeschickt
+        // (Nutzerwunsch 2026-09-13). 2.5s gibt spuerbar mehr Luft, ohne dass
+        // sich das Ende einer Antwort traege anfuehlt.
+        let interval = initial ? 4.0 : 2.5
         silenceTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
             Task { @MainActor in self?.evaluateCapturedCommand() }
         }
