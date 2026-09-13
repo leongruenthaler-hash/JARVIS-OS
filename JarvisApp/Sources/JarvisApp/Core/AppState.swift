@@ -17,8 +17,6 @@ final class AppState: ObservableObject {
     @Published var messages: [ChatMessage] = [
         ChatMessage(role: .system, text: "Jarvis App bereit. Ich starte den lokalen Core automatisch. Sehr höflich von mir, finde ich.")
     ]
-    @Published var privacySummary = "Datenschutzstatus wird geladen ..."
-    @Published var permissions: [String: PermissionInfo] = [:]
     @Published var memoryFacts: [MemoryFact] = []
     @Published var memoryFactsTotal = 0
     @Published var automations: [AutomationJob] = []
@@ -1177,61 +1175,6 @@ final class AppState: ObservableObject {
             lastFileSearchQuery = ""
         } catch {
             fileResult = "Dateiindex konnte nicht zurückgesetzt werden."
-        }
-    }
-
-    func refreshPermissions() async {
-        await ensureServerConnected()
-        do {
-            permissions = try await serverController.permissions()
-            privacySummary = try await serverController.privacyStatus()
-            lastError = nil
-        } catch {
-            lastError = "Berechtigungen konnten nicht geladen werden."
-        }
-    }
-
-    func setPermission(_ permission: String, allowed: Bool) async {
-        await ensureServerConnected()
-        do {
-            permissions = try await serverController.setPermission(permission, allowed: allowed)
-            privacySummary = try await serverController.privacyStatus()
-            lastError = nil
-        } catch {
-            lastError = "Berechtigung konnte nicht geändert werden."
-        }
-    }
-
-    func exportPrivacyData() async {
-        await ensureServerConnected()
-        do {
-            let path = try await serverController.exportPrivacyData()
-            messages.append(ChatMessage(role: .system, text: "Datenschutzdaten exportiert: \(path)"))
-            await refreshStatus(startIfOffline: false)
-        } catch {
-            lastError = "Export fehlgeschlagen."
-        }
-    }
-
-    func deleteHistory() async {
-        await ensureServerConnected()
-        do {
-            let message = try await serverController.deleteHistory()
-            messages.append(ChatMessage(role: .system, text: message))
-            await refreshStatus(startIfOffline: false)
-        } catch {
-            lastError = "Verlauf konnte nicht gelöscht werden."
-        }
-    }
-
-    func clearLogs() async {
-        await ensureServerConnected()
-        do {
-            let message = try await serverController.clearLogs()
-            messages.append(ChatMessage(role: .system, text: message))
-            await refreshStatus(startIfOffline: false)
-        } catch {
-            lastError = "Logs konnten nicht gelöscht werden."
         }
     }
 

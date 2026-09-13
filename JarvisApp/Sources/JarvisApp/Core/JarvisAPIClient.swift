@@ -200,37 +200,6 @@ struct JarvisAPIClient {
         let _: Response = try await post("/api/settings/voice", body: Request(voice: voice))
     }
 
-    func privacyStatus() async throws -> String {
-        struct Response: Decodable { let status: String }
-        let response: Response = try await get("/api/privacy/status")
-        return response.status
-    }
-
-    func permissions() async throws -> [String: PermissionInfo] {
-        let payloads: [String: PermissionPayload] = try await get("/api/permissions")
-        return Self.decodePermissions(payloads)
-    }
-
-    func setPermission(_ permission: String, allowed: Bool) async throws -> [String: PermissionInfo] {
-        struct Request: Encodable { let permission: String; let allowed: Bool }
-        struct Response: Decodable { let permissions: [String: PermissionPayload] }
-        let response: Response = try await post("/api/permissions", body: Request(permission: permission, allowed: allowed))
-        return Self.decodePermissions(response.permissions)
-    }
-
-    private static func decodePermissions(_ payloads: [String: PermissionPayload]) -> [String: PermissionInfo] {
-        var result: [String: PermissionInfo] = [:]
-        for (name, payload) in payloads {
-            result[name] = PermissionInfo(
-                name: name,
-                allowed: payload.allowed,
-                explanation: payload.explanation,
-                updatedAt: payload.updatedAt
-            )
-        }
-        return result
-    }
-
     func setOpenAIKey(_ apiKey: String) async throws {
         struct Request: Encodable { let api_key: String }
         struct Response: Decodable { let ok: Bool }
@@ -240,24 +209,6 @@ struct JarvisAPIClient {
     func deleteOpenAIKey() async throws {
         struct Response: Decodable { let deleted: Bool }
         let _: Response = try await post("/api/openai-key/delete", body: EmptyBody())
-    }
-
-    func exportPrivacyData() async throws -> String {
-        struct Response: Decodable { let path: String }
-        let response: Response = try await post("/api/privacy/export", body: EmptyBody())
-        return response.path
-    }
-
-    func deleteHistory() async throws -> String {
-        struct Response: Decodable { let message: String }
-        let response: Response = try await post("/api/privacy/delete-history", body: EmptyBody())
-        return response.message
-    }
-
-    func clearLogs() async throws -> String {
-        struct Response: Decodable { let message: String }
-        let response: Response = try await post("/api/privacy/clear-logs", body: EmptyBody())
-        return response.message
     }
 
     func memoryFacts(search: String = "", category: String = "") async throws -> MemoryFactsResponse {
@@ -366,18 +317,6 @@ struct JarvisAPIClient {
             let body = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
             throw APIError(statusCode: http.statusCode, body: body)
         }
-    }
-}
-
-private struct PermissionPayload: Decodable {
-    let allowed: Bool
-    let explanation: String
-    let updatedAt: String?
-
-    enum CodingKeys: String, CodingKey {
-        case allowed
-        case explanation
-        case updatedAt = "updated_at"
     }
 }
 

@@ -1,35 +1,31 @@
 import SwiftUI
+import AVFoundation
+import Speech
+import AppKit
 
+/// Datenschutz-/Berechtigungs-Uebersicht, verschlankt auf echten macOS-TCC-Status
+/// (Rest-Migrations-Plan, Abschnitt 3). Die alte Version zeigte 16 Consent-Schalter
+/// (Mikrofon/Mail/Kalender/Kontakte/Fotos/...), die ein eigenes, ueber das alte Backend
+/// verwaltetes Consent-Modell abbildeten - nicht echten macOS-Berechtigungsstatus. Seit
+/// Mail/Kalender/Fotos/Dateien ueber OpenClaw-Skills auf dem Mac Mini laufen (nicht mehr
+/// lokal auf diesem Mac), ist dieses alte Modell fuer die meisten Eintraege ohnehin
+/// obsolet - die jeweiligen Proxy-Tokens sind der eigentliche Freischalt-Schritt (siehe
+/// PhotosView.photosAllowed/FilesView.filesAllowed fuer denselben, bereits etablierten
+/// Fix). Uebrig bleiben genau die zwei Berechtigungen, die JarvisApp selbst LOKAL auf
+/// diesem Mac braucht: Mikrofon (Audioaufnahme) und Spracherkennung (on-device STT) -
+/// beide direkt ueber Apples eigene Authorization-APIs abgefragt, kein Backend-Call mehr.
 struct PrivacyView: View {
-    @EnvironmentObject private var appState: AppState
-    @State private var showDeleteHistoryConfirmation = false
-    @State private var showClearLogsConfirmation = false
-
-    private let groups: [PermissionGroup] = [
-        PermissionGroup(title: "Eingabe & Geräte", symbol: "mic", permissions: ["microphone", "camera", "screen", "location"]),
-        PermissionGroup(title: "Apple Apps", symbol: "apple.logo", permissions: ["mail", "calendar", "reminders", "contacts", "notes", "photos", "music"]),
-        PermissionGroup(title: "Dateien & Internet", symbol: "folder", permissions: ["files", "internet", "external_api"]),
-        PermissionGroup(title: "KI & Speicher", symbol: "brain.head.profile", permissions: ["cloud_llm", "memory"])
-    ]
-
-    private var activeCount: Int {
-        appState.permissions.values.filter(\.allowed).count
-    }
-
-    private var totalCount: Int {
-        appState.permissions.count
-    }
+    @State private var microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+    @State private var speechStatus = SFSpeechRecognizer.authorizationStatus()
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 header
-                summaryGrid
-                permissionGroups
-                dataActions
+                permissionRows
             }
             .padding(28)
-            .frame(maxWidth: 1040, alignment: .leading)
+            .frame(maxWidth: 720, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(LiquidGlassBackground())
@@ -37,29 +33,18 @@ struct PrivacyView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    Task { await appState.refreshPermissions() }
+                    refreshStatus()
                 } label: {
                     Label("Aktualisieren", systemImage: "arrow.clockwise")
                 }
             }
         }
-        .task { await appState.refreshPermissions() }
-        .confirmationDialog("Verlauf löschen?", isPresented: $showDeleteHistoryConfirmation, titleVisibility: .visible) {
-            Button("Verlauf löschen", role: .destructive) {
-                Task { await appState.deleteHistory() }
-            }
-            Button("Abbrechen", role: .cancel) {}
-        } message: {
-            Text("Jarvis löscht Gesprächsverlauf und Hintergrund-Cache. Berechtigungen bleiben erhalten.")
-        }
-        .confirmationDialog("Technische Logs löschen?", isPresented: $showClearLogsConfirmation, titleVisibility: .visible) {
-            Button("Logs löschen", role: .destructive) {
-                Task { await appState.clearLogs() }
-            }
-            Button("Abbrechen", role: .cancel) {}
-        } message: {
-            Text("Jarvis löscht technische Logs. Sensible Inhalte sollten dort ohnehin nicht stehen.")
-        }
+        .onAppear { refreshStatus() }
+    }
+
+    private func refreshStatus() {
+        microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+        speechStatus = SFSpeechRecognizer.authorizationStatus()
     }
 
     private var header: some View {
@@ -67,9 +52,9 @@ struct PrivacyView: View {
             LiquidGlassIcon(symbol: "hand.raised.fill", tint: .green)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Datenschutz-Zentrale")
+                Text("Datenschutz")
                     .font(.system(size: 34, weight: .bold, design: .rounded))
-                Text("Hier steuerst du, worauf Jarvis zugreifen darf. Jede Berechtigung ist einzeln schaltbar und kritische Aktionen bleiben bestätigungspflichtig.")
+                Text("JarvisApp selbst braucht auf diesem Mac nur Mikrofon und Spracherkennung - Mail, Kalender, Fotos und Dateien laufen über eigene, separat gekoppelte Proxys auf dem Mac Mini (siehe „Verbindung“).")
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .lineSpacing(2)
@@ -79,78 +64,52 @@ struct PrivacyView: View {
         .liquidGlassPanel(tint: .green)
     }
 
-    private var summaryGrid: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 14)], spacing: 14) {
-            summaryCard(
-                title: "Aktive Berechtigungen",
-                value: "\(activeCount) von \(max(totalCount, 1))",
-                symbol: "checkmark.shield.fill",
-                tint: .green
-            )
-            summaryCard(
-                title: "KI-Modus",
-                value: "OpenClaw",
-                symbol: "cpu.fill",
-                tint: .blue
-            )
-            summaryCard(
-                title: "Logging",
-                value: "Inhaltsarm",
-                symbol: "doc.text.magnifyingglass",
-                tint: .purple
-            )
-        }
-    }
-
-    private func summaryCard(title: String, value: String, symbol: String, tint: Color) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: symbol)
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(tint)
-                .frame(width: 34, height: 34)
-                .background(.thinMaterial, in: Circle())
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Text(value)
-                    .font(.headline)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(14)
-        .liquidGlassCard(tint: tint, cornerRadius: 20)
-    }
-
-    private var permissionGroups: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            sectionHeader("Berechtigungen", subtitle: "Wenn ein Schalter aus ist, soll Jarvis diesen Bereich nicht eigenständig nutzen.")
-
-            ForEach(groups) { group in
-                VStack(alignment: .leading, spacing: 12) {
-                    Label(group.title, systemImage: group.symbol)
-                        .font(.title3.bold())
-
-                    VStack(spacing: 10) {
-                        ForEach(group.permissions, id: \.self) { permission in
-                            permissionRow(permission)
-                        }
+    private var permissionRows: some View {
+        VStack(spacing: 12) {
+            permissionRow(
+                title: "Mikrofon",
+                symbol: "mic.fill",
+                explanation: "Für Push-to-Talk und den Immer-Zuhör-Modus - Jarvis nimmt nur auf, während du sprichst oder das Aktivierungswort erkannt wurde.",
+                status: authorizationLabel(microphoneStatus),
+                allowed: microphoneStatus == .authorized
+            ) {
+                if microphoneStatus == .notDetermined {
+                    AVCaptureDevice.requestAccess(for: .audio) { _ in
+                        DispatchQueue.main.async { refreshStatus() }
                     }
+                } else {
+                    openSystemSettings()
                 }
-                .liquidGlassPanel(tint: .green)
+            }
+
+            permissionRow(
+                title: "Spracherkennung",
+                symbol: "waveform",
+                explanation: "Für die on-device Transkription deiner Sprache (Live-Diktat und Aktivierungswort-Erkennung) - läuft komplett lokal, keine Cloud-Anfrage.",
+                status: authorizationLabel(speechStatus),
+                allowed: speechStatus == .authorized
+            ) {
+                if speechStatus == .notDetermined {
+                    SFSpeechRecognizer.requestAuthorization { _ in
+                        DispatchQueue.main.async { refreshStatus() }
+                    }
+                } else {
+                    openSystemSettings()
+                }
             }
         }
     }
 
-    private func permissionRow(_ permission: String) -> some View {
-        let info = appState.permissions[permission]
-        let allowed = info?.allowed ?? false
-
-        return HStack(alignment: .top, spacing: 12) {
-            Image(systemName: permissionSymbol(permission))
+    private func permissionRow(
+        title: String,
+        symbol: String,
+        explanation: String,
+        status: String,
+        allowed: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: symbol)
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(allowed ? .green : .secondary)
                 .frame(width: 34, height: 34)
@@ -159,33 +118,20 @@ struct PrivacyView: View {
 
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 8) {
-                    Text(permissionTitle(permission))
+                    Text(title)
                         .font(.headline)
-                    statusPill(allowed: allowed)
+                    statusPill(status: status, allowed: allowed)
                 }
-                Text(info?.explanation ?? fallbackExplanation(permission))
+                Text(explanation)
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                if let updated = info?.updatedAt, !updated.isEmpty {
-                    Text("Zuletzt geändert: \(updated)")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
             }
 
             Spacer(minLength: 12)
 
-            Toggle("", isOn: Binding(
-                get: { appState.permissions[permission]?.allowed ?? false },
-                set: { newValue in
-                    DispatchQueue.main.async {
-                        Task { await appState.setPermission(permission, allowed: newValue) }
-                    }
-                }
-            ))
-            .toggleStyle(.switch)
-            .labelsHidden()
+            Button(allowed ? "Systemeinstellungen" : "Erlauben", action: action)
+                .buttonStyle(.bordered)
         }
         .padding(12)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -195,48 +141,8 @@ struct PrivacyView: View {
         )
     }
 
-    private var dataActions: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("Daten verwalten", subtitle: "Exportieren oder löschen, ohne im Terminal herumzustochern.")
-
-            HStack(spacing: 10) {
-                Button {
-                    Task { await appState.exportPrivacyData() }
-                } label: {
-                    Label("Datenschutzdaten exportieren", systemImage: "square.and.arrow.up")
-                }
-                .buttonStyle(.borderedProminent)
-
-                Button(role: .destructive) {
-                    showDeleteHistoryConfirmation = true
-                } label: {
-                    Label("Verlauf löschen", systemImage: "trash")
-                }
-                .buttonStyle(.bordered)
-
-                Button(role: .destructive) {
-                    showClearLogsConfirmation = true
-                } label: {
-                    Label("Logs löschen", systemImage: "xmark.bin")
-                }
-                .buttonStyle(.bordered)
-            }
-        }
-        .liquidGlassPanel(tint: .green)
-    }
-
-    private func sectionHeader(_ title: String, subtitle: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.title2.bold())
-            Text(subtitle)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private func statusPill(allowed: Bool) -> some View {
-        Text(allowed ? "Erlaubt" : "Blockiert")
+    private func statusPill(status: String, allowed: Bool) -> some View {
+        Text(status)
             .font(.caption.weight(.semibold))
             .foregroundStyle(allowed ? .green : .secondary)
             .padding(.horizontal, 8)
@@ -244,59 +150,26 @@ struct PrivacyView: View {
             .background((allowed ? Color.green : Color.secondary).opacity(0.12), in: Capsule())
     }
 
-    private func permissionTitle(_ permission: String) -> String {
-        switch permission {
-        case "microphone": return "Mikrofon"
-        case "camera": return "Kamera"
-        case "screen": return "Bildschirm"
-        case "location": return "Standort"
-        case "mail": return "Mail"
-        case "calendar": return "Kalender"
-        case "reminders": return "Erinnerungen"
-        case "contacts": return "Kontakte"
-        case "notes": return "Notizen"
-        case "files": return "Dateien"
-        case "photos": return "Fotos"
-        case "music": return "Musik"
-        case "internet": return "Internet"
-        case "external_api": return "Externe APIs"
-        case "cloud_llm": return "Cloud-KI"
-        case "memory": return "Memory"
-        default: return permission
+    private func authorizationLabel(_ status: AVAuthorizationStatus) -> String {
+        switch status {
+        case .authorized: return "Erlaubt"
+        case .denied, .restricted: return "Blockiert"
+        case .notDetermined: return "Noch nicht gefragt"
+        @unknown default: return "Unbekannt"
         }
     }
 
-    private func permissionSymbol(_ permission: String) -> String {
-        switch permission {
-        case "microphone": return "mic.fill"
-        case "camera": return "camera.fill"
-        case "screen": return "rectangle.on.rectangle"
-        case "location": return "location.fill"
-        case "mail": return "envelope.fill"
-        case "calendar": return "calendar"
-        case "reminders": return "checklist"
-        case "contacts": return "person.crop.circle.fill"
-        case "notes": return "note.text"
-        case "files": return "folder.fill"
-        case "photos": return "photo.fill.on.rectangle.fill"
-        case "music": return "music.note"
-        case "internet": return "network"
-        case "external_api": return "point.3.connected.trianglepath.dotted"
-        case "cloud_llm": return "cloud.fill"
-        case "memory": return "brain.head.profile"
-        default: return "switch.2"
+    private func authorizationLabel(_ status: SFSpeechRecognizerAuthorizationStatus) -> String {
+        switch status {
+        case .authorized: return "Erlaubt"
+        case .denied, .restricted: return "Blockiert"
+        case .notDetermined: return "Noch nicht gefragt"
+        @unknown default: return "Unbekannt"
         }
     }
 
-    private func fallbackExplanation(_ permission: String) -> String {
-        "Jarvis nutzt diese Berechtigung nur, wenn du eine passende Funktion aktiv verwendest."
+    private func openSystemSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy") else { return }
+        NSWorkspace.shared.open(url)
     }
-}
-
-private struct PermissionGroup: Identifiable {
-    let title: String
-    let symbol: String
-    let permissions: [String]
-
-    var id: String { title }
 }

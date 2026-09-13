@@ -54,7 +54,6 @@ struct FilesView: View {
             Text("Jarvis verschiebt alle aktuellen Suchtreffer für \(appState.lastFileSearchQuery.isEmpty ? appState.fileSearchText : appState.lastFileSearchQuery) in den Ordner \(pendingMoveTarget) auf deinem Schreibtisch.")
         }
         .task {
-            await appState.refreshPermissions()
             await appState.refreshScanStatesSafely()
         }
     }

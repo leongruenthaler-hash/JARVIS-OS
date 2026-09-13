@@ -875,30 +875,6 @@ final class LocalServerController: ObservableObject {
         isRunning = true
     }
 
-    func privacyStatus() async throws -> String {
-        try await apiClient.privacyStatus()
-    }
-
-    func permissions() async throws -> [String: PermissionInfo] {
-        try await apiClient.permissions()
-    }
-
-    func setPermission(_ permission: String, allowed: Bool) async throws -> [String: PermissionInfo] {
-        try await apiClient.setPermission(permission, allowed: allowed)
-    }
-
-    func exportPrivacyData() async throws -> String {
-        try await apiClient.exportPrivacyData()
-    }
-
-    func deleteHistory() async throws -> String {
-        try await apiClient.deleteHistory()
-    }
-
-    func clearLogs() async throws -> String {
-        try await apiClient.clearLogs()
-    }
-
     func memoryFacts(search: String = "", category: String = "") async throws -> MemoryFactsResponse {
         try await apiClient.memoryFacts(search: search, category: category)
     }

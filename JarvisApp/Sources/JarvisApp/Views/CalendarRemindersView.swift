@@ -4,12 +4,18 @@ struct CalendarWorkspaceView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.jarvisTheme) private var theme
 
+    // Wie PhotosView.photosAllowed/FilesView.filesAllowed: der alte, ueber das
+    // Backend verwaltete Consent-Schalter blieb seit der Kalender-Migration
+    // (2026-09-12) permanent "false", sobald JarvisApp nicht mehr auf dem Mac
+    // Mini selbst laeuft. Das Eintragen des Kalender-Proxy-Tokens IST jetzt der
+    // eigentliche Freischalt-Schritt (Kalender und Erinnerungen teilen sich
+    // denselben Proxy).
     private var calendarAllowed: Bool {
-        appState.permissions["calendar"]?.allowed ?? false
+        OpenClawSettings.calendarToken != nil
     }
 
     private var remindersAllowed: Bool {
-        appState.permissions["reminders"]?.allowed ?? false
+        OpenClawSettings.calendarToken != nil
     }
 
     var body: some View {
@@ -29,7 +35,6 @@ struct CalendarWorkspaceView: View {
         .background(LiquidGlassBackground())
         .navigationTitle("Kalender")
         .task {
-            await appState.refreshPermissions()
             await appState.refreshCalendarOverview()
         }
     }
@@ -97,7 +102,7 @@ struct CalendarWorkspaceView: View {
             )
             statusCard(
                 title: "Automatik",
-                subtitle: appState.privacySummary,
+                subtitle: "Läuft über OpenClaw-Automationen.",
                 symbol: "sparkles",
                 tint: .indigo,
                 details: [
@@ -375,7 +380,7 @@ struct CalendarWorkspaceView: View {
     }
 
     private func permissionLabel(_ key: String) -> String {
-        appState.permissions[key]?.allowed == true ? "Aktiv" : "Blockiert"
+        (OpenClawSettings.calendarToken != nil) ? "Aktiv" : "Blockiert"
     }
 
     private func boolLabel(_ key: String) -> String {
@@ -435,7 +440,7 @@ struct RemindersWorkspaceView: View {
     @Environment(\.jarvisTheme) private var theme
 
     private var remindersAllowed: Bool {
-        appState.permissions["reminders"]?.allowed ?? false
+        OpenClawSettings.calendarToken != nil
     }
 
     var body: some View {
@@ -453,9 +458,6 @@ struct RemindersWorkspaceView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(LiquidGlassBackground())
         .navigationTitle("Erinnerungen")
-        .task {
-            await appState.refreshPermissions()
-        }
     }
 
     private var header: some View {

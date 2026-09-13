@@ -63,7 +63,6 @@ struct DashboardView: View {
         .environment(\.jarvisTheme, .signal)
         .task { await pollSystemStats() }
         .task(id: appState.weatherLocation) { await pollWeather() }
-        .task { await appState.refreshPermissions() }
         .task(id: calendarOrRemindersAllowed) {
             if calendarOrRemindersAllowed { await appState.refreshCalendarOverview() }
         }
@@ -74,16 +73,18 @@ struct DashboardView: View {
         .task { await appState.refreshAutomations() }
     }
 
+    // Wie PhotosView.photosAllowed: die jeweiligen Proxy-Token sind der
+    // eigentliche Freischalt-Schritt, nicht der alte Backend-Consent-Schalter.
     private var calendarOrRemindersAllowed: Bool {
-        (appState.permissions["calendar"]?.allowed ?? false) || (appState.permissions["reminders"]?.allowed ?? false)
+        OpenClawSettings.calendarToken != nil
     }
 
     private var mailAllowed: Bool {
-        appState.permissions["mail"]?.allowed ?? false
+        OpenClawSettings.mailToken != nil
     }
 
     private var musicAllowed: Bool {
-        appState.permissions["music"]?.allowed ?? false
+        OpenClawSettings.musicToken != nil
     }
 
     // MARK: - Live data polling (Etappe 3)
@@ -396,14 +397,14 @@ struct DashboardView: View {
         HStack(spacing: 16) {
             DashboardCard(title: "Kalender", symbol: "calendar", badge: true) {
                 KalenderCardContent(
-                    hasPermission: appState.permissions["calendar"]?.allowed ?? false,
+                    hasPermission: OpenClawSettings.calendarToken != nil,
                     overview: appState.calendarOverview.calendar,
                     openSettings: { activeSection = .section(.privacy) }
                 )
             }
             DashboardCard(title: "Mail", symbol: "envelope.fill", badge: true) {
                 MailCardContent(
-                    hasPermission: appState.permissions["mail"]?.allowed ?? false,
+                    hasPermission: OpenClawSettings.mailToken != nil,
                     overview: appState.mailOverview,
                     openSettings: { activeSection = .section(.privacy) }
                 )

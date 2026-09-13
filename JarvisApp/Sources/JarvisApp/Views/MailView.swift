@@ -4,8 +4,11 @@ struct MailView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.jarvisTheme) private var theme
 
+    // Wie PhotosView.photosAllowed: der alte Backend-verwaltete Consent-Schalter
+    // blieb seit der Mail-Migration (2026-09-12) permanent "false". Das
+    // Eintragen des Mail-Proxy-Tokens IST jetzt der eigentliche Freischalt-Schritt.
     private var mailAllowed: Bool {
-        appState.permissions["mail"]?.allowed ?? false
+        OpenClawSettings.mailToken != nil
     }
 
     var body: some View {
@@ -35,7 +38,6 @@ struct MailView: View {
             }
         }
         .task {
-            await appState.refreshPermissions()
             await appState.refreshScanStatesSafely()
             await appState.loadMailSummaries()
         }

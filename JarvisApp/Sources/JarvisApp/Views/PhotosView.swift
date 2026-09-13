@@ -32,7 +32,6 @@ struct PhotosView: View {
         .background(LiquidGlassBackground())
         .navigationTitle("Fotos")
         .task {
-            await appState.refreshPermissions()
             await appState.refreshPhotoPermissionStatus()
             await appState.refreshScanStatesSafely()
         }

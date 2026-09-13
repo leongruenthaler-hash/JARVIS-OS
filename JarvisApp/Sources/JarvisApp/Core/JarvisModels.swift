@@ -78,21 +78,6 @@ struct ServerHealth: Codable {
     }
 }
 
-struct PermissionInfo: Codable, Equatable, Identifiable {
-    var id: String { name }
-    let name: String
-    let allowed: Bool
-    let explanation: String
-    let updatedAt: String?
-
-    enum CodingKeys: String, CodingKey {
-        case name
-        case allowed
-        case explanation
-        case updatedAt = "updated_at"
-    }
-}
-
 /// A Calendar event / Reminder the backend detected in a mail (invoice due date, meeting
 /// invite, deadline, ...) but has NOT created yet - inbound mail is untrusted content, so
 /// these always need an explicit confirm/dismiss via `resolveCalendarAction` before

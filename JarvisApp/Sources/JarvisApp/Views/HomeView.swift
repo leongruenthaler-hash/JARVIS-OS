@@ -4,13 +4,28 @@ struct HomeView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.jarvisTheme) private var theme
 
-    private var activePermissions: Int {
-        appState.permissions.values.filter(\.allowed).count
+    // Ersetzt die alte, ueber das Backend verwaltete Berechtigungszaehlung (Rest-
+    // Migrations-Plan, Abschnitt 3) - zaehlt stattdessen, wie viele der Mac-Mini-Proxys
+    // tatsaechlich gekoppelt sind (siehe PairingView), der eigentliche Freischalt-Schritt
+    // seit der Proxy-Migration.
+    private var pairedProxyCount: Int {
+        let tokens: [String?] = [
+            OpenClawSettings.token,
+            OpenClawSettings.ttsToken,
+            OpenClawSettings.filesToken,
+            OpenClawSettings.photosToken,
+            OpenClawSettings.memoryToken,
+            OpenClawSettings.gatewayActivityToken,
+            OpenClawSettings.mailToken,
+            OpenClawSettings.musicToken,
+            OpenClawSettings.calendarToken,
+            OpenClawSettings.automationsToken,
+            OpenClawSettings.voiceTranscribeToken,
+        ]
+        return tokens.filter { $0 != nil }.count
     }
 
-    private var totalPermissions: Int {
-        max(appState.permissions.count, 1)
-    }
+    private var totalProxyCount: Int { 11 }
 
     var body: some View {
         ScrollView {
@@ -30,7 +45,6 @@ struct HomeView: View {
         .background(LiquidGlassBackground())
         .navigationTitle("Home")
         .task {
-            await appState.refreshPermissions()
             await appState.refreshScanStatesSafely()
         }
     }
@@ -205,8 +219,8 @@ struct HomeView: View {
                 tint: .indigo
             )
             summaryCard(
-                title: "Berechtigungen",
-                value: "\(activePermissions) / \(totalPermissions)",
+                title: "Gekoppelte Dienste",
+                value: "\(pairedProxyCount) / \(totalProxyCount)",
                 symbol: "hand.raised.fill",
                 tint: .green
             )
@@ -296,7 +310,7 @@ struct HomeView: View {
     /// touch either - otherwise this card would be exactly the every-launch proactive
     /// trigger it's meant to avoid (see `connectPrompt`).
     private var calendarAndRemindersAllowed: Bool {
-        (appState.permissions["calendar"]?.allowed ?? false) && (appState.permissions["reminders"]?.allowed ?? false)
+        OpenClawSettings.calendarToken != nil
     }
 
     private var briefingCard: some View {
@@ -346,11 +360,10 @@ struct HomeView: View {
             }
             Spacer(minLength: 12)
             Button("Verbinden") {
-                Task {
-                    await appState.setPermission("calendar", allowed: true)
-                    await appState.setPermission("reminders", allowed: true)
-                    await appState.refreshDailyBriefing()
-                }
+                // Kalender/Erinnerungen haengen jetzt am Kalender-Proxy-Token (siehe
+                // CalendarWorkspaceView.calendarAllowed) statt an einem in-App-Schalter -
+                // das Token wird in den Einstellungen unter "Verbindung" eingetragen.
+                appState.selectedSection = .settings
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
