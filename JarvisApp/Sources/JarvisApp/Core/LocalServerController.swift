@@ -827,10 +827,6 @@ final class LocalServerController: ObservableObject {
         try await apiClient.musicOverview()
     }
 
-    func dailyBriefing() async throws -> DailyBriefingPayload {
-        try await apiClient.dailyBriefing()
-    }
-
     func startFileIndexScan() async throws -> ScanProgress {
         let progress = try await apiClient.startFileIndexScan()
         isRunning = true

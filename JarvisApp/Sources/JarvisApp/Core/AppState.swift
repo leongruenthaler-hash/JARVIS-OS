@@ -972,16 +972,80 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Nativer Nachbau der alten `build_daily_briefing()`-Logik (Rest-Migrations-Plan,
+    /// Abschnitt 3) - rein deterministisch aus bereits migrierten Clients zusammengesetzt,
+    /// kein Server-Call, kein LLM-Aufruf (bewusste Nutzerentscheidung: kostenlos und
+    /// vorhersagbar statt natuerlicher formuliert).
     func refreshDailyBriefing() async {
-        await ensureServerConnected()
-        do {
-            let payload = try await serverController.dailyBriefing()
-            dailyBriefingText = payload.briefing
-            lastError = nil
-        } catch {
-            dailyBriefingText = "Tagesbriefing gerade nicht verfügbar. Kalender, Erinnerungen oder Mail antworten nicht sauber. Ich bleibe dran, sehr heldenhaft im Stillen."
-            lastError = "Tagesbriefing konnte nicht geladen werden."
+        async let calendarRefresh: Void = refreshCalendarOverview()
+        async let mailRefresh: Void = refreshMailOverview()
+        _ = await calendarRefresh
+        _ = await mailRefresh
+        dailyBriefingText = buildDailyBriefingText()
+    }
+
+    private func buildDailyBriefingText() -> String {
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "dd.MM.yyyy"
+        var parts = ["Tagesbriefing für \(dateFormatter.string(from: Date()))."]
+
+        if let calendarSection = briefingSection(
+            label: "Heute wichtig",
+            items: calendarOverview.calendar.items,
+            formatter: { item in
+                if let start = item.start, !start.isEmpty {
+                    return "\(item.title) (\(start))"
+                }
+                return item.title
+            }
+        ) {
+            parts.append(calendarSection)
         }
+
+        if let reminderSection = briefingSection(
+            label: "Erinnerungen",
+            items: calendarOverview.reminders.items,
+            formatter: { $0.title }
+        ) {
+            parts.append(reminderSection)
+        }
+
+        let mailText = mailBriefingSummary()
+        if !mailText.isEmpty {
+            parts.append("Mails: \(mailText).")
+        }
+
+        if parts.count == 1 {
+            parts.append("Aktuell ist nichts Dringendes auffällig. Verdächtig ruhig, fast schon unverschämt.")
+        }
+        return parts.joined(separator: " ")
+    }
+
+    /// Port von app/core/daily_briefing.py's `_format_section()` - bis zu `maxItems`
+    /// Eintraege, mit "und N weitere" statt einer unbegrenzten Liste (das Briefing wird
+    /// auch vorgelesen).
+    private func briefingSection<T>(label: String, items: [T], maxItems: Int = 3, formatter: (T) -> String) -> String? {
+        guard !items.isEmpty else { return nil }
+        let shown = items.prefix(maxItems)
+        let remaining = items.count - shown.count
+        var text = shown.map(formatter).joined(separator: "; ")
+        if remaining > 0 {
+            let noun = remaining == 1 ? "weiterer" : "weitere"
+            text += " und \(remaining) \(noun)"
+        }
+        return "\(label): \(text)."
+    }
+
+    private func mailBriefingSummary() -> String {
+        guard mailOverview.error.isEmpty else { return "" }
+        guard mailOverview.unreadCount > 0 else { return "" }
+        let noun = mailOverview.unreadCount == 1 ? "ungelesene Mail" : "ungelesene Mails"
+        var text = "\(mailOverview.unreadCount) \(noun)"
+        let topSubjects = mailSummaries.prefix(2).map { $0.subject }
+        if !topSubjects.isEmpty {
+            text += ": \(topSubjects.joined(separator: "; "))"
+        }
+        return text
     }
 
     func startLocalPhotoVisionAnalysis() async {

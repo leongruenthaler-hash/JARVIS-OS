@@ -144,10 +144,6 @@ struct JarvisAPIClient {
         try await get("/api/music/overview")
     }
 
-    func dailyBriefing() async throws -> DailyBriefingPayload {
-        try await post("/api/daily-briefing", body: EmptyBody())
-    }
-
     func startFileIndexScan() async throws -> ScanProgress {
         try await post("/api/files/scan", body: EmptyBody())
     }
@@ -442,18 +438,6 @@ struct LocalVisionStatus: Decodable, Equatable {
 struct CalendarOverviewPayload: Decodable, Equatable {
     let calendar: CalendarOverviewSection
     let reminders: CalendarOverviewSection
-}
-
-struct DailyBriefingPayload: Decodable, Equatable {
-    let briefing: String
-    let calendarCount: Int
-    let remindersCount: Int
-
-    enum CodingKeys: String, CodingKey {
-        case briefing
-        case calendarCount = "calendar_count"
-        case remindersCount = "reminders_count"
-    }
 }
 
 struct CalendarOverviewSection: Decodable, Equatable {
