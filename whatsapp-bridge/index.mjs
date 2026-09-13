@@ -117,8 +117,19 @@ VERTRAUENSWUERDIGE KONTAKTE (bekannt, keine Fremden/Unbekannten):
 
 Antworte immer knapp, hoeflich, auf Deutsch.
 
-WICHTIG - Antwortformat: gib GENAU diese zwei Zeilen zurueck, sonst nichts
-(keine Anfuehrungszeichen, keine Erklaerungen, kein Markdown):
+WICHTIG - Antwortformat: gib GENAU diese zwei Zeilen zurueck, SONST NICHTS -
+auch keine Vorueberlegung, keine Meta-Kommentare ueber die Konversation
+(z.B. NIE Saetze wie "Ich beantworte nur die letzte, noch offene
+Nachricht" oder aehnliches ueber vorherige Nachrichten schreiben) und keine
+Zeile vor "ANTWORT_AN_ABSENDER:" (keine Anfuehrungszeichen, keine
+Erklaerungen, kein Markdown). Die allererste Zeile deiner Antwort MUSS mit
+"ANTWORT_AN_ABSENDER:" beginnen.
+
+Vermeide ausserdem, bei mehreren Nachrichten an denselben Kontakt immer
+wieder denselben Satzbau/dieselbe Formulierung zu wiederholen (z.B. nicht
+jedes Mal mit "Guten Tag, hier ist Jarvis..." beginnen) - variiere Wortwahl
+und Satzbau spuerbar von Antwort zu Antwort, auch wenn der Inhalt (Jarvis
+als Absender, Weiterleitung an Herrn Gruenthaler) gleich bleibt.
 
 ANTWORT_AN_ABSENDER: <die Nachricht, die an den Absender geschickt wird>
 NOTIZ_AN_LEON: <im Terminfall/Verdachtsfall die kurze Info fuer Herrn Gruenthaler, sonst genau das Wort LEER>`
@@ -137,11 +148,18 @@ function parseAgentResponse(raw) {
   // Labels nur noch case-insensitiv per Position suchen statt strikt zu
   // parsen.
   const clean = raw.replace(/\*\*/g, '')
+  const answerIdx = clean.search(/ANTWORT_AN_ABSENDER:/i)
   const noteIdx = clean.search(/NOTIZ_AN_LEON:/i)
-  const replyPart = noteIdx === -1 ? clean : clean.slice(0, noteIdx)
-  const notePart = noteIdx === -1 ? '' : clean.slice(noteIdx).replace(/NOTIZ_AN_LEON:/i, '')
+  // Alles VOR dem ANTWORT_AN_ABSENDER-Label wird verworfen, nicht nur das
+  // Label selbst entfernt - das Modell schreibt gelegentlich eigene
+  // Vorueberlegungen davor (z.B. "Ich beantworte nur die letzte, noch
+  // offene Nachricht..."), die sonst unveraendert mit in die Nachricht an
+  // den Absender rutschten (live beobachtet 2026-09-13, bei Leons Mutter).
+  const replyStart = answerIdx === -1 ? 0 : answerIdx
+  const replyPart = noteIdx === -1 ? clean.slice(replyStart) : clean.slice(replyStart, noteIdx)
+  const notePart = noteIdx === -1 ? '' : clean.slice(noteIdx)
   const reply = replyPart.replace(/ANTWORT_AN_ABSENDER:/i, '').trim()
-  const noteRaw = notePart.trim()
+  const noteRaw = notePart.replace(/NOTIZ_AN_LEON:/i, '').trim()
   const note = noteRaw && noteRaw.toUpperCase() !== 'LEER' ? noteRaw : null
   return { reply, note }
 }
